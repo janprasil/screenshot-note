@@ -3,6 +3,7 @@ import CoreGraphics
 
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
+ let cloudSettings=CloudSettings()
  var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
@@ -14,6 +15,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    (L("Vyfotit celou obrazovku"),"display",#selector(full)),
    (L("Otevřít rozpracovanou poznámku"),"square.and.pencil",#selector(resume)),
    (L("Otevřít složku screenshotů"),"folder",#selector(openFolder)),
+   (L("Cloudová knihovna…"),"icloud",#selector(openCloudSettings)),
    (L("Nastavení…"),"gearshape",#selector(preferences)),
    (L("O aplikaci Screenshot Note…"),"info.circle",#selector(aboutApp)),
    (L("Ukončit"),"power",#selector(quit))
@@ -33,14 +35,16 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  @objc func external(_ notification:Notification){capture(full:notification.object as? String == "full")}
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
+ @objc func openCloudSettings(){cloudSettings.show()}
  @objc func preferences(){settings.show()}
  @objc func aboutApp(){AboutController.shared.show()}
  func menuNeedsUpdate(_ menu:NSMenu){if menu === item?.menu{updateFolderMenu()}}
  func updateFolderMenu(){
   guard let entry=folderEntry else{return}
-  let configurations=Topics.all
-  if configurations.count==1{
-   entry.submenu=nil;entry.action=#selector(openFolder);entry.target=self;entry.representedObject=configurations[0].folder
+  let configurations=Topics.all.filter(\.savesLocally)
+  if configurations.count<=1{
+   guard let configuration=configurations.first else{entry.submenu=nil;entry.action=nil;entry.representedObject=nil;return}
+   entry.submenu=nil;entry.action=#selector(openFolder);entry.target=self;entry.representedObject=configuration.folder
   }else{
    let submenu=NSMenu(title:L("Konfigurace"));submenu.autoenablesItems=false
    for configuration in configurations{
@@ -51,7 +55,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    entry.action=nil;entry.representedObject=nil;entry.submenu=submenu
   }
  }
- @objc func openFolder(){openFolderPath(Topics.all[0].folder)}
+ @objc func openFolder(){if let path=folderEntry?.representedObject as? String{openFolderPath(path)}}
  @objc func openConfigurationFolder(_ sender:NSMenuItem){guard let path=sender.representedObject as? String else{return};openFolderPath(path)}
  func openFolderPath(_ path:String){
   let folder=URL(fileURLWithPath:path,isDirectory:true)
@@ -80,7 +84,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  func chooseSavedSession(root:URL)throws->Draft?{
   browsingSavedSessions=true;defer{browsingSavedSessions=false}
   var saved:[(Topic,PreviousSession)]=[]
-  for configuration in Topics.all{saved += try previousSessions(in:configuration.destination).map{(configuration,$0)}}
+  for configuration in Topics.all where configuration.savesLocally{saved += try previousSessions(in:configuration.destination).map{(configuration,$0)}}
   saved.sort{$0.1.modified>$1.1.modified}
   var rows=[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku."))]
   rows += saved.map{configuration,session in
@@ -148,9 +152,34 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   view.onCapture={[weak self] full in self?.capture(full:full,fromComposer:true)}
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}
-   do {if result != 0 {try self.persist(draft,root:root);if result == 2{let stored=try readDraft(draftRoot);try finishSession(stored,root:draftRoot)}}
-    try? fm.removeItem(at:root);self.session=nil;self.composer=nil
-   }catch{showError(L("Uložení se nepodařilo: ")+error.localizedDescription+L("\nOkno zůstává otevřené, můžeš to zkusit znovu."));view.window.makeKeyAndOrderFront(nil)}
+   let upload = result == 2 && draft.topic?.savesToCloud == true
+   let cloudOnly = upload && draft.topic?.savesLocally == false && draft.previous == nil
+   do {
+    if upload { try CloudLibrary.shared.requireAccount() }
+    if result != 0 {
+     try self.persist(draft,root:root)
+     if result == 2 {
+      let stored=try readDraft(draftRoot)
+      if cloudOnly {
+       try CloudLibrary.shared.enqueue(stored,root:draftRoot)
+       clearDraft(stored,root:draftRoot)
+      } else {
+       try finishSession(stored,root:draftRoot)
+      }
+     }
+    }
+   } catch {
+    showError(L("Uložení se nepodařilo: ")+error.localizedDescription+L("\nOkno zůstává otevřené, můžeš to zkusit znovu."))
+    view.window.makeKeyAndOrderFront(nil)
+    return
+   }
+   if upload {
+    do {
+     if !cloudOnly { try CloudLibrary.shared.enqueue(draft,root:root) }
+     Task { @MainActor in await CloudLibrary.shared.sync() }
+    } catch { showError(L("Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit.")+" "+error.localizedDescription) }
+   }
+   try? fm.removeItem(at:root);self.session=nil;self.composer=nil
   };view.show()
  }
  func previewTest(){
@@ -163,6 +192,46 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 
 if CommandLine.arguments.contains("--language-check"){print(AppLanguage.current);exit(0)}
+
+if CommandLine.arguments.contains("--cloud-self-test") {
+ _ = NSApplication.shared
+ NSApp.setActivationPolicy(.prohibited)
+ Task { @MainActor in
+  let env = ProcessInfo.processInfo.environment
+  guard let url = env["SCREENSHOT_NOTE_TEST_URL"],
+        let key = env["SCREENSHOT_NOTE_TEST_KEY"],
+        let email = env["SCREENSHOT_NOTE_TEST_EMAIL"],
+        let password = env["SCREENSHOT_NOTE_TEST_PASSWORD"],
+        let project = CloudProject(url: url, key: key),
+        ["localhost", "127.0.0.1"].contains(project.url.host ?? "") else {
+   fputs("Supply test account credentials and a loopback project URL.\n", stderr);exit(1)
+  }
+  let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  do {
+   try fm.createDirectory(at: root, withIntermediateDirectories: true)
+   let library = CloudLibrary(queue: root.appendingPathComponent("queue"))
+   try await library.signIn(project: project, email: email, password: password)
+   let asset = "screenshot.png"
+   let data = Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/XKcAAAAASUVORK5CYII=")!
+   try data.write(to: root.appendingPathComponent(asset))
+   let draft = Draft(images:[asset],comment:"Cloud **integration** test",title:"Screenshot Note test",imageNotes:[asset:"Caption"])
+   try library.enqueue(draft,root:root)
+   assert(library.pendingCount == 1)
+   await library.sync()
+   guard library.pendingCount == 0 else {
+    throw NSError(domain:"ScreenshotNote.CloudTest",code:1,userInfo:[NSLocalizedDescriptionKey:library.lastError ?? "Pending upload"])
+   }
+   try fm.removeItem(at:root)
+   print("PASS: native sign-in, persistent outbox, PNG upload and session publication")
+   exit(0)
+  } catch {
+   try? fm.removeItem(at:root)
+   fputs(error.localizedDescription+"\n",stderr)
+   exit(1)
+  }
+ }
+ dispatchMain()
+}
 
 if CommandLine.arguments.contains("--self-test") {
  let interactiveUITests=CommandLine.arguments.contains("--interactive-ui-tests")

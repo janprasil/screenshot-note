@@ -76,6 +76,10 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    data.append(Data(content.utf8));try data.write(to:markdown,options:.atomic)
   } else {try Data(content.utf8).write(to:markdown,options:.withoutOverwriting)}
  } catch { for file in copied { try? fm.removeItem(at:file) }; throw error }
+ clearDraft(draft,root:root)
+}
+
+func clearDraft(_ draft:Draft,root:URL){
  // Remove the manifest first: a later cleanup error must not cause duplicate output.
  try? fm.removeItem(at:root.appendingPathComponent("draft.json"))
  for image in draft.images { removeAnnotatedImage(root.appendingPathComponent(image)) }

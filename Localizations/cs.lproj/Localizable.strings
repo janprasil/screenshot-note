@@ -199,3 +199,25 @@
 "Anotovat" = "Anotovat";
 "Upravit" = "Upravit";
 "Poznámka" = "Poznámka";
+
+"Cloudová knihovna…" = "Cloudová knihovna…";
+"Cloudová knihovna" = "Cloudová knihovna";
+"Nejprve se přihlas do Cloudové knihovny v nabídce aplikace." = "Nejprve se přihlas do Cloudové knihovny v nabídce aplikace.";
+"Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit." = "Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit.";
+"Použij stejný účet jako ve webové knihovně." = "Použij stejný účet jako ve webové knihovně.";
+"Adresa projektu" = "Adresa projektu";
+"Veřejný klíč projektu" = "Veřejný klíč projektu";
+"E-mail" = "E-mail";
+"Heslo" = "Heslo";
+"Přihlásit se" = "Přihlásit se";
+"Odhlásit se" = "Odhlásit se";
+"Zkusit nahrát znovu" = "Zkusit nahrát znovu";
+"Čekající relace: %ld" = "Čekající relace: %ld";
+"Přihlašuji…" = "Přihlašuji…";
+"Zadej HTTPS adresu projektu a jeho veřejný klíč." = "Zadej HTTPS adresu projektu a jeho veřejný klíč.";
+"Vyplň e-mail a heslo." = "Vyplň e-mail a heslo.";
+"Přihlášení se nezdařilo." = "Přihlášení se nezdařilo.";
+"Cloud vrátil chybu HTTP %ld." = "Cloud vrátil chybu HTTP %ld.";
+"Jen lokální složka" = "Jen lokální složka";
+"Jen cloud" = "Jen cloud";
+"Lokální složka a cloud" = "Lokální složka a cloud";

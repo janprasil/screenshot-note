@@ -198,3 +198,9 @@ Thumbnail actions expand to show their labels on hover. An annotated or captione
 ## License
 
 Screenshot Note is available under the [MIT License](LICENSE).
+
+## Cloud storage
+
+In the menu bar, open **Cloud Library…** and sign in with the account you use for your hosted Screenshot Note library. Enter its Supabase project URL and publishable key. Under **Settings → Manage configurations**, select a local folder, cloud storage, or both. If a network transfer fails, it stays in the local outbox until you retry it or sign in again.
+
+Cloud-only configurations publish to the library. Use the web library to view and export those sessions. A local folder or Obsidian vault works without an account.

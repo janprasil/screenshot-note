@@ -298,13 +298,14 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  @objc func refreshSavedSessions(){refreshPreviousSessions()}
  func refreshPreviousSessions(){
-  do{previousChoices=try previousSessions(in:(draft.topic ?? Topics.defaultTopic).destination);sessionPicker.toolTip=L("Přidat k uložené relaci nebo vytvořit novou")}catch{previousChoices=[];sessionPicker.toolTip=error.localizedDescription}
+  do{let topic=draft.topic ?? Topics.defaultTopic;previousChoices=topic.savesLocally ? try previousSessions(in:topic.destination):[];sessionPicker.toolTip=L("Přidat k uložené relaci nebo vytvořit novou")}catch{previousChoices=[];sessionPicker.toolTip=error.localizedDescription}
   sessionPicker.removeAllItems();sessionPicker.addItem(withTitle:L("Nová relace"))
   sessionPicker.addItems(withTitles:previousChoices.map{$0.display})
   if let target=draft.previous,let index=previousChoices.firstIndex(where:{$0.target.id==target.id}){sessionPicker.selectItem(at:index+1)}else{sessionPicker.selectItem(at:0)}
   updatePreviousAvailability()
  }
  func updatePreviousAvailability(){sessionLink.title=draft.previous.flatMap{target in previousChoices.first{$0.target.id==target.id}?.title} ?? L("Nová relace");sessionLink.toolTip=sessionLink.title
+  sessionLink.isEnabled=draft.topic?.savesLocally != false
   topicLink.isEnabled=draft.previous == nil;topicLink.needsDisplay=true
   topicLink.toolTip=draft.previous == nil ? draft.topic.map{$0.name+($0.detail.isEmpty ? "":"\n"+$0.detail)}:L("Konfiguraci uložené relace nelze změnit.")
   layoutContextRow()
@@ -330,6 +331,7 @@ final class Composer:NSObject,NSWindowDelegate {
   };window.makeKeyAndOrderFront(nil)
  }
  @objc func chooseSession(){
+  guard draft.topic?.savesLocally != false else{return}
   childEditorOpen=true;defer{childEditorOpen=false};snapshotFields();refreshPreviousSessions()
   var rows=[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku z aktuálních snímků."))]
   rows+=previousChoices.map{session in let assets=URL(fileURLWithPath:session.target.path).deletingLastPathComponent().appendingPathComponent("assets");return SessionChoice(title:session.title,detail:session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})}

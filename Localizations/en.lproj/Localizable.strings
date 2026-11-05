@@ -199,3 +199,25 @@
 "Anotovat" = "Annotate";
 "Upravit" = "Edit";
 "Poznámka" = "Note";
+
+"Cloudová knihovna…" = "Cloud Library…";
+"Cloudová knihovna" = "Cloud Library";
+"Nejprve se přihlas do Cloudové knihovny v nabídce aplikace." = "Sign in to Cloud Library from the menu bar first.";
+"Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit." = "The note was saved locally. The cloud copy could not be prepared.";
+"Použij stejný účet jako ve webové knihovně." = "Use the same account as the web library.";
+"Adresa projektu" = "Project URL";
+"Veřejný klíč projektu" = "Publishable key";
+"E-mail" = "Email";
+"Heslo" = "Password";
+"Přihlásit se" = "Sign in";
+"Odhlásit se" = "Sign out";
+"Zkusit nahrát znovu" = "Retry uploads";
+"Čekající relace: %ld" = "Pending sessions: %ld";
+"Přihlašuji…" = "Signing in…";
+"Zadej HTTPS adresu projektu a jeho veřejný klíč." = "Enter the HTTPS project URL and its publishable key.";
+"Vyplň e-mail a heslo." = "Enter your email and password.";
+"Přihlášení se nezdařilo." = "Could not sign in.";
+"Cloud vrátil chybu HTTP %ld." = "Cloud returned HTTP %ld.";
+"Jen lokální složka" = "Local folder only";
+"Jen cloud" = "Cloud only";
+"Lokální složka a cloud" = "Local folder and cloud";

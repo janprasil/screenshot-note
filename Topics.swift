@@ -1,7 +1,9 @@
 import AppKit
 
 struct Topic:Codable,Equatable {
- var id:String;var name:String;var detail:String;var folder:String;var combined:Bool;var combinedFile:String;var markdownTemplate:String? = nil
+ var id:String;var name:String;var detail:String;var folder:String;var combined:Bool;var combinedFile:String;var markdownTemplate:String? = nil;var uploadToCloud:Bool? = nil;var cloudOnly:Bool? = nil
+ var savesLocally:Bool{cloudOnly != true}
+ var savesToCloud:Bool{cloudOnly == true || uploadToCloud == true}
  var destination:URL{URL(fileURLWithPath:folder,isDirectory:true)}
 }
 enum Topics {
@@ -17,6 +19,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate {
  let name=CenteredTextField(),detail=CenteredTextField(),folder=CenteredTextField(),file=CenteredTextField()
  var template=defaultMarkdownTemplate
  let saveStatus=NSTextField(labelWithString:"")
+ let storage=NSPopUpButton();private var chooseFolderButton:AppButton!
  let mode=NSPopUpButton();let isDefault=NSButton(checkboxWithTitle:L("Výchozí konfigurace pro nové relace"),target:nil,action:nil)
  func show(){
   if let w=window{if !isExportingDesign{list=Topics.all};table.reloadData();if let topic=list.first(where:{$0.id==editingID}){load(topic)};presentScreenshotPanel(w);return}
@@ -35,12 +38,15 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate {
   name.placeholderString=L("Například Produktové poznámky");detail.placeholderString=L("Krátký popis pro snazší výběr")
   view.addSubview(sectionLabel(L("Složka"),NSRect(x:272,y:356,width:600,height:18)))
   inputShell(folder,frame:NSRect(x:272,y:314,width:450,height:36),in:view)
-  let choose=styledButton(L("Vybrat…"),symbol:"folder",frame:NSRect(x:736,y:315,width:136,height:34),target:self,action:#selector(chooseFolder));view.addSubview(choose)
+  chooseFolderButton=styledButton(L("Vybrat…"),symbol:"folder",frame:NSRect(x:736,y:315,width:136,height:34),target:self,action:#selector(chooseFolder));view.addSubview(chooseFolderButton)
   view.addSubview(DesignDivider(NSRect(x:272,y:294,width:600,height:1)))
   view.addSubview(sectionLabel(L("Ukládání relací"),NSRect(x:272,y:264,width:600,height:18)))
   mode.addItems(withTitles:[L("Samostatný Markdown pro každou relaci"),L("Všechny relace v jednom Markdownu")]);mode.target=self;mode.action=#selector(updateMode);inputShell(mode,frame:NSRect(x:272,y:222,width:600,height:36),in:view)
   view.addSubview(sectionLabel(L("Společný soubor"),NSRect(x:272,y:194,width:600,height:18)));inputShell(file,frame:NSRect(x:272,y:152,width:600,height:36),in:view)
-  isDefault.frame=NSRect(x:272,y:102,width:330,height:28);isDefault.font = .systemFont(ofSize:13);view.addSubview(isDefault)
+  isDefault.frame=NSRect(x:272,y:114,width:330,height:24);isDefault.font = .systemFont(ofSize:13);view.addSubview(isDefault)
+  storage.addItems(withTitles:[L("Jen lokální složka"),L("Jen cloud"),L("Lokální složka a cloud")])
+  storage.target=self;storage.action=#selector(updateMode)
+  inputShell(storage,frame:NSRect(x:272,y:79,width:320,height:32),in:view)
   view.addSubview(styledButton(L("Šablona Markdownu…"),symbol:"doc.text",frame:NSRect(x:620,y:100,width:252,height:32),target:self,action:#selector(editTemplate)))
   view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
   saveStatus.frame=NSRect(x:272,y:28,width:410,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;view.addSubview(saveStatus)
@@ -57,9 +63,15 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate {
   cell.addSubview(designLabel(secondary,NSRect(x:43,y:9,width:152,height:18),size:10,color:AppPalette.secondary));return cell
  }
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if list.indices.contains(row){load(list[row])}}
- func load(_ topic:Topic){saveStatus.stringValue="";editingID=topic.id;template=topic.markdownTemplate ?? defaultMarkdownTemplate;name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0);isDefault.state=topic.id==Topics.defaultTopic.id ? .on:.off;updateMode()}
- @objc func updateMode(){file.isEnabled=mode.indexOfSelectedItem==1;file.superview?.alphaValue=file.isEnabled ? 1:0.45}
- @objc func addTopic(){saveStatus.stringValue="";editingID=nil;template=defaultMarkdownTemplate;table.deselectAll(nil);name.stringValue="";detail.stringValue="";folder.stringValue=destination.path;file.stringValue=AppLanguage.current=="cs" ? "Screenshoty.md":"Screenshots.md";mode.selectItem(at:0);isDefault.state = .off;updateMode();window.makeFirstResponder(name)}
+ func load(_ topic:Topic){saveStatus.stringValue="";editingID=topic.id;template=topic.markdownTemplate ?? defaultMarkdownTemplate;name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0);storage.selectItem(at:topic.savesLocally ? (topic.savesToCloud ? 2:0):1);isDefault.state=topic.id==Topics.defaultTopic.id ? .on:.off;updateMode()}
+ @objc func updateMode(){
+  let local=storage.indexOfSelectedItem != 1
+  folder.isEnabled=local;folder.superview?.alphaValue=local ? 1:0.45
+  chooseFolderButton?.isEnabled=local;mode.isEnabled=local
+  file.isEnabled=local && mode.indexOfSelectedItem==1
+  file.superview?.alphaValue=file.isEnabled ? 1:0.45
+ }
+ @objc func addTopic(){saveStatus.stringValue="";editingID=nil;template=defaultMarkdownTemplate;table.deselectAll(nil);name.stringValue="";detail.stringValue="";folder.stringValue=destination.path;file.stringValue=AppLanguage.current=="cs" ? "Screenshoty.md":"Screenshots.md";mode.selectItem(at:0);isDefault.state = .off;storage.selectItem(at:0);updateMode();window.makeFirstResponder(name)}
  @objc func chooseFolder(){let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.directoryURL=URL(fileURLWithPath:folder.stringValue);if panel.runModal() == .OK,let url=panel.url{folder.stringValue=url.path}}
  @objc func editTemplate(){
   let editor=MarkdownEditor()
@@ -70,10 +82,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate {
  @objc func saveTopic(){
   window.makeFirstResponder(nil)
   let title=name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),path=folder.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-  guard !title.isEmpty,path.hasPrefix("/") else{showError(L("Vyplň název konfigurace a absolutní cestu ke složce."));return}
+  let local=storage.indexOfSelectedItem != 1
+  guard !title.isEmpty,!local || path.hasPrefix("/") else{showError(L("Vyplň název konfigurace a absolutní cestu ke složce."));return}
   let rawFile=(file.stringValue as NSString).deletingPathExtension
   let filename=(filenameFromTitle(rawFile) ?? filenameFromTitle(title) ?? "Screenshoty")+".md"
-  let topic=Topic(id:editingID ?? UUID().uuidString,name:title,detail:detail.stringValue,folder:path,combined:mode.indexOfSelectedItem==1,combinedFile:filename,markdownTemplate:template)
+  let topic=Topic(id:editingID ?? UUID().uuidString,name:title,detail:detail.stringValue,folder:path,combined:mode.indexOfSelectedItem==1,combinedFile:filename,markdownTemplate:template,uploadToCloud:storage.indexOfSelectedItem == 2 ? true:nil,cloudOnly:local ? nil:true)
   if let i=list.firstIndex(where:{$0.id==topic.id}){list[i]=topic}else{list.append(topic)}
   let defaultID=isDefault.state == .on ? topic.id:Topics.defaultTopic.id
   do{try Topics.save(list,defaultID:defaultID);editingID=topic.id;table.reloadData();let i=list.firstIndex{$0.id==topic.id}!;table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);load(topic);saveStatus.stringValue=L("Konfigurace byla uložena.");saveStatus.alphaValue=0;animateDesign{saveStatus.animator().alphaValue=1}}catch{showError(error.localizedDescription)}

@@ -1,7 +1,7 @@
 # Native cloud transport
 
 The client uses only the configured Screenshot Note web origin and `/api/v1`.
-The default address is `https://screenshotnote.com`; this is a configured domain,
+The production origin is fixed at build time to `https://screenshotnote.com`; this is a configured domain,
 not evidence that production pairing/uploads are enabled. There is no Supabase
 project URL/key, password login, Auth refresh token or direct Storage request.
 The server remains responsible for Auth, ownership, billing and Storage access.
@@ -11,7 +11,7 @@ The server remains responsible for Auth, ownership, billing and Storage access.
 Cloud Library starts a pairing with the Mac's device name. The returned native
 credential is saved in the non-synchronizing Keychain item
 `cz.janprasil.screenshotnote.device.v1` / `current` before the browser can open.
-The browser URL must equal the selected origin's `/pair-device/{id}` and never
+The browser URL must equal the build origin's `/pair-device/{id}` and never
 contains the token. The dialog displays the comparison code and asks the user
 to check both code and account. Pending status is polled no faster than five
 seconds, with Retry-After/backoff on errors. Closing the window stops polling;
@@ -21,8 +21,11 @@ client refresh or hidden renewal. Re-pair after server expiry/revocation.
 Once active, `/me` supplies the owner UUID and display email; an existing owner
 binding cannot silently change. Every upload drain checks `/me` again. A
 credential, display email and pairing metadata live in Keychain, never in
-UserDefaults, outbox JSON, browser URLs or logs. UserDefaults stores only the
-web address. Cookies, caches and redirects are disabled in the native transport.
+UserDefaults, outbox JSON, browser URLs or logs. The signed bundle stores the build origin. The UI has no server address field;
+old `cloudWebURL` preferences and runtime environment variables are ignored.
+Local/test builds use origin-specific Keychain services; production retains the
+existing service. A stored credential for another origin is never loaded.
+See the README for build-time local/test configuration. Cookies, caches and redirects are disabled in the native transport.
 Responses are bounded to 512 KiB; PNG request bodies stream from local files.
 
 Cancel pairing calls the pending DELETE endpoint. Forget connection removes

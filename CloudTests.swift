@@ -21,25 +21,30 @@ func cloudUnitTests() throws {
  assert(CloudEndpoint("https://screenshotnote.com") != nil)
  for url in ["https://user:secret@example.test","https://example.test/a","https://example.test/?token=secret","http://remote.test","file:///tmp","https://example.test/#secret"] { assert(CloudEndpoint(url) == nil) }
  assert(CloudEndpoint("http://127.0.0.1:4567") != nil)
+ assert(CloudEndpoint("http://[::1]:5173") != nil)
+ assert(CloudKeychain(endpoint:CloudEndpoint("https://screenshotnote.com")!).service == "cz.janprasil.screenshotnote.device.v1")
+ assert(CloudKeychain(endpoint:CloudEndpoint("http://localhost:5173")!).service != CloudKeychain(endpoint:CloudEndpoint("https://screenshotnote.com")!).service)
  assert(!CloudConnection.validToken("legacy.jwt.token"));assert(!CloudConnection.validToken("sn_device_v1_bad"))
  let vault=CloudMemoryVault();vault.value=cloudFixtureConnection()
  assert(CloudLibrary.browserURL(vault.value!)?.query == nil)
+ let mismatched = CloudLibrary(vault:vault,endpoint:CloudEndpoint("https://screenshotnote.com")!)
+ assert(mismatched.connection == nil && vault.value != nil)
  let root=fm.temporaryDirectory.appendingPathComponent("sn-cloud-unit-" + UUID().uuidString)
  try fm.createDirectory(at:root,withIntermediateDirectories:true);defer {try? fm.removeItem(at:root)}
  try cloudFixturePNG().write(to:root.appendingPathComponent("shot.png"))
  let normalized=try cloudImage(root.appendingPathComponent("shot.png"))
  assert(normalized[24] == 8 && [2,6].contains(normalized[25]) && normalized[28] == 0)
- let lib=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault)
+ let lib=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:CloudEndpoint("https://fixture.invalid")!)
  let draft=Draft(images:["shot.png"],comment:"Offline note",title:"Frozen title")
  try lib.enqueue(draft,root:root);assert(lib.pendingCount == 1)
  let other=CloudMemoryVault();other.value=cloudFixtureConnection()
- assert(CloudLibrary(queue:root.appendingPathComponent("queue"),vault:other).pendingCount == 0)
- assert(CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault).pendingCount == 1)
+ assert(CloudLibrary(queue:root.appendingPathComponent("queue"),vault:other,endpoint:CloudEndpoint("https://fixture.invalid")!).pendingCount == 0)
+ assert(CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:CloudEndpoint("https://fixture.invalid")!).pendingCount == 1)
  let old=root.appendingPathComponent("queue/legacy",isDirectory:true);try fm.createDirectory(at:old,withIntermediateDirectories:true)
  try Data("{\"project\":\"legacy\",\"session\":{}}".utf8).write(to:old.appendingPathComponent("job.json"))
  assert(lib.legacyPendingCount == 1 && lib.pendingCount == 1)
  let pending=CloudMemoryVault();pending.value=cloudFixtureConnection(owner:nil)
- do { try CloudLibrary(queue:root,vault:pending).enqueue(draft,root:root);assertionFailure("Pending credential admitted upload") } catch {}
+ do { try CloudLibrary(queue:root,vault:pending,endpoint:CloudEndpoint("https://fixture.invalid")!).enqueue(draft,root:root);assertionFailure("Pending credential admitted upload") } catch {}
  let jobDir = try fm.contentsOfDirectory(at:root.appendingPathComponent("queue"),includingPropertiesForKeys:nil).first { $0.lastPathComponent != "legacy" }!
  let jobFile = jobDir.appendingPathComponent("job.json"), originalJob = try Data(contentsOf:jobFile)
  var corrupt = try JSONSerialization.jsonObject(with:originalJob) as! [String:Any]
@@ -59,12 +64,12 @@ func cloudUnitTests() throws {
  let root=fm.temporaryDirectory.appendingPathComponent("sn-native-rest-" + UUID().uuidString)
  try fm.createDirectory(at:root,withIntermediateDirectories:true);defer {try? fm.removeItem(at:root)}
  let vault=CloudMemoryVault();var clock=Date()
- let failed=CloudLibrary(queue:root.appendingPathComponent("failed"),vault:vault,now:{clock});vault.fail=true
+ let failed=CloudLibrary(queue:root.appendingPathComponent("failed"),vault:vault,endpoint:endpoint,now:{clock});vault.fail=true
  do {try await failed.startPairing(endpoint:endpoint,name:"Failed vault");assertionFailure("Keychain failure ignored")} catch {}
  assert(failed.connection == nil && vault.value == nil);vault.fail=false
- let lib=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,now:{clock})
+ let lib=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock})
  try await lib.startPairing(endpoint:endpoint,name:"Native fixture");assert(vault.value?.ownerID == nil && lib.connection != nil)
- let resumed=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,now:{clock})
+ let resumed=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock})
  try await resumed.refreshConnection();assert(resumed.connection?.ownerID != nil)
  let original=resumed.connection!
  let png=cloudFixturePNG();try png.write(to:root.appendingPathComponent("shot.png"))
@@ -81,17 +86,17 @@ func cloudUnitTests() throws {
  assert(resumed.pendingCount == 0)
  try resumed.enqueue(draft,root:root)
  var wrong=original;wrong.ownerID=UUID();try vault.save(wrong)
- let switched=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,now:{clock});assert(switched.pendingCount == 0)
+ let switched=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock});assert(switched.pendingCount == 0)
  await switched.sync();assert(switched.lastError != nil)
- try vault.save(original);let restored=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,now:{clock});assert(restored.pendingCount == 1)
+ try vault.save(original);let restored=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock});assert(restored.pendingCount == 1)
  try restored.forgetConnection();assert(restored.connection == nil)
- let unsafe=CloudLibrary(queue:root.appendingPathComponent("unsafe"),vault:vault,now:{clock})
+ let unsafe=CloudLibrary(queue:root.appendingPathComponent("unsafe"),vault:vault,endpoint:endpoint,now:{clock})
  do {try await unsafe.startPairing(endpoint:endpoint,name:"Unsafe URI");assertionFailure("Foreign browser URI accepted")} catch {}
  assert(unsafe.connection == nil && vault.value == nil)
- let cancel=CloudLibrary(queue:root.appendingPathComponent("cancel"),vault:vault,now:{clock})
+ let cancel=CloudLibrary(queue:root.appendingPathComponent("cancel"),vault:vault,endpoint:endpoint,now:{clock})
  try await cancel.startPairing(endpoint:endpoint,name:"Cancel fixture");try await cancel.cancelPairing()
  assert(cancel.connection == nil && vault.value == nil)
- let limited=CloudLibrary(queue:root.appendingPathComponent("limited"),vault:vault,now:{clock})
+ let limited=CloudLibrary(queue:root.appendingPathComponent("limited"),vault:vault,endpoint:endpoint,now:{clock})
  do {try await limited.startPairing(endpoint:endpoint,name:"Rate fixture");assertionFailure("Rate limit ignored")} catch {}
  assert(limited.retryAt >= clock.addingTimeInterval(60))
  do {try await limited.startPairing(endpoint:endpoint,name:"Rate fixture");assertionFailure("Rate limit retried early")} catch {}

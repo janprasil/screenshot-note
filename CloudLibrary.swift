@@ -8,10 +8,18 @@ struct CloudEndpoint: Equatable {
  init?(_ raw: String) {
   guard var p = URLComponents(string: raw), let host = p.host, p.user == nil, p.password == nil,
         p.query == nil, p.fragment == nil, p.path.isEmpty || p.path == "/",
-        p.scheme == "https" || (p.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(host)) else { return nil }
+        p.scheme == "https" || (p.scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)) else { return nil }
   p.path = ""; guard let url = p.url else { return nil }; self.url = url
  }
  func path(_ path: String) -> URL { URL(string: url.absoluteString + path)! }
+}
+
+enum CloudBuild {
+ static let endpoint: CloudEndpoint = {
+  guard let raw = Bundle.main.object(forInfoDictionaryKey: "ScreenshotNoteWebOrigin") as? String,
+        let endpoint = CloudEndpoint(raw) else { preconditionFailure("Missing build web origin") }
+  return endpoint
+ }()
 }
 
 struct CloudConnection: Codable {
@@ -33,8 +41,15 @@ protocol CloudCredentialStore {
  func save(_ value: CloudConnection?) throws
 }
 struct CloudKeychain: CloudCredentialStore {
+ let endpoint: CloudEndpoint
+ init(endpoint: CloudEndpoint = CloudBuild.endpoint) { self.endpoint = endpoint }
+ var service: String {
+  let base = "cz.janprasil.screenshotnote.device.v1"
+  if endpoint == CloudEndpoint("https://screenshotnote.com") { return base }
+  return base + "." + SHA256.hash(data: Data(endpoint.url.absoluteString.utf8)).map { String(format:"%02x",$0) }.joined()
+ }
  private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
-  kSecAttrService as String: "cz.janprasil.screenshotnote.device.v1", kSecAttrAccount as String: "current",
+  kSecAttrService as String: service, kSecAttrAccount as String: "current",
   kSecAttrSynchronizable as String: false] }
  func load() throws -> CloudConnection? {
   var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -170,6 +185,7 @@ func cloudImage(_ file: URL) throws -> Data {
 
 final class CloudLibrary {
  static let shared = CloudLibrary()
+ let endpoint: CloudEndpoint
  private let queue: URL
  private let vault: CloudCredentialStore
  private let now: () -> Date
@@ -181,11 +197,11 @@ final class CloudLibrary {
  var lastError: String?
  var didChange: (() -> Void)?
 
- init(queue: URL = draftRoot.deletingLastPathComponent().appendingPathComponent("Cloud Outbox", isDirectory: true), vault: CloudCredentialStore = CloudKeychain(), now: @escaping () -> Date = Date.init) {
-  self.queue = queue; self.vault = vault; self.now = now
+ init(queue: URL = draftRoot.deletingLastPathComponent().appendingPathComponent("Cloud Outbox", isDirectory: true), vault: CloudCredentialStore? = nil, endpoint: CloudEndpoint = CloudBuild.endpoint, now: @escaping () -> Date = Date.init) {
+  self.queue = queue; self.endpoint = endpoint; self.vault = vault ?? CloudKeychain(endpoint:endpoint); self.now = now
   do {
-   if let saved = try vault.load() {
-    guard CloudEndpoint(saved.endpoint) != nil, CloudConnection.validToken(saved.token), Self.browserURL(saved) != nil else { throw CloudFailure.invalid }
+   if let saved = try self.vault.load() {
+    guard CloudEndpoint(saved.endpoint) == endpoint, CloudConnection.validToken(saved.token), Self.browserURL(saved) != nil else { throw CloudFailure.invalid }
     connection = saved
    }
   } catch { lastError = L("Uložené připojení nelze načíst. Zkontroluj Keychain; lokální data se nemění.") }
@@ -210,7 +226,7 @@ final class CloudLibrary {
   return f.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
  }
  @MainActor func startPairing(endpoint: CloudEndpoint, name: String) async throws {
-  guard !syncing, !connecting, now() >= retryAt, connection == nil else { throw CloudFailure.invalid }
+  guard endpoint == self.endpoint, !syncing, !connecting, now() >= retryAt, connection == nil else { throw CloudFailure.invalid }
   connecting = true; defer { connecting = false; didChange?() }
   let clean = String(String.UnicodeScalarView(name.unicodeScalars.filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) }.prefix(100)))
   let body = try JSONEncoder().encode(["device_name": clean.isEmpty ? "Mac" : clean])

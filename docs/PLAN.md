@@ -1,3 +1,34 @@
+# Aktuálně — pevný server podle buildu (18. 11. 2026)
+
+- Výchozí čistý main/origin/main `de6ff2d55b54344c68b96397f90c720e493e74c0`,
+  PR #1 standardně merged. Jan následně autorizoval lokální výměnu aplikace:
+  nový proces ověřený v ~/Applications, původní bundle i ZIP zachované v
+  ~/Library/Application Support/Screenshot Note/App Updates/20261118-194413.
+- Větev `feat/build-cloud-origin`: odstraněné editovatelné pole adresy i čtení/zápis
+  cloudWebURL. Build-time SCREENSHOT_NOTE_ENV local/test/production a volitelný
+  SCREENSHOT_NOTE_WEB_ORIGIN zapisují origin před podpisem do Info.plist.
+  Production pevně screenshotnote.com, local pouze HTTP loopback (default5173),
+  test vyžaduje explicitní neprodukční HTTPS. Neznámé prostředí a vadné URL odmítnuté.
+- Credential se načte jen pro shodný build origin; nové local/test Keychain služby
+  oddělené podle originu, původní produkční služba zachovaná. Outbox owner/origin
+  vazby se nemění, staré fronty ani Keychain se nemažou. UI uživatel server nevolí.
+- Web spuštěný pouze na loopback localhost5173, s dosavadním cloudovým vývojovým
+  Auth/DB a explicitně vypnutými billing/pairing/writes/legal flags. Bez cílových
+  migrací/aktivace a zásahu do stávajících Docker stacků. Nejde o plnou lokální
+  Mac→Next pairing/upload akceptaci ani produkční rollout.
+- Ověření: Python buildconfig2testy passed; local build/signature a celá defaultní
+  neinteraktivní regrese passed. Finální qATa1B build prošel reálným native REST
+  loopback testem, offscreen cs-dark preview bez pole vizuálně ověřené.
+  Nezávislé review nalezlo IPv6 mismatch a produkční trailing-dot alias; opravené
+  validací + regresí, finální re-review bez dalšíchP1/P2, diffcheckpassed.
+- Po Janově bezpečném ukončení instalován local build do ~/Applications,
+  podpis/hash a nový běžící proces ověřené. Backup bundle/ZIP v App Updates/
+  20261118-200057. Není to distribuční release. PR/merge se doplní níže.
+- Web authenticated Library/Storage odhalil nesoulad nového kódu se starým
+  clouddev schématem (transport/inventory). Spouští se samostatný nový lokální
+  backend a cílené E2E; cloud migrace se neaplikují. Jan nově autorizoval testovací
+  platby jen na tomto lokálu přes BO Test, nikoli produkční rollout.
+
 # Screenshot Note Mac — stav implementace
 
 Aktualizováno 18. 11. 2026. Výchozí čistý main/origin/main

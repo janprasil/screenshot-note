@@ -54,7 +54,7 @@ Exported sessions include invisible HTML boundaries and metadata for reopening c
 
 ## Build
 
-Requires macOS 13 or later and Xcode or the Xcode Command Line Tools. There are no third-party package dependencies.
+Requires macOS 13 or later, Python 3 and Xcode or the Xcode Command Line Tools. There are no third-party package dependencies.
 
 ```sh
 ./build.sh
@@ -63,6 +63,25 @@ Requires macOS 13 or later and Xcode or the Xcode Command Line Tools. There are 
 The script builds for the host architecture with a macOS 13 deployment target, signs the app locally, verifies the signature and runs the regression checks. It prints the path to the completed app. Copy that app to `~/Applications` or `/Applications` and launch it.
 
 Allow Screenshot Note in System Settings → Privacy & Security → Screen Recording when prompted.
+
+The web origin is baked into the signed bundle; users cannot edit it in the app.
+The default build is production, fixed to `https://screenshotnote.com`.
+Use build-time variables for development:
+
+```sh
+SCREENSHOT_NOTE_ENV=local ./build.sh
+# Defaults to http://localhost:5173; another loopback port can be set explicitly.
+SCREENSHOT_NOTE_ENV=local SCREENSHOT_NOTE_WEB_ORIGIN=http://localhost:6000 ./build.sh
+# Supply the actual test deployment origin; no test URL is assumed.
+SCREENSHOT_NOTE_ENV=test SCREENSHOT_NOTE_WEB_ORIGIN=https://YOUR_TEST_HOST ./build.sh
+```
+
+Test builds require an explicit HTTPS origin separate from production. Production
+rejects a custom origin. Runtime environment variables and old `cloudWebURL`
+preferences do not change the destination. Keychain credentials are separated by
+origin; production keeps its existing Keychain service for upgrade compatibility.
+Outbox items retain their original owner and origin and cannot cross environments.
+No backend feature is activated by selecting a build environment.
 
 To use your own signing identity:
 
@@ -207,7 +226,7 @@ Screenshot Note is available under the [MIT License](LICENSE).
 Cloud Library connects this Mac through the Screenshot Note web pairing page.
 Check the comparison code and account in your browser before approving. The
 native credential is saved in Keychain. The app never asks for a Supabase key,
-project URL or account password. The default web address is screenshotnote.com;
+project URL or account password. The production build connects only to screenshotnote.com;
 cloud pairing/uploads still require a separately activated server deployment.
 Local notes work without an account.
 

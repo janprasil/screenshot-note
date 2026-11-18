@@ -1,5 +1,8 @@
 # Aktuálně — pevný server podle buildu (18. 11. 2026)
 
+- PR #2 standardně merged, main/origin/main `0a36a3e8d123b0568b38623fb9b0047ede7670db`.
+  Navazující build validace odmítá percent-encoded hostname aliasy; Python regrese
+  a diffcheck prošly. Změna nemění aktuální localhost build ani jeho instalaci.
 - Výchozí čistý main/origin/main `de6ff2d55b54344c68b96397f90c720e493e74c0`,
   PR #1 standardně merged. Jan následně autorizoval lokální výměnu aplikace:
   nový proces ověřený v ~/Applications, původní bundle i ZIP zachované v

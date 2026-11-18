@@ -50,6 +50,10 @@ func exportDesignPreviews(to directory:URL)throws{
   let imageNote=ImageNoteEditor();_ = imageNote.run(L("Zjednodušit poslední krok objednávky."),image:root.appendingPathComponent("sample-\(language)-0.png"))
   let chooser=SessionChoiceDialog();_ = chooser.run(title:L("Vybrat konfiguraci"),choices:[SessionChoice(title:demo.name,detail:demo.detail),SessionChoice(title:second.name,detail:second.detail)])
   let sessions=SessionChoiceDialog();_ = sessions.run(title:L("Vybrat relaci"),choices:[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku z aktuálních snímků.")),SessionChoice(title:L("Průchod objednávkou"),detail:L("Zvýraznit vybranou platbu a zjednodušit potvrzení objednávky."),images:[root.appendingPathComponent("sample-\(language)-0.png"),root.appendingPathComponent("sample-\(language)-1.png")])])
+  let cloudVault=CloudMemoryVault(), pairingID=UUID()
+  cloudVault.value=CloudConnection(endpoint:"https://screenshotnote.com",token:"sn_device_v1_" + String(repeating:"a",count:43),id:pairingID,
+   comparisonCode:"AB12CD34",verificationURI:"https://screenshotnote.com/pair-device/" + pairingID.uuidString.lowercased(),expiresAt:"2099-01-01T00:00:00Z")
+  let cloud=CloudSettings(library:CloudLibrary(queue:root.appendingPathComponent("preview-cloud"),vault:cloudVault));cloud.show();exportDesignWindow(cloud.window!,name:"cloud-pairing")
   let hotkeys=Hotkeys();let settings=SettingsController(hotkeys:hotkeys);settings.show();exportDesignWindow(settings.window,name:"settings")
   let topics=TopicSettings();topics.list=[demo,second];topics.show();topics.folder.stringValue=language=="en" ? "~/Pictures/Screenshot Note/Product":"~/Pictures/Screenshot Note/Produkt";topics.isDefault.state = .on;exportDesignWindow(topics.window,name:"configurations")
   let shortcuts=ShortcutSettings(hotkeys:hotkeys);shortcuts.show()

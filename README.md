@@ -96,6 +96,9 @@ The checks cover filenames and collisions, export modes, persistent drafts, prev
 |---|---|
 | `main.swift` | Menu bar app, capture workflow and regression checks |
 | `CaptureNote.swift` | Drafts, filenames and Markdown export |
+| `CloudLibrary.swift` | Device pairing, Keychain, REST uploads and persistent outbox |
+| `CloudSettings.swift` | Native cloud connection and retry controls |
+| `CloudTests.swift` | Offline and loopback native cloud checks |
 | `Interface.swift` | Capture window, settings and shortcuts |
 | `SessionPicker.swift` | Configuration/session selection dialogs |
 | `ImageNoteEditor.swift` | Per-image note dialog and Markdown expansion |
@@ -201,6 +204,21 @@ Screenshot Note is available under the [MIT License](LICENSE).
 
 ## Cloud storage
 
-In the menu bar, open **Cloud Library…** and sign in with the account you use for your hosted Screenshot Note library. Enter its Supabase project URL and publishable key. Under **Settings → Manage configurations**, select a local folder, cloud storage, or both. If a network transfer fails, it stays in the local outbox until you retry it or sign in again.
+Cloud Library connects this Mac through the Screenshot Note web pairing page.
+Check the comparison code and account in your browser before approving. The
+native credential is saved in Keychain. The app never asks for a Supabase key,
+project URL or account password. The default web address is screenshotnote.com;
+cloud pairing/uploads still require a separately activated server deployment.
+Local notes work without an account.
 
-Cloud-only configurations publish to the library. Use the web library to view and export those sessions. A local folder or Obsidian vault works without an account.
+Under Settings → Manage configurations, choose local storage, cloud, or both.
+Cloud copies are converted to sRGB RGB/RGBA8 PNG, with at most 30 images and
+100 MB per transfer; local-only sessions have no fixed image count limit.
+Interrupted transfers remain in the owner-bound local outbox. Retry preserves
+the same session ID and skips confirmed images. Older queued transfers remain
+on disk and are not silently sent under a new account.
+
+Forget connection removes only local access. Revoke an active Mac in web
+Settings. [Transport, tests and release acceptance](docs/CLOUD-REST.md) explain
+the boundaries; [current implementation status](docs/PLAN.md) tracks the work.
+No installer, production deployment or backend feature activation is included.

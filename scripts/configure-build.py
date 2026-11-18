@@ -22,7 +22,7 @@ def configuration(environment, override):
     if (not origin or not origin.isascii() or any(c.isspace() or ord(c) < 32 for c in origin)
             or url.username is not None or url.password is not None
             or not url.hostname or url.path not in ("", "/")
-            or "?" in origin or "#" in origin or "\\" in origin
+            or "?" in origin or "#" in origin or "\\" in origin or "%" in origin
             or port is not None and not 1 <= port <= 65535):
         raise ValueError("Supply a plain web origin without credentials, path, query or fragment")
     if environment == "local":

@@ -1,298 +1,336 @@
 import AppKit
+import Security
+import CryptoKit
+import ImageIO
 
-struct CloudProject: Equatable {
+struct CloudEndpoint: Equatable {
  let url: URL
- let key: String
-
- init?(url rawURL: String, key: String) {
-  guard var parts = URLComponents(string: rawURL), let host = parts.host,
-        parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
-        parts.path.isEmpty || parts.path == "/",
-        parts.scheme == "https" || (parts.scheme == "http" && ["localhost", "127.0.0.1"].contains(host)),
-        Self.isPublicKey(key) else { return nil }
-  parts.path = ""
-  guard let url = parts.url else { return nil }
-  self.url = url
-  self.key = key
+ init?(_ raw: String) {
+  guard var p = URLComponents(string: raw), let host = p.host, p.user == nil, p.password == nil,
+        p.query == nil, p.fragment == nil, p.path.isEmpty || p.path == "/",
+        p.scheme == "https" || (p.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(host)) else { return nil }
+  p.path = ""; guard let url = p.url else { return nil }; self.url = url
  }
+ func path(_ path: String) -> URL { URL(string: url.absoluteString + path)! }
+}
 
- private static func isPublicKey(_ key: String) -> Bool {
-  if key.hasPrefix("sb_publishable_") { return true }
-  // The local Supabase CLI also provides a legacy anonymous JWT.
-  let parts = key.split(separator: ".")
-  guard parts.count == 3 else { return false }
-  var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-  payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
-  guard let data = Data(base64Encoded: payload),
-        let claims = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
-  return claims["role"] as? String == "anon"
+struct CloudConnection: Codable {
+ let endpoint: String
+ let token: String
+ let id: UUID
+ let comparisonCode: String
+ let verificationURI: String
+ var expiresAt: String
+ var ownerID: UUID?
+ var email: String?
+ static func validToken(_ token: String) -> Bool {
+  token.range(of: "^sn_device_v1_[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil
  }
 }
 
-private struct CloudAccount: Decodable {
- struct User: Decodable { let id: UUID; let email: String? }
- let accessToken: String
- let refreshToken: String
- let expiresAt: Double
- let user: User
+protocol CloudCredentialStore {
+ func load() throws -> CloudConnection?
+ func save(_ value: CloudConnection?) throws
 }
-
-private struct CloudSession: Codable {
- let id: String
- let ownerID: String
- let title: String
- let comment: String
- let configuration: String
- let template: String
- let captions: [String]
-
- enum CodingKeys: String, CodingKey {
-  case id, title, comment, configuration, template, captions
-  case ownerID = "owner_id"
+struct CloudKeychain: CloudCredentialStore {
+ private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
+  kSecAttrService as String: "cz.janprasil.screenshotnote.device.v1", kSecAttrAccount as String: "current",
+  kSecAttrSynchronizable as String: false] }
+ func load() throws -> CloudConnection? {
+  var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+  var value: CFTypeRef?; let status = SecItemCopyMatching(q as CFDictionary, &value)
+  if status == errSecItemNotFound { return nil }
+  guard status == errSecSuccess, let data = value as? Data else { throw CloudFailure.keychain }
+  return try JSONDecoder().decode(CloudConnection.self, from: data)
  }
-
- func objectPath(index: Int) -> String { "\(ownerID)/\(id)/\(index + 1).png" }
+ func save(_ value: CloudConnection?) throws {
+  guard let value else { let s = SecItemDelete(query as CFDictionary); guard s == errSecSuccess || s == errSecItemNotFound else { throw CloudFailure.keychain }; return }
+  let data = try JSONEncoder().encode(value)
+  let updated = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+  if updated == errSecItemNotFound {
+   var q = query; q[kSecValueData as String] = data; q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+   guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw CloudFailure.keychain }
+  } else if updated != errSecSuccess { throw CloudFailure.keychain }
+ }
 }
 
-private struct CloudJob: Codable {
- let project: String
- let session: CloudSession
-}
-
-private struct CloudHTTPError: LocalizedError {
+struct CloudFailure: LocalizedError {
+ let message: String
  let status: Int
- var errorDescription: String? { LF("Cloud vrátil chybu HTTP %ld.", status) }
+ let retryAfter: TimeInterval
+ init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0) { self.message = message; self.status = status; self.retryAfter = retryAfter }
+ var errorDescription: String? { message }
+ static var keychain: Self { Self(L("Přístup do Keychain se nezdařil. Připojení nebylo změněno.")) }
+ static var invalid: Self { Self(L("Server vrátil neplatnou odpověď. Lokální data zůstávají zachovaná.")) }
 }
 
-private final class CloudTransport: NSObject, URLSessionTaskDelegate {
+final class CloudTransport: NSObject, URLSessionTaskDelegate {
  static let shared = CloudTransport()
- lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+ lazy var session: URLSession = {
+  let config = URLSessionConfiguration.ephemeral
+  config.httpCookieStorage = nil; config.httpShouldSetCookies = false; config.urlCache = nil
+  config.requestCachePolicy = .reloadIgnoringLocalCacheData; config.timeoutIntervalForResource = 75
+  return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+ }()
  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                 newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-  completionHandler(nil)
+                 newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+ func request(_ endpoint: CloudEndpoint, _ path: String, method: String = "GET", token: String? = nil,
+              body: Data? = nil, file: URL? = nil) async throws -> Data {
+  guard path.hasPrefix("/api/v1/"), !path.contains("?"), !path.contains("#") else { throw CloudFailure.invalid }
+  var req = URLRequest(url: endpoint.path(path)); req.httpMethod = method; req.timeoutInterval = file == nil ? 15 : 70
+  if let token { guard CloudConnection.validToken(token) else { throw CloudFailure.invalid }; req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+  if let file {
+   req.httpBodyStream = InputStream(url: file)
+   let bytes = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+   req.setValue(String(bytes), forHTTPHeaderField: "Content-Length"); req.setValue("image/png", forHTTPHeaderField: "Content-Type")
+  } else if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+  let (stream, response) = try await session.bytes(for: req)
+  guard let http = response as? HTTPURLResponse else { throw CloudFailure.invalid }
+  var data = Data()
+  for try await byte in stream { if data.count >= 524288 { throw CloudFailure.invalid }; data.append(byte) }
+  guard (200..<300).contains(http.statusCode) else {
+   let retry = min(3600, max(0, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 0))
+   let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap { $0["error"] as? [String: Any] }?["code"] as? String
+   let message: String
+   switch http.statusCode {
+    case 401, 403: message = L("Zařízení nemá přístup. Zkontroluj připojení na webu nebo jej spáruj znovu.")
+    case 402: message = L("Pro nahrávání aktivuj cloudový trial nebo tarif na webu.")
+    case 413: message = L("Relace překračuje limit nahrávání nebo kapacitu cloudového tarifu.")
+    case 415: message = L("Server nepřijal obrázek. Lokální relace zůstává ve frontě.")
+    case 429: message = L("Příliš mnoho požadavků. Další pokus počká na povolený interval.")
+    case 503: message = L("Cloudová služba není dostupná nebo ještě není aktivovaná. Lokální poznámky fungují dál.")
+    case 409, 410: message = L("Přenos zatím nelze dokončit. Zkus jej později znovu; lokální data zůstávají zachovaná.")
+    default: message = LF("Cloud vrátil chybu HTTP %ld.", http.statusCode)
+   }
+   throw CloudFailure(message, status: http.statusCode, retryAfter: max(retry, code == "upload_incomplete" ? 90 : 0))
+  }
+  return data
  }
+}
+
+private struct Envelope<T: Decodable>: Decodable { let data: T }
+private struct Pairing: Decodable {
+ let id: UUID; let expires_at: String; let device_token: String; let comparison_code: String; let verification_uri: String; let interval: Int
+}
+private struct PairingStatus: Decodable { let state: String; let expires_at: String; let interval: Int }
+private struct CloudOwner: Decodable { let id: UUID; let email: String? }
+struct CloudManifest: Codable {
+ struct Image: Codable { let index: Int; let bytes: Int; let sha256: String }
+ let title: String; let comment: String; let configuration: String; let template: String; let captions: [String]; let images: [Image]
+}
+extension CloudManifest {
+ var valid: Bool {
+  func text(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
+  return (1...30).contains(images.count) && captions.count == images.count && text(title,500,2000) && text(comment,100000,100000)
+   && text(configuration,200,800) && text(template,100000,100000) && captions.allSatisfy { text($0,20000,20000) }
+   && captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 && images.enumerated().allSatisfy { index,image in
+    image.index == index + 1 && (1...52428800).contains(image.bytes) && image.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
+   } && images.reduce(0,{$0 + $1.bytes}) <= 100000000
+ }
+}
+private struct CloudJob: Codable {
+ let schemaVersion: Int
+ let endpoint: String
+ let ownerID: UUID
+ let sessionID: UUID
+ let manifest: CloudManifest
+ var manifestDigest: String?
+}
+private struct UploadStatus: Decodable {
+ let session_id: UUID; let state: String; let manifest_digest: String; let confirmed_indices: [Int]
+}
+
+func cloudImage(_ file: URL) throws -> Data {
+ guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+       CGImageSourceGetCount(source) == 1,
+       let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+       let width = props[kCGImagePropertyPixelWidth] as? Int, let height = props[kCGImagePropertyPixelHeight] as? Int,
+       width > 0, height > 0, width <= 16384, height <= 16384, width * height <= 64000000,
+       let image = CGImageSourceCreateImageAtIndex(source, 0, nil), let space = CGColorSpace(name: CGColorSpace.sRGB),
+       let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                               space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CloudFailure.invalid }
+ context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+ let output = NSMutableData()
+ guard let converted = context.makeImage(), let encoder = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil) else { throw CloudFailure.invalid }
+ CGImageDestinationAddImage(encoder, converted, [kCGImagePropertyPNGDictionary: [kCGImagePropertyPNGInterlaceType: 0]] as CFDictionary)
+ guard CGImageDestinationFinalize(encoder) else { throw CloudFailure.invalid }
+ // The server accepts a narrow RGB profile; retain only the encoded critical PNG chunks.
+ let data = output as Data; var clean = Data(data.prefix(8)), offset = 8
+ while offset + 12 <= data.count {
+  let length = data[offset..<offset + 4].reduce(0) { ($0 << 8) | Int($1) }
+  guard length <= data.count - offset - 12 else { throw CloudFailure.invalid }
+  let type = String(bytes: data[offset + 4..<offset + 8], encoding: .ascii)
+  if ["IHDR", "IDAT", "IEND"].contains(type) { clean.append(data[offset..<offset + length + 12]) }
+  else if data[offset + 4] & 32 == 0 { throw CloudFailure.invalid }
+  if type == "IHDR" { guard length == 13, data[offset + 16] == 8, [2,6].contains(data[offset + 17]), data[offset + 20] == 0 else { throw CloudFailure.invalid } }
+  offset += length + 12
+ }
+ guard offset == data.count, clean.count <= 52428800 else { throw CloudFailure.invalid }; return clean
 }
 
 final class CloudLibrary {
  static let shared = CloudLibrary()
  private let queue: URL
- private var project: CloudProject?
- private var account: CloudAccount?
+ private let vault: CloudCredentialStore
+ private let now: () -> Date
+ private(set) var connection: CloudConnection?
  private(set) var syncing = false
+ private(set) var connecting = false
+ private(set) var retryAt = Date.distantPast
+ private var nextPoll = Date.distantPast
  var lastError: String?
  var didChange: (() -> Void)?
 
- init(queue: URL = draftRoot.deletingLastPathComponent().appendingPathComponent("Cloud Outbox", isDirectory: true)) {
-  self.queue = queue
- }
-
- var signedInEmail: String? { account.map { $0.user.email ?? $0.user.id.uuidString } }
- var pendingCount: Int {
-  guard let project, let account else { return 0 }
-  return jobs(project: project, account: account).count
- }
-
- func signIn(project: CloudProject, email: String, password: String) async throws {
-  let newAccount = try await authenticate(project, grant: "password", fields: ["email": email, "password": password])
-  self.project = project
-  account = newAccount
-  didChange?()
- }
-
- func signOut() {
-  guard !syncing else { return }
-  account = nil
-  project = nil
-  lastError = nil
-  didChange?()
- }
-
- func requireAccount() throws {
-  guard account != nil else {
-   throw NSError(domain: "ScreenshotNote.Cloud", code: 1, userInfo: [NSLocalizedDescriptionKey:
-    L("Nejprve se přihlas do Cloudové knihovny v nabídce aplikace.")])
-  }
- }
-
- func enqueue(_ draft: Draft, root: URL) throws {
-  try requireAccount()
-  guard let account, let project else { return }
-  let id = UUID().uuidString.lowercased()
-  let title = draft.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-  let session = CloudSession(id: id, ownerID: account.user.id.uuidString.lowercased(),
-                             title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot",
-                             comment: draft.comment, configuration: draft.topic?.name ?? "",
-                             template: draft.topic?.markdownTemplate ?? defaultMarkdownTemplate,
-                             captions: draft.images.map { draft.imageNotes?[$0] ?? "" })
-  let staging = queue.appendingPathComponent(".\(id)", isDirectory: true)
-  try fm.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-  defer { try? fm.removeItem(at: staging) }
-  for (index, filename) in draft.images.enumerated() {
-   try fm.copyItem(at: root.appendingPathComponent(filename), to: staging.appendingPathComponent("\(index + 1).png"))
-  }
-  let job = CloudJob(project: project.url.absoluteString, session: session)
-  try JSONEncoder().encode(job).write(to: staging.appendingPathComponent("job.json"), options: .atomic)
-  try fm.moveItem(at: staging, to: queue.appendingPathComponent(id, isDirectory: true))
-  didChange?()
- }
-
- @MainActor func sync() async {
-  guard !syncing, let project, let account else { return }
-  syncing = true
-  lastError = nil
-  didChange?()
-  defer { syncing = false; didChange?() }
-  while let (directory, job) = jobs(project: project, account: account).first {
-   do {
-    for index in job.session.captions.indices {
-     let file = directory.appendingPathComponent("\(index + 1).png")
-     _ = try await authorized(project, path: "storage/v1/object/screenshot-note/" + job.session.objectPath(index: index),
-                              file: file, headers: ["Content-Type": "image/png", "x-upsert": "true"])
-    }
-    _ = try await authorized(project, path: "rest/v1/screenshot_sessions?on_conflict=id",
-                             body: JSONEncoder().encode(job.session),
-                             headers: ["Content-Type": "application/json", "Prefer": "resolution=ignore-duplicates"])
-    try fm.removeItem(at: directory)
-   } catch {
-    lastError = error.localizedDescription
-    break
+ init(queue: URL = draftRoot.deletingLastPathComponent().appendingPathComponent("Cloud Outbox", isDirectory: true), vault: CloudCredentialStore = CloudKeychain(), now: @escaping () -> Date = Date.init) {
+  self.queue = queue; self.vault = vault; self.now = now
+  do {
+   if let saved = try vault.load() {
+    guard CloudEndpoint(saved.endpoint) != nil, CloudConnection.validToken(saved.token), Self.browserURL(saved) != nil else { throw CloudFailure.invalid }
+    connection = saved
    }
+  } catch { lastError = L("Uložené připojení nelze načíst. Zkontroluj Keychain; lokální data se nemění.") }
+ }
+ var signedInEmail: String? { connection.flatMap { c in c.ownerID.map { c.email ?? $0.uuidString } } }
+ var pendingCount: Int { jobs().count }
+ var legacyPendingCount: Int { entries().filter { readJob($0) == nil }.count }
+ private func readJob(_ directory: URL) -> CloudJob? {
+  guard let handle = try? FileHandle(forReadingFrom:directory.appendingPathComponent("job.json")) else { return nil }
+  defer { try? handle.close() }
+  guard let data = try? handle.read(upToCount:1000001), data.count <= 1000000,
+        let job = try? JSONDecoder().decode(CloudJob.self,from:data),job.schemaVersion == 1,job.manifest.valid,
+        job.manifestDigest == nil || job.manifestDigest!.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil,
+        directory.lastPathComponent == job.sessionID.uuidString.lowercased() else { return nil };return job
+ }
+ static func browserURL(_ c: CloudConnection) -> URL? {
+  guard let endpoint = CloudEndpoint(c.endpoint), let url = URL(string: c.verificationURI),
+        url == endpoint.path("/pair-device/" + c.id.uuidString.lowercased()) else { return nil }; return url
+ }
+ private static func date(_ raw: String) -> Date? {
+  let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  return f.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+ }
+ @MainActor func startPairing(endpoint: CloudEndpoint, name: String) async throws {
+  guard !syncing, !connecting, now() >= retryAt, connection == nil else { throw CloudFailure.invalid }
+  connecting = true; defer { connecting = false; didChange?() }
+  let clean = String(String.UnicodeScalarView(name.unicodeScalars.filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) }.prefix(100)))
+  let body = try JSONEncoder().encode(["device_name": clean.isEmpty ? "Mac" : clean])
+  let data: Data
+  do { data = try await CloudTransport.shared.request(endpoint, "/api/v1/device-pairings", method: "POST", body: body) }
+  catch { retryAt = now().addingTimeInterval(max(5,(error as? CloudFailure)?.retryAfter ?? 15));throw error }
+  let result = try JSONDecoder().decode(Envelope<Pairing>.self, from: data).data
+  let saved = CloudConnection(endpoint: endpoint.url.absoluteString, token: result.device_token, id: result.id,
+    comparisonCode: result.comparison_code, verificationURI: result.verification_uri, expiresAt: result.expires_at)
+  guard CloudConnection.validToken(saved.token), saved.comparisonCode.range(of: "^[A-F0-9]{8}$", options: .regularExpression) != nil,
+        Self.browserURL(saved) != nil, let expires = Self.date(saved.expiresAt), expires > now(), expires < now().addingTimeInterval(660), result.interval >= 5 else { throw CloudFailure.invalid }
+  try vault.save(saved); connection = saved; nextPoll = now().addingTimeInterval(TimeInterval(result.interval)); lastError = nil
+  didChange?()
+ }
+ @MainActor func refreshConnection() async throws {
+  guard !connecting, !syncing, let current = connection, let endpoint = CloudEndpoint(current.endpoint) else { return }
+  guard now() >= nextPoll else { return }
+  connecting = true; defer { connecting = false; didChange?() }
+  nextPoll = now().addingTimeInterval(5)
+  let data: Data
+  do { data = try await CloudTransport.shared.request(endpoint, "/api/v1/device-pairing", token: current.token) }
+  catch { nextPoll = now().addingTimeInterval(max(30,(error as? CloudFailure)?.retryAfter ?? 30));throw error }
+  let status = try JSONDecoder().decode(Envelope<PairingStatus>.self, from: data).data
+  nextPoll = now().addingTimeInterval(TimeInterval(max(5, min(3600, status.interval))))
+  guard status.state == "active" else {
+   if status.state == "pending", current.ownerID == nil, let expiry = Self.date(status.expires_at), expiry > now() { return }
+   nextPoll = .distantFuture
+   throw CloudFailure(L("Párování bylo odmítnuto, odvoláno nebo vypršelo. Připoj zařízení znovu."), status: 403)
+  }
+  let ownerData = try await CloudTransport.shared.request(endpoint, "/api/v1/me", token: current.token)
+  let owner = try JSONDecoder().decode(Envelope<CloudOwner>.self, from: ownerData).data
+  guard current.ownerID == nil || current.ownerID == owner.id, let expiry = Self.date(status.expires_at), expiry > now() else { throw CloudFailure.invalid }
+  var saved = current; saved.ownerID = owner.id; saved.email = owner.email; saved.expiresAt = status.expires_at
+  try vault.save(saved); connection = saved; lastError = nil
+ }
+ @MainActor func cancelPairing() async throws {
+  guard !connecting, !syncing, let c = connection, c.ownerID == nil, let endpoint = CloudEndpoint(c.endpoint) else { return }
+  connecting = true; defer { connecting = false; didChange?() }
+  _ = try await CloudTransport.shared.request(endpoint, "/api/v1/device-pairing", method: "DELETE", token: c.token)
+  try vault.save(nil); connection = nil; lastError = nil
+ }
+ func forgetConnection() throws {
+  guard !syncing, !connecting else { throw CloudFailure.invalid }
+  try vault.save(nil); connection = nil; lastError = nil; didChange?()
+ }
+ func requireAccount() throws {
+  guard let c = connection, c.ownerID != nil, let expiry = Self.date(c.expiresAt), expiry > now() else {
+   throw CloudFailure(L("Nejprve připoj a potvrď tento Mac v Cloudové knihovně."))
   }
  }
-
- private func jobs(project: CloudProject, account: CloudAccount) -> [(URL, CloudJob)] {
-  let entries = (try? fm.contentsOfDirectory(at: queue, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-  return entries.sorted { $0.lastPathComponent < $1.lastPathComponent }.compactMap { directory in
-   guard let data = try? Data(contentsOf: directory.appendingPathComponent("job.json")),
-         let job = try? JSONDecoder().decode(CloudJob.self, from: data),
-         job.project == project.url.absoluteString,
-         job.session.ownerID == account.user.id.uuidString.lowercased() else { return nil }
+ private func entries() -> [URL] { ((try? fm.contentsOfDirectory(at: queue, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent } }
+ private func jobs() -> [(URL, CloudJob)] {
+  guard let c = connection, let owner = c.ownerID else { return [] }
+  return entries().compactMap { directory in
+   guard let job = readJob(directory), job.endpoint == c.endpoint, job.ownerID == owner, directory.lastPathComponent == job.sessionID.uuidString.lowercased() else { return nil }
    return (directory, job)
   }
  }
-
- private func authenticate(_ project: CloudProject, grant: String, fields: [String: String]) async throws -> CloudAccount {
-  let data = try await request(project, path: "auth/v1/token?grant_type=" + grant,
-                               body: JSONEncoder().encode(fields), headers: ["Content-Type": "application/json"])
-  let decoder = JSONDecoder()
-  decoder.keyDecodingStrategy = .convertFromSnakeCase
-  return try decoder.decode(CloudAccount.self, from: data)
- }
-
- @MainActor private func authorized(_ project: CloudProject, path: String, body: Data? = nil,
-                                    file: URL? = nil, headers: [String: String]) async throws -> Data {
-  guard let current = account else { try requireAccount(); return Data() }
-  let token: String
-  if current.expiresAt < Date().timeIntervalSince1970 + 60 {
-   let refreshed = try await authenticate(project, grant: "refresh_token", fields: ["refresh_token": current.refreshToken])
-   account = refreshed
-   token = refreshed.accessToken
-  } else {
-   token = current.accessToken
+ func enqueue(_ draft: Draft, root: URL) throws {
+  try requireAccount(); guard let c = connection, let owner = c.ownerID else { throw CloudFailure.invalid }
+  guard (1...30).contains(draft.images.count) else { throw CloudFailure(L("Cloudová relace může obsahovat 1 až 30 snímků. Lokální ukládání tento limit nemá.")) }
+  let id = UUID(), title = draft.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let captions = draft.images.map { draft.imageNotes?[$0] ?? "" }
+  func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
+  let heading = title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot", config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
+  guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),
+        captions.allSatisfy({valid($0,20000,20000)}), captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 else { throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná.")) }
+  let staging = queue.appendingPathComponent("." + id.uuidString, isDirectory: true)
+  try fm.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]); defer { try? fm.removeItem(at: staging) }
+  var images: [CloudManifest.Image] = []; var bytes = 0
+  for (index, filename) in draft.images.enumerated() {
+   guard URL(fileURLWithPath: filename).lastPathComponent == filename, !filename.contains("/") else { throw CloudFailure.invalid }
+   let data = try cloudImage(root.appendingPathComponent(filename)); bytes += data.count
+   guard bytes <= 100000000 else { throw CloudFailure(L("Relace překračuje limit 100 MB pro jeden cloudový přenos.")) }
+   try data.write(to: staging.appendingPathComponent("\(index + 1).png"), options: .atomic)
+   images.append(.init(index:index + 1,bytes:data.count,sha256:SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined()))
   }
-  return try await request(project, path: path, token: token, body: body, file: file, headers: headers)
+  let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images)
+  let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest)
+  try JSONEncoder().encode(job).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
+  try fm.moveItem(at:staging,to:queue.appendingPathComponent(id.uuidString.lowercased(),isDirectory:true)); didChange?()
  }
-
- private func request(_ project: CloudProject, path: String, token: String? = nil, body: Data? = nil,
-                      file: URL? = nil, headers: [String: String]) async throws -> Data {
-  var request = URLRequest(url: URL(string: project.url.absoluteString + "/" + path)!)
-  request.httpMethod = "POST"
-  request.timeoutInterval = 45
-  request.setValue(project.key, forHTTPHeaderField: "apikey")
-  if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-  for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
-  let transport = CloudTransport.shared.session
-  let (data, response): (Data, URLResponse)
-  if let file { (data, response) = try await transport.upload(for: request, fromFile: file) }
-  else { request.httpBody = body; (data, response) = try await transport.data(for: request) }
-  let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-  guard (200..<300).contains(status) else { throw CloudHTTPError(status: status) }
-  return data
- }
-}
-
-final class CloudSettings: NSObject, NSWindowDelegate {
- private var window: NSWindow?
- private let projectURL = CenteredTextField()
- private let key = CenteredTextField()
- private let email = CenteredTextField()
- private let password = NSSecureTextField()
- private let status = NSTextField(wrappingLabelWithString: "")
- private var signIn: AppButton!
- private var signOut: AppButton!
- private var retry: AppButton!
- private var signingIn = false
- private let library = CloudLibrary.shared
-
- func show() {
-  if let window { refresh(); presentScreenshotPanel(window); return }
-  let panel = ScreenshotPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 440),
-                              styleMask: [.nonactivatingPanel], backing: .buffered, defer: false)
-  panel.isReleasedWhenClosed = false
-  panel.delegate = self
-  window = panel
-  let view = installDesignRoot(panel, headerHeight: 92)
-  view.addSubview(designLabel(L("Cloudová knihovna"), NSRect(x: 26, y: 382, width: 470, height: 32), size: 23, weight: .semibold))
-  view.addSubview(designLabel(L("Použij stejný účet jako ve webové knihovně."), NSRect(x: 26, y: 352, width: 490, height: 24), size: 12, color: AppPalette.secondary))
-  for (label, field, y) in [("Adresa projektu", projectURL as NSTextField, 280), ("Veřejný klíč projektu", key, 218),
-                            ("E-mail", email, 156), ("Heslo", password, 94)] {
-   view.addSubview(sectionLabel(L(label), NSRect(x: 26, y: y + 36, width: 508, height: 18)))
-   inputShell(field, frame: NSRect(x: 26, y: y, width: 508, height: 34), in: view)
-  }
-  projectURL.stringValue = UserDefaults.standard.string(forKey: "cloudProjectURL") ?? ""
-  key.stringValue = UserDefaults.standard.string(forKey: "cloudPublishableKey") ?? ""
-  status.frame = NSRect(x: 26, y: 50, width: 508, height: 34)
-  status.font = .systemFont(ofSize: 12); status.textColor = AppPalette.secondary; view.addSubview(status)
-  signIn = styledButton(L("Přihlásit se"), role: .primary, frame: NSRect(x: 384, y: 16, width: 150, height: 32), target: self, action: #selector(connect))
-  signOut = styledButton(L("Odhlásit se"), role: .quiet, frame: NSRect(x: 26, y: 16, width: 120, height: 32), target: self, action: #selector(disconnect))
-  retry = styledButton(L("Zkusit nahrát znovu"), frame: NSRect(x: 334, y: 16, width: 200, height: 32), target: self, action: #selector(sync))
-  for button in [signIn!, signOut!, retry!] { view.addSubview(button) }
-  library.didChange = { [weak self] in self?.refresh() }
-  refresh()
-  presentScreenshotPanel(panel)
- }
-
- private func refresh() {
-  let connected = library.signedInEmail
-  for field in [projectURL as NSTextField, key, email, password] { field.isEnabled = connected == nil && !signingIn }
-  signIn.isHidden = connected != nil
-  signIn.isEnabled = !signingIn
-  signOut.isHidden = connected == nil
-  signOut.isEnabled = !library.syncing
-  retry.isHidden = connected == nil
-  retry.isEnabled = !library.syncing && library.pendingCount > 0
-  if let connected {
-   status.stringValue = library.lastError ?? (connected + " · " + LF("Čekající relace: %ld", library.pendingCount))
-  } else { status.stringValue = signingIn ? L("Přihlašuji…") : "" }
- }
-
- @objc private func connect() {
-  window?.makeFirstResponder(nil)
-  let trim = CharacterSet.whitespacesAndNewlines
-  guard let project = CloudProject(url: projectURL.stringValue.trimmingCharacters(in: trim), key: key.stringValue.trimmingCharacters(in: trim)) else {
-   status.stringValue = L("Zadej HTTPS adresu projektu a jeho veřejný klíč.")
-   return
-  }
-  let address = email.stringValue.trimmingCharacters(in: trim), secret = password.stringValue
-  guard !address.isEmpty, !secret.isEmpty else { status.stringValue = L("Vyplň e-mail a heslo."); return }
-  password.stringValue = ""
-  signingIn = true; refresh()
-  Task { @MainActor in
-   do {
-    try await library.signIn(project: project, email: address, password: secret)
-    UserDefaults.standard.set(project.url.absoluteString, forKey: "cloudProjectURL")
-    UserDefaults.standard.set(project.key, forKey: "cloudPublishableKey")
-    signingIn = false; refresh()
-    await library.sync()
-   } catch {
-    signingIn = false; refresh()
-    status.stringValue = L("Přihlášení se nezdařilo.") + " " + error.localizedDescription
+ @MainActor func sync() async {
+  guard !syncing, !connecting, now() >= retryAt, let c = connection, let owner = c.ownerID, let endpoint = CloudEndpoint(c.endpoint) else { return }
+  syncing = true; lastError = nil; didChange?(); defer { syncing = false; didChange?() }
+  do {
+   let me = try await CloudTransport.shared.request(endpoint,"/api/v1/me",token:c.token)
+   guard try JSONDecoder().decode(Envelope<CloudOwner>.self,from:me).data.id == owner else { throw CloudFailure.invalid }
+   while let (directory, original) = jobs().first {
+    var job = original; let path = "/api/v1/uploads/" + job.sessionID.uuidString.lowercased()
+    let created = try await CloudTransport.shared.request(endpoint,path,method:"PUT",token:c.token,body:JSONEncoder().encode(job.manifest))
+    var state = try JSONDecoder().decode(Envelope<UploadStatus>.self,from:created).data
+    func validate(_ state: UploadStatus) throws {
+     guard state.session_id == job.sessionID, state.manifest_digest.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil,
+           job.manifestDigest == nil || job.manifestDigest == state.manifest_digest,
+           Set(state.confirmed_indices).count == state.confirmed_indices.count,
+           state.confirmed_indices.allSatisfy({$0 >= 1 && $0 <= job.manifest.images.count}), ["uploading","committed"].contains(state.state) else { throw CloudFailure.invalid }
+    }
+    try validate(state)
+    if job.manifestDigest == nil {
+     job.manifestDigest = state.manifest_digest
+     try JSONEncoder().encode(job).write(to:directory.appendingPathComponent("job.json"),options:.atomic)
+    }
+    if state.state != "committed" {
+     for image in job.manifest.images where !state.confirmed_indices.contains(image.index) {
+      let file = directory.appendingPathComponent("\(image.index).png"), data = try Data(contentsOf:file,options:.mappedIfSafe)
+      guard data.count == image.bytes, SHA256.hash(data:data).map({String(format:"%02x",$0)}).joined() == image.sha256 else { throw CloudFailure.invalid }
+      _ = try await CloudTransport.shared.request(endpoint,path + "/images/\(image.index)",method:"PUT",token:c.token,file:file)
+     }
+     let committed = try await CloudTransport.shared.request(endpoint,path + "/commit",method:"POST",token:c.token)
+     state = try JSONDecoder().decode(Envelope<UploadStatus>.self,from:committed).data; try validate(state)
+    }
+    guard state.state == "committed", job.manifestDigest == state.manifest_digest,
+          Set(state.confirmed_indices) == Set(job.manifest.images.map(\.index)) else { throw CloudFailure.invalid }
+    try fm.removeItem(at:directory)
    }
+  } catch {
+   lastError = (error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
+   let delay = max(5, (error as? CloudFailure)?.retryAfter ?? 15)
+   retryAt = now().addingTimeInterval(delay + Double.random(in:0...2))
   }
  }
-
- func windowWillClose(_ notification: Notification) { password.stringValue = "" }
-
- @objc private func disconnect() { library.signOut() }
- @objc private func sync() { Task { @MainActor in await library.sync() } }
 }

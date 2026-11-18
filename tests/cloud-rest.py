@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Run the native client against a disposable loopback REST fixture."""
+import datetime
+import hashlib
+import http.server
+import json
+import os
+import secrets
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+import uuid
+import zlib
+
+owner = str(uuid.uuid4())
+connections, jobs, requests = {}, {}, []
+dropped = set()
+errors = []
+
+
+def png(data):
+    assert data[:8] == b'\x89PNG\r\n\x1a\n'
+    offset, compressed, types = 8, bytearray(), []
+    while offset < len(data):
+        length, = struct.unpack('>I', data[offset:offset + 4])
+        kind = data[offset + 4:offset + 8]
+        body = data[offset + 8:offset + 8 + length]
+        crc, = struct.unpack('>I', data[offset + 8 + length:offset + 12 + length])
+        assert crc == zlib.crc32(kind + body) & 0xffffffff
+        types.append(kind)
+        if kind == b'IHDR':
+            width, height, depth, color, comp, filt, interlace = struct.unpack('>IIBBBBB', body)
+            assert width == height == 2 and depth == 8 and color in (2, 6)
+            assert comp == filt == interlace == 0
+        elif kind == b'IDAT':
+            compressed.extend(body)
+        else:
+            assert kind == b'IEND' and length == 0
+        offset += length + 12
+    assert types[0] == b'IHDR' and types[-1] == b'IEND'
+    assert len(zlib.decompress(compressed)) == height * (1 + width * (4 if color == 6 else 3))
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def log_message(self, *args):
+        pass
+
+    def body(self):
+        assert 'Transfer-Encoding' not in self.headers
+        length = int(self.headers.get('Content-Length', 0))
+        assert 0 <= length <= 52428800
+        return self.rfile.read(length)
+
+    def reply(self, data, status=200):
+        body = json.dumps({'data': data}).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def drop(self, stage):
+        if stage not in dropped:
+            dropped.add(stage)
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return True
+        return False
+
+    def serve(self):
+        try:
+            assert self.path.startswith('/api/v1/') and '?' not in self.path
+            assert all(h not in self.headers for h in ('Cookie', 'Origin', 'apikey'))
+            requests.append((self.command, self.path))
+            if self.path == '/api/v1/device-pairings':
+                assert self.command == 'POST' and 'Authorization' not in self.headers
+                body = json.loads(self.body())
+                assert set(body) == {'device_name'}
+                if body['device_name'] == 'Rate fixture':
+                    self.send_response(429)
+                    self.send_header('Retry-After', '60')
+                    self.send_header('Content-Length', '2')
+                    self.end_headers()
+                    self.wfile.write(b'{}')
+                    return
+                token = 'sn_device_v1_' + secrets.token_urlsafe(32)
+                ident = str(uuid.uuid4())
+                connections[token] = {'id': ident, 'active': False}
+                address = 'http://127.0.0.1:' + str(self.server.server_port)
+                uri = address + '/pair-device/' + ident
+                if body['device_name'] == 'Unsafe URI':
+                    uri = 'https://foreign.invalid/pair-device/' + ident
+                expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)).isoformat()
+                self.reply(dict(id=ident, device_token=token, verification_uri=uri,
+                                comparison_code='AB12CD34', expires_at=expiry, interval=5), 201)
+                return
+            assert self.headers.get('Authorization', '').startswith('Bearer ')
+            token = self.headers['Authorization'][7:]
+            assert token in connections
+            if self.path == '/api/v1/device-pairing':
+                if self.command == 'DELETE':
+                    assert not connections[token]['active']
+                    self.reply(dict(state='denied', expires_at='2099-01-01T00:00:00Z', interval=5))
+                else:
+                    connections[token]['active'] = True
+                    self.reply(dict(state='active', expires_at='2099-01-01T00:00:00Z', interval=5))
+            elif self.path == '/api/v1/me':
+                self.reply(dict(id=owner, email='fixture@example.test'))
+            else:
+                parts = self.path.split('/')
+                assert parts[3] == 'uploads'
+                ident = parts[4]
+                uuid.UUID(ident)
+                if len(parts) == 5:
+                    assert self.command == 'PUT'
+                    manifest = json.loads(self.body())
+                    assert set(manifest) == {'title', 'comment', 'configuration', 'template', 'captions', 'images'}
+                    assert len(manifest['images']) == len(manifest['captions']) == 1
+                    if ident not in jobs:
+                        digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
+                        jobs[ident] = dict(manifest=manifest, digest=digest, images={}, state='uploading')
+                        if len(jobs) > 1:
+                            time.sleep(0.3)
+                    assert jobs[ident]['manifest'] == manifest
+                    if self.drop('manifest'):
+                        return
+                elif parts[5] == 'images':
+                    assert self.command == 'PUT' and self.headers['Content-Type'] == 'image/png'
+                    index = int(parts[6])
+                    data = self.body()
+                    image = jobs[ident]['manifest']['images'][index - 1]
+                    assert len(data) == image['bytes'] and hashlib.sha256(data).hexdigest() == image['sha256']
+                    png(data)
+                    jobs[ident]['images'][index] = data
+                    if self.drop('image'):
+                        return
+                    self.reply(dict(session_id=ident, index=index, confirmed=True), 201)
+                    return
+                else:
+                    assert self.command == 'POST' and parts[5] == 'commit' and not self.body()
+                    assert set(jobs[ident]['images']) == {1}
+                    jobs[ident]['state'] = 'committed'
+                    if self.drop('commit'):
+                        return
+                self.reply(dict(session_id=ident, state=jobs[ident]['state'], manifest_digest=jobs[ident]['digest'],
+                                confirmed_indices=list(jobs[ident]['images'])))
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as error:
+            errors.append(type(error).__name__)
+            self.reply({}, 500)
+
+    do_GET = do_POST = do_PUT = do_DELETE = serve
+
+
+assert len(sys.argv) == 2, 'Supply the built ScreenshotNote binary.'
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    env = {'PATH': os.environ['PATH'], 'SCREENSHOT_NOTE_TEST_URL': 'http://127.0.0.1:' + str(server.server_port)}
+    result = subprocess.run([sys.argv[1], '--cloud-self-test'], env=env, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not errors, errors
+    assert dropped == {'manifest', 'image', 'commit'}
+    assert sum(1 for method, path in requests if method == 'DELETE') == 1
+    assert len(jobs) == 3 and all(job['state'] == 'committed' for job in jobs.values())
+    assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
+    print(result.stdout.strip())
+    print('PASS: loopback-only wire contract, no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join()

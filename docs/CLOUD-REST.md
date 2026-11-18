@@ -1,0 +1,95 @@
+# Native cloud transport
+
+The client uses only the configured Screenshot Note web origin and `/api/v1`.
+The default address is `https://screenshotnote.com`; this is a configured domain,
+not evidence that production pairing/uploads are enabled. There is no Supabase
+project URL/key, password login, Auth refresh token or direct Storage request.
+The server remains responsible for Auth, ownership, billing and Storage access.
+
+## Pairing and credentials
+
+Cloud Library starts a pairing with the Mac's device name. The returned native
+credential is saved in the non-synchronizing Keychain item
+`cz.janprasil.screenshotnote.device.v1` / `current` before the browser can open.
+The browser URL must equal the selected origin's `/pair-device/{id}` and never
+contains the token. The dialog displays the comparison code and asks the user
+to check both code and account. Pending status is polled no faster than five
+seconds, with Retry-After/backoff on errors. Closing the window stops polling;
+reopening resumes the saved pending credential. Active credentials have no
+client refresh or hidden renewal. Re-pair after server expiry/revocation.
+
+Once active, `/me` supplies the owner UUID and display email; an existing owner
+binding cannot silently change. Every upload drain checks `/me` again. A
+credential, display email and pairing metadata live in Keychain, never in
+UserDefaults, outbox JSON, browser URLs or logs. UserDefaults stores only the
+web address. Cookies, caches and redirects are disabled in the native transport.
+Responses are bounded to 512 KiB; PNG request bodies stream from local files.
+
+Cancel pairing calls the pending DELETE endpoint. Forget connection removes
+only this Mac's Keychain item and leaves all queued data; it does **not** claim
+to revoke an active server device. Use web Settings to revoke that device.
+The UI explains the distinction. A failed Keychain write leaves the in-memory
+connection unchanged. A lost initial pairing response leaves an expiring server
+pending request; no secret is recovered from the web.
+
+## Outbox and PNG
+
+New `schemaVersion=1` jobs bind the exact origin, owner UUID, stable session UUID,
+frozen manifest and per-image bytes/SHA256. No credential is stored in jobs.
+Files are staged privately and the complete directory is moved into the queue
+before a draft may be cleared. Metadata limits match the current server contract:
+1–30 images, 50 MiB/image, 100,000,000 bytes/job and bounded title/text/captions.
+Local-only sessions retain their existing unlimited image workflow.
+
+The cloud copy is explicitly rendered to non-interlaced sRGB RGB/RGBA8 PNG and
+stripped to IHDR/IDAT/IEND. This satisfies the narrow server PNG profile rather
+than claiming general HDR/ICC/16-bit preservation. Existing local exports are
+not rewritten. Cloud-only output uses the converted copy; color/HDR fidelity
+still needs representative Mac/display acceptance before release.
+
+PUT the same manifest/UUID on every retry. The first successful manifest reply
+pins the server's canonical `manifest_digest` durably before sending images.
+This digest is server-generated; the native client independently hashes image
+bytes, not the server's canonical JSON format. Confirmed indices are skipped on
+resume. PNG and commit failures retain the same job and ID. Only `committed`
+with the matching UUID, pinned digest and complete index set permits removal.
+A lost commit reply is resolved by the repeated immutable manifest request.
+No timeout invents another session ID. HTTP429 honors Retry-After; temporary
+errors use bounded cooldown/jitter and manual retry. `upload_incomplete` waits
+at least 90 seconds. Trial/capacity/invalid-image errors retain the local job.
+The drain rereads the queue after each completion, including notes added while
+an earlier request is in flight.
+
+Jobs are validated again when read (bounded JSON, count/index/hash/size/text
+limits). Invalid or unknown items remain on disk and are not uploaded. Older
+Supabase `job.json` items remain untouched in Cloud Outbox and are identified
+in the dialog; there is no implicit conversion or replay under another account.
+Their previous public project settings are ignored. Recovery/migration of an
+old queue requires a separate explicit owner/project mapping and user decision.
+Switching to a different account/origin never drains the previous account's jobs.
+
+## Validation and remaining acceptance
+
+`./build.sh` compiles for macOS13+, verifies its local signature and runs default
+noninteractive regressions, including endpoint/token checks, image conversion,
+owner isolation, malformed/legacy queue preservation and vault failure atomicity.
+No production Keychain entry or cloud account is used by these tests.
+
+```sh
+python3 tests/cloud-rest.py '/path/to/Screenshot Note.app/Contents/MacOS/ScreenshotNote'
+```
+
+This starts an owned loopback HTTP fixture and the actual compiled native client.
+It verifies pairing/vault/restart wiring, identity, streaming RGB8 PNG CRC/hash,
+lost manifest/image/commit responses, stable IDs/digests, drain concurrency,
+cancellation, cooldown and account switching. The fixture simulates web approval;
+it does not prove an external provider/browser or production server acceptance.
+All fixture data and processes are owned and removed; no existing stack restarts.
+The vault in tests is in memory. Actual macOS Keychain authorization/access,
+installed-app upgrades, native→Next integration, representative large/HDR/color
+images and production network failures remain release acceptance work.
+
+Design export includes native Cloud Library pending screens in Czech/English and
+light/dark using synthetic data, without a live credential or network calls.
+This change builds source only: no installer publication, application install,
+production deploy, target migrations or backend feature activation.

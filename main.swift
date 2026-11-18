@@ -194,46 +194,16 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 if CommandLine.arguments.contains("--language-check"){print(AppLanguage.current);exit(0)}
 
 if CommandLine.arguments.contains("--cloud-self-test") {
- _ = NSApplication.shared
- NSApp.setActivationPolicy(.prohibited)
+ _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
  Task { @MainActor in
-  let env = ProcessInfo.processInfo.environment
-  guard let url = env["SCREENSHOT_NOTE_TEST_URL"],
-        let key = env["SCREENSHOT_NOTE_TEST_KEY"],
-        let email = env["SCREENSHOT_NOTE_TEST_EMAIL"],
-        let password = env["SCREENSHOT_NOTE_TEST_PASSWORD"],
-        let project = CloudProject(url: url, key: key),
-        ["localhost", "127.0.0.1"].contains(project.url.host ?? "") else {
-   fputs("Supply test account credentials and a loopback project URL.\n", stderr);exit(1)
-  }
-  let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-  do {
-   try fm.createDirectory(at: root, withIntermediateDirectories: true)
-   let library = CloudLibrary(queue: root.appendingPathComponent("queue"))
-   try await library.signIn(project: project, email: email, password: password)
-   let asset = "screenshot.png"
-   let data = Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/XKcAAAAASUVORK5CYII=")!
-   try data.write(to: root.appendingPathComponent(asset))
-   let draft = Draft(images:[asset],comment:"Cloud **integration** test",title:"Screenshot Note test",imageNotes:[asset:"Caption"])
-   try library.enqueue(draft,root:root)
-   assert(library.pendingCount == 1)
-   await library.sync()
-   guard library.pendingCount == 0 else {
-    throw NSError(domain:"ScreenshotNote.CloudTest",code:1,userInfo:[NSLocalizedDescriptionKey:library.lastError ?? "Pending upload"])
-   }
-   try fm.removeItem(at:root)
-   print("PASS: native sign-in, persistent outbox, PNG upload and session publication")
-   exit(0)
-  } catch {
-   try? fm.removeItem(at:root)
-   fputs(error.localizedDescription+"\n",stderr)
-   exit(1)
-  }
+  do { try await cloudIntegrationTest();exit(0) }
+  catch { fputs("Native REST integration failed.\n",stderr);exit(1) }
  }
  dispatchMain()
 }
 
 if CommandLine.arguments.contains("--self-test") {
+ try cloudUnitTests()
  let interactiveUITests=CommandLine.arguments.contains("--interactive-ui-tests")
  _ = NSApplication.shared;NSApp.setActivationPolicy(interactiveUITests ? .accessory:.prohibited)
  AppLanguage.override="cs"

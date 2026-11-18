@@ -239,7 +239,6 @@
 "Relace překračuje limit 100 MB pro jeden cloudový přenos." = "Relace překračuje limit 100 MB pro jeden cloudový přenos.";
 "Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus." = "Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.";
 "Připoj tento Mac potvrzením ve webovém prohlížeči." = "Připoj tento Mac potvrzením ve webovém prohlížeči.";
-"Adresa webové knihovny" = "Adresa webové knihovny";
 "Na webu zkontroluj shodný kód a účet. Potvrď pouze párování, které jsi právě zahájil na tomto Macu." = "Na webu zkontroluj shodný kód a účet. Potvrď pouze párování, které jsi právě zahájil na tomto Macu.";
 "Připojit Mac" = "Připojit Mac";
 "Zapomenout připojení" = "Zapomenout připojení";
@@ -251,6 +250,5 @@
 "Čekám na potvrzení párování na webu." = "Čekám na potvrzení párování na webu.";
 "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu." = "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu.";
 "Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají." = "Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají.";
-"Zadej HTTPS adresu webové knihovny." = "Zadej HTTPS adresu webové knihovny.";
 "Připojení se nezdařilo. Zkus to později znovu." = "Připojení se nezdařilo. Zkus to později znovu.";
 "Párování nelze zrušit. Můžeš zapomenout místní připojení; nedokončené párování vyprší." = "Párování nelze zrušit. Můžeš zapomenout místní připojení; nedokončené párování vyprší.";

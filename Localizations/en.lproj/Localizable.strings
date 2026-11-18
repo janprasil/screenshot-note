@@ -239,7 +239,6 @@
 "Relace překračuje limit 100 MB pro jeden cloudový přenos." = "The session exceeds the 100 MB limit for a single cloud transfer.";
 "Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus." = "The transfer failed. The local queue is preserved for another attempt.";
 "Připoj tento Mac potvrzením ve webovém prohlížeči." = "Connect this Mac by confirming it in your web browser.";
-"Adresa webové knihovny" = "Web library address";
 "Na webu zkontroluj shodný kód a účet. Potvrď pouze párování, které jsi právě zahájil na tomto Macu." = "Check the matching code and account on the web. Only approve pairing that you just started on this Mac.";
 "Připojit Mac" = "Connect Mac";
 "Zapomenout připojení" = "Forget connection";
@@ -251,6 +250,5 @@
 "Čekám na potvrzení párování na webu." = "Waiting for pairing confirmation on the web.";
 "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu." = "Forgetting removes access only from this Mac. Revoke the device in web settings.";
 "Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají." = "Older or unreadable queued items remain local and are not uploaded automatically.";
-"Zadej HTTPS adresu webové knihovny." = "Enter the HTTPS address of your web library.";
 "Připojení se nezdařilo. Zkus to později znovu." = "Could not connect. Try again later.";
 "Párování nelze zrušit. Můžeš zapomenout místní připojení; nedokončené párování vyprší." = "Pairing could not be cancelled. You can forget the local connection; unfinished pairing will expire.";

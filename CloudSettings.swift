@@ -2,7 +2,6 @@ import AppKit
 
 final class CloudSettings: NSObject, NSWindowDelegate {
  private(set) var window: NSWindow?
- private let address = CenteredTextField()
  private let status = NSTextField(wrappingLabelWithString: "")
  private let code = NSTextField(labelWithString: "")
  private var connectButton: AppButton!
@@ -17,14 +16,11 @@ final class CloudSettings: NSObject, NSWindowDelegate {
 
  func show() {
   if let window { refresh(); startPolling(); presentScreenshotPanel(window); return }
-  let panel = ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:440),styleMask:[.nonactivatingPanel],backing:.buffered,defer:false)
+  let panel = ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:360),styleMask:[.nonactivatingPanel],backing:.buffered,defer:false)
   panel.isReleasedWhenClosed=false;panel.delegate=self;window=panel
   let view=installDesignRoot(panel,headerHeight:92)
-  view.addSubview(designLabel(L("Cloudová knihovna"),NSRect(x:26,y:382,width:510,height:32),size:23,weight:.semibold))
-  view.addSubview(designLabel(L("Připoj tento Mac potvrzením ve webovém prohlížeči."),NSRect(x:26,y:352,width:528,height:24),size:12,color:AppPalette.secondary))
-  view.addSubview(sectionLabel(L("Adresa webové knihovny"),NSRect(x:26,y:310,width:528,height:18)))
-  inputShell(address,frame:NSRect(x:26,y:270,width:528,height:34),in:view)
-  address.stringValue=library.connection?.endpoint ?? UserDefaults.standard.string(forKey:"cloudWebURL") ?? "https://screenshotnote.com"
+  view.addSubview(designLabel(L("Cloudová knihovna"),NSRect(x:26,y:302,width:510,height:32),size:23,weight:.semibold))
+  view.addSubview(designLabel(L("Připoj tento Mac potvrzením ve webovém prohlížeči."),NSRect(x:26,y:272,width:528,height:24),size:12,color:AppPalette.secondary))
   let explanation=NSTextField(wrappingLabelWithString:L("Na webu zkontroluj shodný kód a účet. Potvrď pouze párování, které jsi právě zahájil na tomto Macu."))
   explanation.frame=NSRect(x:26,y:207,width:528,height:50);explanation.font = .systemFont(ofSize:13);explanation.textColor=AppPalette.secondary;view.addSubview(explanation)
   code.frame=NSRect(x:26,y:162,width:528,height:32);code.font = .monospacedSystemFont(ofSize:23,weight:.semibold);code.isSelectable=true;view.addSubview(code)
@@ -53,7 +49,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  private func refresh() {
   guard connectButton != nil else { return }
   let c=library.connection, busy=library.syncing || library.connecting
-  address.isEnabled=c == nil && !busy;connectButton.isHidden=c != nil;connectButton.isEnabled = !busy && Date() >= library.retryAt
+  connectButton.isHidden=c != nil;connectButton.isEnabled = !busy && Date() >= library.retryAt
   forget.isHidden=c == nil;forget.isEnabled = !busy
   retry.isHidden=c?.ownerID == nil;retry.isEnabled = !busy && library.pendingCount > 0 && Date() >= library.retryAt
   cancel.isHidden=c == nil || c?.ownerID != nil;cancel.isEnabled = !busy
@@ -66,11 +62,9 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  }
  @objc private func connect() {
   window?.makeFirstResponder(nil)
-  guard let endpoint=CloudEndpoint(address.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)) else { library.lastError=L("Zadej HTTPS adresu webové knihovny.");refresh();return }
   Task { @MainActor in
    do {
-    try await library.startPairing(endpoint:endpoint,name:Host.current().localizedName ?? "Mac")
-    UserDefaults.standard.set(endpoint.url.absoluteString,forKey:"cloudWebURL")
+    try await library.startPairing(endpoint:library.endpoint,name:Host.current().localizedName ?? "Mac")
     openBrowser()
    } catch { library.lastError=(error as? CloudFailure)?.message ?? L("Připojení se nezdařilo. Zkus to později znovu.") }
    refresh()

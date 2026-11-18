@@ -53,7 +53,7 @@ func exportDesignPreviews(to directory:URL)throws{
   let cloudVault=CloudMemoryVault(), pairingID=UUID()
   cloudVault.value=CloudConnection(endpoint:"https://screenshotnote.com",token:"sn_device_v1_" + String(repeating:"a",count:43),id:pairingID,
    comparisonCode:"AB12CD34",verificationURI:"https://screenshotnote.com/pair-device/" + pairingID.uuidString.lowercased(),expiresAt:"2099-01-01T00:00:00Z")
-  let cloud=CloudSettings(library:CloudLibrary(queue:root.appendingPathComponent("preview-cloud"),vault:cloudVault));cloud.show();exportDesignWindow(cloud.window!,name:"cloud-pairing")
+  let cloud=CloudSettings(library:CloudLibrary(queue:root.appendingPathComponent("preview-cloud"),vault:cloudVault,endpoint:CloudEndpoint("https://screenshotnote.com")!));cloud.show();exportDesignWindow(cloud.window!,name:"cloud-pairing")
   let hotkeys=Hotkeys();let settings=SettingsController(hotkeys:hotkeys);settings.show();exportDesignWindow(settings.window,name:"settings")
   let topics=TopicSettings();topics.list=[demo,second];topics.show();topics.folder.stringValue=language=="en" ? "~/Pictures/Screenshot Note/Product":"~/Pictures/Screenshot Note/Produkt";topics.isDefault.state = .on;exportDesignWindow(topics.window,name:"configurations")
   let shortcuts=ShortcutSettings(hotkeys:hotkeys);shortcuts.show()

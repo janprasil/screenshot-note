@@ -4,3 +4,4 @@ build/
 *.app/
 *.dSYM/
 xcuserdata/
+__pycache__/

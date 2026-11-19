@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CoreGraphics
 
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
@@ -98,8 +99,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 
  func capture(full:Bool,fromComposer:Bool=false){
   let active=composer
-  func restoreComposerSize(){if fromComposer{active?.expandCompact()}}
-  guard !capturing && !browsingSavedSessions else{restoreComposerSize();return}
+  let fromOpenComposer = fromComposer || active != nil
+  func restoreComposerSize(){if fromOpenComposer{active?.expandCompact()}}
+  guard !capturing && !browsingSavedSessions else{return}
+  active?.collapseCompact()
   if !CGPreflightScreenCaptureAccess(){restoreComposerSize();_ = CGRequestScreenCaptureAccess();showError(L("Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť snímání znovu."));NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!);return}
   let screens=NSScreen.screens
   let pointerDisplay=screens.firstIndex{$0.frame.contains(NSEvent.mouseLocation)}
@@ -112,7 +115,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    else {let copy=try workingCopy();draft=copy.0;root=copy.1}
    let file=root.appendingPathComponent(UUID().uuidString+".png")
    let process=Process();process.executableURL=URL(fileURLWithPath:"/usr/sbin/screencapture")
-   let mode=full ? (fromComposer ? ["-D",String((pointerDisplay ?? 0)+1)]:["-m"]):["-i"]
+   let mode=full ? (fromOpenComposer ? ["-D",String((pointerDisplay ?? 0)+1)]:["-m"]):["-i"]
    process.arguments=["-x"]+mode+[file.path]
    capturing=true
    hiddenWindows=NSApp.orderedWindows.filter{$0.isVisible}
@@ -464,7 +467,24 @@ if CommandLine.arguments.contains("--self-test") {
  compose.setImageNote("",for:"b.png");assert(compose.draft.imageNotes?["b.png"]==nil)
  print("PASS: thumbnail hover actions and per-image notes independent of PNG editing")
 
- compose.removeImage(remove);assert(compose.draft.images.isEmpty && !compose.saveButton.isEnabled && compose.laterButton.isEnabled)
+ compose.removeImage(remove);assert(compose.draft.images.isEmpty && !compose.saveButton.isEnabled && compose.addShotButton.isEnabled)
+ let shortcut=Shortcut(key:21,modifiers:UInt32(controlKey|optionKey|shiftKey),name:"4")
+ func shortcutEvent(_ key:UInt16,_ flags:NSEvent.ModifierFlags)->NSEvent {
+  NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:flags,timestamp:0,windowNumber:0,context:nil,characters:"4",charactersIgnoringModifiers:"4",isARepeat:false,keyCode:key)!
+ }
+ assert(shortcut.matches(shortcutEvent(21,[.control,.option,.shift,.capsLock])))
+ assert(!shortcut.matches(shortcutEvent(21,[.control,.option])))
+ assert(!shortcut.matches(shortcutEvent(21,[.control,.option,.shift,.command])))
+ assert(!shortcut.matches(shortcutEvent(20,[.control,.option,.shift])))
+ let hotkeyProbe=Hotkeys();var triggered:[Int]=[];hotkeyProbe.callback={triggered.append($0)}
+ assert(hotkeyProbe.trigger(1,at:10));assert(!hotkeyProbe.trigger(1,at:10.05))
+ assert(hotkeyProbe.trigger(2,at:10.1));assert(hotkeyProbe.trigger(1,at:10.4));assert(triggered==[1,2,1])
+ let captureProbe=Composer(draft:Draft(images:[],comment:"",title:"",topic:topic),root:deleteRoot);captureProbe.show(present:false)
+ assert(captureProbe.topicLink.superview != nil && captureProbe.addShotButton.superview != nil)
+ assert(captureProbe.sessionLink.superview == nil && captureProbe.laterButton.superview == nil)
+ assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
+ captureProbe.window.close()
+ print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")
  assert(Shortcut(key:103,modifiers:UInt32(256),name:"\u{F70E}").display == "⌘F11")
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")
  print("PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels")

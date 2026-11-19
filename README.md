@@ -17,7 +17,7 @@ Capture an area or your screen, annotate images, add a title and a comment, and 
 - Annotations: selection, moving and deleting objects, arrows, shapes, freehand drawing, text styling, colors and crop.
 - A single-line comment field with a larger editor that styles Markdown as you type.
 - Named configurations with their own destination folder, export mode and Markdown template.
-- Configuration/session selection dialogs with descriptions and screenshot previews.
+- Configuration selection and a separate menu action for reopening saved sessions.
 - Separate notes per session or a shared Markdown file.
 - Add screenshots to previously exported sessions, including sections of a shared note.
 - Light and dark appearance, fullscreen-aware panels, and optional launch at login.
@@ -159,7 +159,7 @@ Removed horizontal rules at header-to-content transitions.
 
 ### 4.2
 
-Title-first composer, link-based configuration/session pickers, unlimited screenshot strip, per-image notes and configurable Markdown templates. Verified with 12-image sessions, persisted caption remapping, mixed legacy/custom-template notes and external text edits.
+Title-first composer, configuration picker, unlimited screenshot strip, per-image notes and configurable Markdown templates. Add region/full-screen controls and capture shortcuts append to the open note after hiding its window. The composer has no session picker or Continue session button; the menu still reopens saved sessions. Verified with 12-image sessions, persisted caption remapping, mixed legacy/custom-template notes and external text edits.
 
 ### 4.2.1
 

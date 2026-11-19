@@ -1,3 +1,23 @@
+# Aktuálně — snímání a cloudové členění (19. 11. 2026)
+
+- Výchozí main/origin/main `9c9e402d4d6532bbdfd7bc12d70a0ed9e72c2793`.
+  Rozpracovaná oprava odstraňuje viditelný výběr relace a tlačítko Pokračovat
+  v relaci z composeru. Samostatné menu pro otevření uložené relace zůstává.
+- Zkratky při otevřeném composeru používají stejné sbalení/skrytí před capture
+  jako Přidat výřez/snímek. Přibyl lokální panelový key monitor s přesným matchingem,
+  ochranou recorderu a společným debounce s Carbon cestou.
+- Local build EhsBh4, podpis a celá defaultní neinteraktivní regrese passed.
+  Nové kontroly ověřují skutečně sestavený offscreen composer bez obou ovládacích
+  prvků, shortcut matching a debounce. Preview cs/dark a en/light vizuálně ověřené
+  v `/tmp/sn-capture-nov19`. Nejde o skutečné snímání uživatelovy plochy ani
+  novou Mac→cloud upload akceptaci. Instalovaná aplikace se zatím nemění.
+- Jan upřesnil: kategorie lokálně, buckety na webu, společný účet na více Macích.
+  Lokální přejmenování na buckety ani změna výchozího uploadu nejsou implementované.
+  Pracovní návrh je ve web repo `docs/CLOUD-BUCKETS.md`; rozsah stahování obsahu
+  a vztah cloudových změn k lokálním Markdown exportům čeká na rozhodnutí.
+- Nezávislé i finální review nových testů a dokumentace bez P1/P2; syntaxe webového
+  testu a diffcheck obou repozitářů passed. Následuje commit/PR/checks/standard merge.
+
 # Aktuálně — pevný server podle buildu (18. 11. 2026)
 
 - PR #2 standardně merged, main/origin/main `0a36a3e8d123b0568b38623fb9b0047ede7670db`.

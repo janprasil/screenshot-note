@@ -47,6 +47,11 @@ func showError(_ message:String){NSApp.activate(ignoringOtherApps:true);let a=NS
 func label(_ value:String,_ frame:NSRect)->NSTextField{let f=NSTextField(labelWithString:value);f.frame=frame;return f}
 struct Shortcut:Codable {
  var key:UInt32;var modifiers:UInt32;var name:String
+ func matches(_ event:NSEvent)->Bool {
+  let flags=event.modifierFlags;var value:UInt32=0
+  for (flag,carbon) in [(NSEvent.ModifierFlags.control,controlKey),(.option,optionKey),(.shift,shiftKey),(.command,cmdKey)] {if flags.contains(flag){value |= UInt32(carbon)}}
+  return UInt32(event.keyCode)==key && value==modifiers
+ }
  var display:String {
   var s="";if modifiers & UInt32(controlKey) != 0{s+="⌃"};if modifiers & UInt32(optionKey) != 0{s+="⌥"};if modifiers & UInt32(shiftKey) != 0{s+="⇧"};if modifiers & UInt32(cmdKey) != 0{s+="⌘"};return s+Self.keyName(key,fallback:name)
  }
@@ -63,19 +68,32 @@ struct Shortcut:Codable {
 }
 final class Hotkeys {
  var refs:[EventHotKeyRef]=[];var handler:EventHandlerRef?;var callback:((Int)->Void)?
+ private var monitor:Any?;private var registered=Set<Int>();private var lastTrigger:(Int,TimeInterval)?
+ @discardableResult func trigger(_ id:Int,at time:TimeInterval=ProcessInfo.processInfo.systemUptime)->Bool {
+  if let last=lastTrigger,last.0==id,time-last.1<0.2{return false}
+  lastTrigger=(id,time);callback?(id);return true
+ }
  init(){var type=EventTypeSpec(eventClass:OSType(kEventClassKeyboard),eventKind:UInt32(kEventHotKeyPressed))
   InstallEventHandler(GetApplicationEventTarget(),{_,event,context in
    guard let context=context else{return OSStatus(eventNotHandledErr)}
    var id=EventHotKeyID();GetEventParameter(event,EventParamName(kEventParamDirectObject),EventParamType(typeEventHotKeyID),nil,MemoryLayout<EventHotKeyID>.size,nil,&id)
-   Unmanaged<Hotkeys>.fromOpaque(context).takeUnretainedValue().callback?(Int(id.id));return noErr
+   Unmanaged<Hotkeys>.fromOpaque(context).takeUnretainedValue().trigger(Int(id.id));return noErr
   },1,&type,Unmanaged.passUnretained(self).toOpaque(),&handler)
  }
- func register()->[String]{for r in refs{UnregisterEventHotKey(r)};refs=[];var errors:[String]=[]
+ func register()->[String]{for r in refs{UnregisterEventHotKey(r)};refs=[];registered=[];if let monitor{NSEvent.removeMonitor(monitor);self.monitor=nil};var errors:[String]=[]
   for id in 1...2 {let s=Shortcut.load(id);var ref:EventHotKeyRef?;let status=RegisterEventHotKey(s.key,s.modifiers,EventHotKeyID(signature:0x53434E54,id:UInt32(id)),GetApplicationEventTarget(),0,&ref)
-   if status == noErr,let ref=ref {refs.append(ref)} else {errors.append(LF("Zkratka %@ je již obsazená. Změň ji v nastavení.",s.display))}
-  };return errors
+   if status == noErr,let ref=ref {refs.append(ref);registered.insert(id)} else {errors.append(LF("Zkratka %@ je již obsazená. Změň ji v nastavení.",s.display))}
+  }
+  monitor=NSEvent.addLocalMonitorForEvents(matching:.keyDown){[weak self] event in
+   guard let self,NSApp.keyWindow is ScreenshotPanel else{return event}
+   if let button=NSApp.keyWindow?.firstResponder as? ShortcutButton,button.recording{return event}
+   guard let id=(1...2).first(where:{self.registered.contains($0) && Shortcut.load($0).matches(event)}) else{return event}
+   if !event.isARepeat{self.trigger(id)}
+   return nil
+  }
+  return errors
  }
- deinit{for r in refs{UnregisterEventHotKey(r)};if let h=handler{RemoveEventHandler(h)}}
+ deinit{if let monitor{NSEvent.removeMonitor(monitor)};for r in refs{UnregisterEventHotKey(r)};if let h=handler{RemoveEventHandler(h)}}
 }
 final class ShortcutButton:AppButton {
  var shortcut:Shortcut!;var onChange:((Shortcut)->Bool)?;var recording=false
@@ -251,12 +269,12 @@ final class Composer:NSObject,NSWindowDelegate {
 
 
  init(draft:Draft,root:URL){self.draft=draft;self.root=root;if self.draft.topic == nil{self.draft.topic=Topics.defaultTopic}}
- func show(){
+ func show(present:Bool=true){
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:800,height:586),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title="";window.titleVisibility = .hidden;window.isReleasedWhenClosed=false;window.delegate=self
   let view=installDesignRoot(window,headerHeight:108,showClose:false)
   titleField.frame=NSRect(x:26,y:500,width:692,height:44);titleField.isBordered=false;titleField.drawsBackground=false;titleField.font = .systemFont(ofSize:27,weight:.semibold);titleField.textColor = .labelColor;titleField.placeholderString=L("Nadpis poznámky");titleField.stringValue=draft.title ?? "";view.addSubview(titleField)
   let collapse=styledButton("",symbol:"arrow.down.right.and.arrow.up.left",role:.quiet,frame:NSRect(x:736,y:506,width:36,height:34),target:self,action:#selector(toggleCompact));collapse.toolTip=L("Sbalit poznámku a prohlédnout si okno pod ní");view.addSubview(collapse)
-  for (button,symbol,x,width,action) in [(topicLink,"folder",CGFloat(28),CGFloat(260),#selector(chooseConfiguration)),(sessionLink,"rectangle.stack",CGFloat(302),CGFloat(276),#selector(chooseSession))]{
+  for (button,symbol,x,width,action) in [(topicLink,"folder",CGFloat(28),CGFloat(400),#selector(chooseConfiguration))]{
    button.role = .quiet;button.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);button.imagePosition = .imageLeading;button.target=self;button.action=action;button.frame=NSRect(x:x,y:430,width:width,height:36);view.addSubview(button)
   }
   let add=addShotButton;add.title=L("Přidat výřez");add.image=NSImage(systemSymbolName:"plus.viewfinder",accessibilityDescription:nil);add.imagePosition = .imageLeading;add.target=self;add.action=#selector(addScreenshot)
@@ -273,10 +291,9 @@ final class Composer:NSObject,NSWindowDelegate {
   let expand=styledButton("",symbol:"line.3.horizontal",role:.quiet,frame:NSRect(x:702,y:4,width:34,height:32),target:self,action:#selector(expandComment));expand.toolTip=L("Otevřít Markdown editor");input.addSubview(expand)
   view.addSubview(DesignDivider(NSRect(x:28,y:78,width:744,height:1)))
   let cancel=styledButton(L("Zrušit"),role:.quiet,frame:NSRect(x:28,y:22,width:90,height:34),target:self,action:#selector(cancel));cancel.keyEquivalent="\u{1b}";view.addSubview(cancel)
-  let later=laterButton;later.title=L("Pokračovat v relaci");later.target=self;later.action=#selector(self.later);later.frame=NSRect(x:440,y:22,width:190,height:34);view.addSubview(later)
   let save=saveButton;save.title=L("Uložit");save.image=NSImage(systemSymbolName:"checkmark",accessibilityDescription:nil);save.imagePosition = .imageLeading;save.role = .primary;save.target=self;save.action=#selector(self.save);save.frame=NSRect(x:644,y:22,width:128,height:34);save.keyEquivalent="\r";view.addSubview(save)
-  reloadThumbnails();presentScreenshotPanel(window);window.makeFirstResponder(titleField)
-  if !isExportingDesign{
+  reloadThumbnails();if present{presentScreenshotPanel(window)};window.makeFirstResponder(titleField)
+  if present && !isExportingDesign{
    pointerScreenFrame=NSScreen.screens.first{$0.frame.contains(NSEvent.mouseLocation)}?.frame
    let timer=Timer(timeInterval:0.12,repeats:true){[weak self] _ in self?.followPointerScreen()}
    screenTimer=timer;RunLoop.main.add(timer,forMode:.default)
@@ -399,7 +416,7 @@ final class Composer:NSObject,NSWindowDelegate {
    if noteInHeader{button.addSubview(note)}else{button.addHoverAction(note)}
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
   }
-  if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Pokračovat v relaci zachová text pro další snímek."),NSRect(x:8,y:102,width:720,height:24)))}
+  if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Přidej výřez nebo snímek celé obrazovky."),NSRect(x:8,y:102,width:720,height:24)))}
   laterButton.isEnabled=true;saveButton.isEnabled = !draft.images.isEmpty;addShotButton.isEnabled=true;updatePreviousAvailability()
  }
  func snapshotFields(){guard window != nil else{return};window.makeFirstResponder(nil);draft.title=titleField.stringValue;draft.comment=comment.markdownText}

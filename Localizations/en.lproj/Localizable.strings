@@ -252,3 +252,4 @@
 "Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají." = "Older or unreadable queued items remain local and are not uploaded automatically.";
 "Připojení se nezdařilo. Zkus to později znovu." = "Could not connect. Try again later.";
 "Párování nelze zrušit. Můžeš zapomenout místní připojení; nedokončené párování vyprší." = "Pairing could not be cancelled. You can forget the local connection; unfinished pairing will expire.";
+"Žádný obrázek. Přidej výřez nebo snímek celé obrazovky." = "No image yet. Add a region or a full-screen screenshot.";

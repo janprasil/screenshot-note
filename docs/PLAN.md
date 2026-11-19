@@ -1,3 +1,32 @@
+# Lokální a cloudové složky + Spaces (19. 11. 2026)
+
+- Výchozí čistý main/origin/main `9fe8fcb5bf1969e5a7c60cb11fd4c31a995d9920`, PR4
+  standardně merged. Větev `feat/local-cloud-folders` realizuje Janovo rozdělení:
+  lokální export a cloudový katalog s místním přiřazením na každém Macu.
+  Potvrzené je i stahování existujících poznámek a nových poznámek jiných Maců.
+- [Implementace, exportní struktura a hranice](LOCAL-CLOUD-FOLDERS.md). Owner/origin
+  cache, optional místní cíl, kontrola kolizí včetně symlinků/missing suffix/case,
+  atomic publish, receipt dedupe a ochrana lokálních úprav. Katalog nepřenáší cesty.
+  Nové lokální volby nepoužívají staré cloud přepínače; původní uložené fronty
+  a frozen drafty se nepřepisují ani neposílají pod jiným účtem.
+- Spaces: floating panely nově canJoinAllSpaces + fullScreenAuxiliary +
+  canJoinAllApplications dle instalovaných AppKit SDK headers. Offscreen aserce
+  passed; skutečné přepínání Mission Control/full-screen čeká na installed smoke.
+- Finální build 4yenGS, podpis a celá defaultní neinteraktivní regrese passed. Nativní
+  původní REST wire test s cEMoxQ také passed. Izolovaný actual Next/Auth/DB/Storage1.95
+  průchod s CVPZRA a následně samostatným web worktree/cEMoxQ passed, vlastní
+  fixture/role/stack/volumes uklizené, původní containerIDs zachované.
+  Async cancellation používá injektovaný transport; actual native→Next download
+  je skutečný. Původní cloud1.96.4 acceptance tím není nahrazený.
+- cs/dark lokální a en/light cloudové nastavení vizuálně ověřené v
+  `/tmp/sn-folders-nov19`. Dvě časné review P2 opravené: stale mapping po await
+  a dvojí lokální kopie. Finální nezávislé review bez dalších P1/P2.
+- Cloudové schéma/API jsou ve vlastním web worktree `feat/cloud-folder-sync`,
+  protože původní web souběžně upravuje jiné vlákno. Nezahrnovat/nemazat jeho WIP.
+  Nový cloud flag zůstává false, cílová migrace/aktivace ani instalace neproběhly.
+  Stávající Mac běží; výměna čeká na bezpečné ukončení uživatelem. Následuje
+  commit/PR/checks/standard merge. Pokračovací prompt až po uzavření tématu.
+
 # Aktuálně — snímání a cloudové členění (19. 11. 2026)
 
 - Výchozí main/origin/main `9c9e402d4d6532bbdfd7bc12d70a0ed9e72c2793`.

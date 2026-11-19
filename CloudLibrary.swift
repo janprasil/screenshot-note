@@ -90,8 +90,8 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                  newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
  func request(_ endpoint: CloudEndpoint, _ path: String, method: String = "GET", token: String? = nil,
-              body: Data? = nil, file: URL? = nil) async throws -> Data {
-  guard path.hasPrefix("/api/v1/"), !path.contains("?"), !path.contains("#") else { throw CloudFailure.invalid }
+              body: Data? = nil, file: URL? = nil, limit:Int=524288) async throws -> Data {
+  guard path.hasPrefix("/api/v1/"), !path.contains("#"), !path.contains(".."), (1...52428800).contains(limit) else { throw CloudFailure.invalid }
   var req = URLRequest(url: endpoint.path(path)); req.httpMethod = method; req.timeoutInterval = file == nil ? 15 : 70
   if let token { guard CloudConnection.validToken(token) else { throw CloudFailure.invalid }; req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
   if let file {
@@ -102,7 +102,7 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
   let (stream, response) = try await session.bytes(for: req)
   guard let http = response as? HTTPURLResponse else { throw CloudFailure.invalid }
   var data = Data()
-  for try await byte in stream { if data.count >= 524288 { throw CloudFailure.invalid }; data.append(byte) }
+  for try await byte in stream { if data.count >= limit { throw CloudFailure.invalid }; data.append(byte) }
   guard (200..<300).contains(http.statusCode) else {
    let retry = min(3600, max(0, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 0))
    let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap { $0["error"] as? [String: Any] }?["code"] as? String
@@ -132,6 +132,7 @@ private struct CloudOwner: Decodable { let id: UUID; let email: String? }
 struct CloudManifest: Codable {
  struct Image: Codable { let index: Int; let bytes: Int; let sha256: String }
  let title: String; let comment: String; let configuration: String; let template: String; let captions: [String]; let images: [Image]
+ var folder_id:UUID? = nil
 }
 extension CloudManifest {
  var valid: Bool {
@@ -304,7 +305,11 @@ final class CloudLibrary {
    try data.write(to: staging.appendingPathComponent("\(index + 1).png"), options: .atomic)
    images.append(.init(index:index + 1,bytes:data.count,sha256:SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined()))
   }
-  let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images)
+  if let folder=draft.topic?.cloudFolderID {
+   guard draft.topic?.cloudOwnerID == owner,draft.topic?.cloudOrigin == c.endpoint,
+         CloudFolders.shared.topics.contains(where:{$0.cloudFolderID == folder}) else {throw CloudFailure.invalid}
+  }
+  let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID)
   let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest)
   try JSONEncoder().encode(job).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
   try fm.moveItem(at:staging,to:queue.appendingPathComponent(id.uuidString.lowercased(),isDirectory:true)); didChange?()

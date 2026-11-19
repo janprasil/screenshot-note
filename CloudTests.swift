@@ -18,6 +18,7 @@ private func cloudFixturePNG() -> Data {
  return bitmap.representation(using:.png,properties:[:])!
 }
 func cloudUnitTests() throws {
+ try cloudFolderUnitTests()
  assert(CloudEndpoint("https://screenshotnote.com") != nil)
  for url in ["https://user:secret@example.test","https://example.test/a","https://example.test/?token=secret","http://remote.test","file:///tmp","https://example.test/#secret"] { assert(CloudEndpoint(url) == nil) }
  assert(CloudEndpoint("http://127.0.0.1:4567") != nil)
@@ -56,6 +57,96 @@ func cloudUnitTests() throws {
  assert(lib.connection != nil && lib.pendingCount == 1)
  vault.fail=false;try lib.forgetConnection();assert(lib.connection == nil)
  print("PASS: native endpoint/token validation, RGB8 PNG normalization, persistent owner-scoped outbox, legacy preservation and Keychain failure atomicity")
+}
+
+func cloudFolderUnitTests()throws {
+ let root=fm.temporaryDirectory.appendingPathComponent("sn-folders-"+UUID().uuidString)
+ try fm.createDirectory(at:root,withIntermediateDirectories:true);defer{try? fm.removeItem(at:root)}
+ let target=root.appendingPathComponent("notes"),alias=root.appendingPathComponent("alias")
+ try fm.createDirectory(at:target,withIntermediateDirectories:true);try fm.createSymbolicLink(at:alias,withDestinationURL:target)
+ let first=Topic(id:"a",name:"Local",detail:"",folder:target.path,combined:false,combinedFile:"Note.md")
+ var second=first;second.id="b";second.name="Cloud";second.uploadToCloud=true
+ for path in [target.path,target.path+"/../notes/",alias.path] {
+  second.folder=path
+  do{try Topics.validateDestinations([first,second]);assertionFailure("Duplicate folder accepted")}catch{}
+ }
+ let missingAlias=try Topics.checkedDestination(alias.appendingPathComponent("new").path),missingTarget=try Topics.checkedDestination(target.appendingPathComponent("new").path)
+ assert(Topics.sameDestination(missingAlias,missingTarget))
+ second.folder=target.appendingPathComponent("nested").path;try Topics.validateDestinations([first,second])
+ second.cloudOnly=true;second.folder="";try Topics.validateDestinations([first,second])
+ let projected=Topics.localProjection(second);assert(!projected.savesToCloud && projected.savesLocally && second.cloudOnly==true)
+ let broken=root.appendingPathComponent("broken");try fm.createSymbolicLink(at:broken,withDestinationURL:root.appendingPathComponent("absent"))
+ do{_ = try Topics.checkedDestination(broken.path);assertionFailure("Broken alias accepted")}catch{}
+ do{_ = try Topics.checkedDestination("relative/path");assertionFailure("Relative folder accepted")}catch{}
+ let c=cloudFixtureConnection(),owner=c.ownerID!,origin=c.endpoint
+ let store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[first]});store.activate(c)
+ let a=CloudFolderRecord(id:UUID(),name:"Research",owner:owner,origin:origin)
+ let b=CloudFolderRecord(id:UUID(),name:"Work",owner:owner,origin:origin)
+ try store.accept([a,b]);assert(store.topics.count==2 && store.topics.allSatisfy{!$0.savesLocally && $0.savesToCloud})
+ do{try store.setFolder(store.topics[0],path:alias.path);assertionFailure("Local/cloud collision accepted")}catch{}
+ let download=root.appendingPathComponent("download").path
+ try store.setFolder(store.topics[0],path:download)
+ do{try store.setFolder(store.topics[1],path:download);assertionFailure("Cloud/cloud collision accepted")}catch{}
+ var renamed=a;renamed.name="Renamed";try store.accept([renamed,b])
+ assert(store.topics[0].folder==download && store.topics[0].name=="Renamed")
+ let restored=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[first]});restored.activate(c);assert(restored.topics==store.topics)
+ let other=cloudFixtureConnection();store.activate(other);assert(store.topics.isEmpty)
+ let foreign=CloudFolderRecord(id:UUID(),name:"Other account",owner:other.ownerID!,origin:other.endpoint)
+ try store.accept([foreign]);do{try store.setFolder(store.topics[0],path:download);assertionFailure("Inactive account collision accepted")}catch{}
+ store.activate(nil);assert(store.topics.isEmpty && store.allTopics.count==3)
+ print("PASS: local/cloud destination isolation, symlinks, missing descendants, stable cloud IDs, rename persistence and account-scoped catalog")
+}
+
+@MainActor func cloudFolderSyncTests() async throws {
+ let root=fm.temporaryDirectory.appendingPathComponent("sn-folder-sync-"+UUID().uuidString)
+ try fm.createDirectory(at:root,withIntermediateDirectories:true);defer{try? fm.removeItem(at:root)}
+ let c=cloudFixtureConnection(),folder=UUID(),note=UUID(),png=cloudFixturePNG()
+ for mode in ["disconnect","mapping"] {
+  var connection:CloudConnection?=c;var store:CloudFolders!
+  var invalidate=false
+  store=CloudFolders(file:root.appendingPathComponent(mode+".json"),connection:{connection},localTopics:{[]},request:{_,path,_,_ in
+   if path.hasSuffix("/images/1") {
+    await Task.yield()
+    if invalidate {if mode=="disconnect"{connection=nil}else{try store.setFolder(store.topics[0],path:root.appendingPathComponent("changed").path)}}
+    return png
+   }
+   let data:Any
+   if path=="/api/v1/folders"{data=["data":[["id":folder.uuidString,"name":"Cloud","revision":"1"]]]}
+   else if path.contains("?"){data=["data":[["id":note.uuidString,"deleting":false]],"pagination":["has_more":false]]}
+   else{data=["data":["id":note.uuidString,"title":"Remote note","comment":"Text","template":defaultMarkdownTemplate,"captions":["Caption"],"images":[["index":1,"path":"/api/v1/sessions/"+note.uuidString.lowercased()+"/images/1"]]]]}
+   return try JSONSerialization.data(withJSONObject:data)
+  })
+  await store.refresh(c);assert(store.topics.count==1)
+  let target=root.appendingPathComponent(mode)
+  try store.setFolder(store.topics[0],path:target.path);invalidate=true
+  await store.refresh(c)
+  assert(store.lastError != nil)
+  let directories=(try? fm.contentsOfDirectory(atPath:target.path)) ?? []
+  assert(directories.isEmpty)
+ }
+ print("PASS: asynchronous download aborts after disconnect or a changed local mapping before publishing files")
+
+ let env=ProcessInfo.processInfo.environment
+ guard let raw=env["SCREENSHOT_NOTE_TEST_URL"],let endpoint=CloudEndpoint(raw),["127.0.0.1","localhost"].contains(endpoint.url.host ?? ""),
+       let token=env["SCREENSHOT_NOTE_TEST_TOKEN"],CloudConnection.validToken(token),let owner=env["SCREENSHOT_NOTE_TEST_OWNER"].flatMap(UUID.init(uuidString:)) else{return}
+ let id=UUID()
+ let live=CloudConnection(endpoint:raw,token:token,id:id,comparisonCode:"AABBCCDD",verificationURI:raw+"/pair-device/"+id.uuidString.lowercased(),expiresAt:"2099-01-01T00:00:00Z",ownerID:owner)
+ let store=CloudFolders(file:root.appendingPathComponent("live.json"),connection:{live},localTopics:{[]})
+ await store.refresh(live);assert(store.lastError==nil && !store.topics.isEmpty)
+ let target=root.appendingPathComponent("downloaded")
+ try store.setFolder(store.topics[0],path:target.path)
+ await store.refresh(live);assert(store.lastError==nil)
+ let directories=try fm.contentsOfDirectory(at:target,includingPropertiesForKeys:nil);assert(directories.count==1)
+ let markdown=directories[0].appendingPathComponent("Note.md"),image=directories[0].appendingPathComponent("assets/1.png")
+ assert(fm.fileExists(atPath:image.path));let original=try Data(contentsOf:markdown);assert(String(decoding:original,as:UTF8.self).contains("Remote cloud fixture"))
+ await store.refresh(live);assert(store.lastError==nil && (try? fm.contentsOfDirectory(atPath:target.path))?.count==1)
+ let edited=original+Data("\nLocal edit".utf8);try edited.write(to:markdown)
+ await store.refresh(live);assert((try? Data(contentsOf:markdown))==edited)
+ try fm.removeItem(at:image);await store.refresh(live);assert(store.lastError==nil)
+ assert((try? Data(contentsOf:markdown))==edited)
+ assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
+ await store.refresh(live);assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
+ print("PASS: native client downloads real Next cloud folder metadata/PNG/Markdown, deduplicates refreshes and preserves edited files")
 }
 
 @MainActor func cloudIntegrationTest() async throws {

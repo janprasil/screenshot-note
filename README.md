@@ -16,7 +16,7 @@ Capture an area or your screen, annotate images, add a title and a comment, and 
 - Per-image Markdown notes, displayed underneath each exported image.
 - Annotations: selection, moving and deleting objects, arrows, shapes, freehand drawing, text styling, colors and crop.
 - A single-line comment field with a larger editor that styles Markdown as you type.
-- Named configurations with their own destination folder, export mode and Markdown template.
+- Separate local and cloud folders; local folders have their own export mode and Markdown template.
 - Configuration selection and a separate menu action for reopening saved sessions.
 - Separate notes per session or a shared Markdown file.
 - Add screenshots to previously exported sessions, including sections of a shared note.
@@ -230,7 +230,17 @@ project URL or account password. The production build connects only to screensho
 cloud pairing/uploads still require a separately activated server deployment.
 Local notes work without an account.
 
-Under Settings → Manage configurations, choose local storage, cloud, or both.
+Under Settings → Manage folders, local folders export on this Mac. Cloud folders
+load from your connected account; optionally assign a different local download
+directory on each Mac. Directories cannot be shared by two local/cloud entries.
+Existing notes and notes added by other Macs download automatically into
+`<session UUID>/Note.md` and `assets/`. Local edits are preserved and are not
+uploaded back. See [folder synchronization](docs/LOCAL-CLOUD-FOLDERS.md).
+
+Cloud folder creation/rename requires the corresponding server migration and
+feature activation; the source change does not activate the cloud backend.
+Cloud notes first enter the durable outbox and materialize in the local download
+directory after their upload is confirmed.
 Cloud copies are converted to sRGB RGB/RGBA8 PNG, with at most 30 images and
 100 MB per transfer; local-only sessions have no fixed image count limit.
 Interrupted transfers remain in the owner-bound local outbox. Retry preserves

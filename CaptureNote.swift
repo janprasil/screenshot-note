@@ -89,6 +89,7 @@ func clearDraft(_ draft:Draft,root:URL){
 func finishSession(_ draft:Draft,root:URL)throws {
  let topic=draft.topic ?? Topics.defaultTopic
  let folder=draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? topic.destination
+ try Topics.validateDestination(topic,folder:folder)
  try finish(draft,root:root,dest:folder,combinedFile:topic.combined ? topic.combinedFile:nil,previous:draft.previous)
 }
 

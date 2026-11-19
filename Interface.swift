@@ -15,7 +15,7 @@ final class ScreenshotPanel:NSPanel {
 }
 var capturePresentationScreen:NSScreen?
 func prepareScreenshotPanel(_ window:NSWindow) {
- window.collectionBehavior = [.moveToActiveSpace,.fullScreenAuxiliary]
+ window.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary,.canJoinAllApplications]
  window.level = .floating
  if let panel=window as? NSPanel {panel.hidesOnDeactivate=false;panel.isFloatingPanel=true;panel.becomesKeyOnlyIfNeeded=false}
 }
@@ -152,7 +152,7 @@ final class SettingsController:NSObject {
   if let icon=NSImage(contentsOfFile:Bundle.main.path(forResource:"AppIcon",ofType:"icns") ?? ""){let logo=NSImageView(frame:NSRect(x:28,y:346,width:46,height:46));logo.image=icon;view.addSubview(logo)}
   view.addSubview(designLabel("Screenshot Note",NSRect(x:88,y:366,width:500,height:31),size:24,weight:.semibold))
   view.addSubview(designLabel(L("Nastavení")+" · "+(Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "4.1"),NSRect(x:88,y:342,width:500,height:22),size:12,color:AppPalette.secondary))
-  for (symbol,title,detail,y) in [("folder",L("Konfigurace"),L("Složky a způsob ukládání poznámek."),CGFloat(252)),("keyboard",L("Klávesové zkratky"),L("Rychlý přístup ke snímání obrazovky."),CGFloat(170)),("power",L("Spuštění po přihlášení"),L("Ikona a zkratky budou připravené po startu."),CGFloat(88))]{
+  for (symbol,title,detail,y) in [("folder",L("Složky"),L("Složky a způsob ukládání poznámek."),CGFloat(252)),("keyboard",L("Klávesové zkratky"),L("Rychlý přístup ke snímání obrazovky."),CGFloat(170)),("power",L("Spuštění po přihlášení"),L("Ikona a zkratky budou připravené po startu."),CGFloat(88))]{
    let badge=DesignSurface(frame:NSRect(x:28,y:y+4,width:38,height:38),fill:AppPalette.accent.withAlphaComponent(0.1),radius:11);view.addSubview(badge);let image=NSImageView(frame:NSRect(x:9,y:9,width:20,height:20));image.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);image.contentTintColor=AppPalette.accent;badge.addSubview(image)
    view.addSubview(designLabel(title,NSRect(x:78,y:y+24,width:325,height:23),size:14,weight:.medium))
    view.addSubview(designLabel(detail,NSRect(x:78,y:y+2,width:330,height:20),size:11,color:AppPalette.secondary))

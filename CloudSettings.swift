@@ -58,6 +58,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   var text=library.lastError ?? (library.connecting ? L("Ověřuji připojení…") : c == nil ? L("Lokální poznámky nevyžadují účet. Cloud se aktivuje samostatně na webu.") : c?.ownerID == nil ? L("Čekám na potvrzení párování na webu.") : (library.signedInEmail ?? "") + " · " + LF("Čekající relace: %ld",library.pendingCount))
   if c?.ownerID != nil { text += "\n" + L("Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu.") }
   if library.legacyPendingCount > 0 { text += "\n" + L("Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají.") }
+  if let error=CloudFolders.shared.lastError {text += "\n"+error}
   status.stringValue=text
  }
  @objc private func connect() {

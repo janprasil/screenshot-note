@@ -6,8 +6,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
  let cloudSettings=CloudSettings()
  var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
+ private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
+  CloudFolders.shared.activate(CloudLibrary.shared.connection)
+  folderTimer=Timer.scheduledTimer(withTimeInterval:5,repeats:true){[weak self] _ in self?.refreshCloudFolders()}
+  refreshCloudFolders()
   settings=SettingsController(hotkeys:hotkeys)
   item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength);item.button?.image=NSImage(systemSymbolName:"camera.viewfinder",accessibilityDescription:"Screenshot Note")
   let menu=NSMenu();menu.delegate=self
@@ -35,6 +39,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   else if CommandLine.arguments.contains("--capture"){DispatchQueue.main.asyncAfter(deadline:.now()+0.3){self.capture(full:CommandLine.arguments.contains("--fullscreen"))}}
  }
  @objc func external(_ notification:Notification){capture(full:notification.object as? String == "full")}
+ func refreshCloudFolders(){
+  CloudFolders.shared.activate(CloudLibrary.shared.connection)
+  guard Date()>=nextFolderRefresh,!CloudFolders.shared.syncing else{return};nextFolderRefresh=Date().addingTimeInterval(60)
+  Task{@MainActor in
+   if CloudLibrary.shared.pendingCount>0{await CloudLibrary.shared.sync()}
+   await CloudFolders.shared.refresh(CloudLibrary.shared.connection)
+  }
+ }
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
  @objc func openCloudSettings(){cloudSettings.show()}
  @objc func preferences(){settings.show()}
@@ -156,7 +168,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}
    let upload = result == 2 && draft.topic?.savesToCloud == true
-   let cloudOnly = upload && draft.topic?.savesLocally == false && draft.previous == nil
+   let cloudOnly = upload && (draft.topic?.cloudFolderID != nil || draft.topic?.savesLocally == false) && draft.previous == nil
    do {
     if upload { try CloudLibrary.shared.requireAccount() }
     if result != 0 {
@@ -179,7 +191,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    if upload {
     do {
      if !cloudOnly { try CloudLibrary.shared.enqueue(draft,root:root) }
-     Task { @MainActor in await CloudLibrary.shared.sync() }
+     Task { @MainActor in await CloudLibrary.shared.sync();await CloudFolders.shared.refresh(CloudLibrary.shared.connection) }
     } catch { showError(L("Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit.")+" "+error.localizedDescription) }
    }
    try? fm.removeItem(at:root);self.session=nil;self.composer=nil
@@ -195,6 +207,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 
 if CommandLine.arguments.contains("--language-check"){print(AppLanguage.current);exit(0)}
+
+if CommandLine.arguments.contains("--folder-sync-self-test") {
+ _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
+ Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed.\n",stderr);exit(1)}}
+ dispatchMain()
+}
 
 if CommandLine.arguments.contains("--cloud-self-test") {
  _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
@@ -489,6 +507,10 @@ if CommandLine.arguments.contains("--self-test") {
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")
  print("PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels")
  let panel=ScreenshotPanel(contentRect:NSRect(x:50,y:50,width:740,height:450),styleMask:[.titled,.nonactivatingPanel],backing:.buffered,defer:false)
+ prepareScreenshotPanel(panel)
+ assert(panel.collectionBehavior.contains(.canJoinAllSpaces) && panel.collectionBehavior.contains(.fullScreenAuxiliary))
+ assert(panel.collectionBehavior.contains(.canJoinAllApplications))
+ assert(!panel.collectionBehavior.contains(.moveToActiveSpace) && panel.level == .floating && !panel.hidesOnDeactivate)
  assert(!panel.styleMask.contains(.titled) && panel.frame.size == panel.contentView!.bounds.size && panel.isMovableByWindowBackground)
  // Check the live AppKit field editor as well as the inactive text layout.
  for (height,size) in [(24.0,13.0),(42.0,27.0)] {

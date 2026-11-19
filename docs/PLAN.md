@@ -1,5 +1,17 @@
 # Lokální a cloudové složky + Spaces (19. 11. 2026)
 
+- PR5 standardně merged; main/origin/main před lokální výměnou
+  `cb8646bf0fa83c914466b563712a08fd84c49422`. Jan potvrdil ukončení aplikace;
+  absence procesu znovu ověřená i bezprostředně před výměnou. Instalovaný local
+  build 4yenGS v `~/Applications/Screenshot Note.app`: podpis, bundle ID,
+  localhost5173 origin a shoda SHA256 binárky s ověřeným buildem passed.
+  Původní bundle i ZIP jsou v `~/Library/Application Support/Screenshot Note/App Updates/20261119-123045`;
+  podpis a původní hash zachované kopie ověřené.
+  Nový běžící proces z instalované cesty a localhost web HTTP200 potvrzené.
+  Keychain, drafty ani nastavení se instalační operací neměnily. Skutečný
+  Spaces/full-screen smoke zůstává uživatelská akceptace; cílová cloudová
+  migrace a aktivace složek/uploadu touto výměnou neproběhly.
+
 - Výchozí čistý main/origin/main `9fe8fcb5bf1969e5a7c60cb11fd4c31a995d9920`, PR4
   standardně merged. Větev `feat/local-cloud-folders` realizuje Janovo rozdělení:
   lokální export a cloudový katalog s místním přiřazením na každém Macu.
@@ -23,9 +35,9 @@
   a dvojí lokální kopie. Finální nezávislé review bez dalších P1/P2.
 - Cloudové schéma/API jsou ve vlastním web worktree `feat/cloud-folder-sync`,
   protože původní web souběžně upravuje jiné vlákno. Nezahrnovat/nemazat jeho WIP.
-  Nový cloud flag zůstává false, cílová migrace/aktivace ani instalace neproběhly.
-  Stávající Mac běží; výměna čeká na bezpečné ukončení uživatelem. Následuje
-  commit/PR/checks/standard merge. Pokračovací prompt až po uzavření tématu.
+  Nový cloud flag zůstává false, cílová migrace/aktivace neproběhly.
+  Zdrojové PR5 a web PR41 standardně merged; následná lokální výměna je doložená
+  výše. Pokračovací prompt až po uzavření tématu.
 
 # Aktuálně — snímání a cloudové členění (19. 11. 2026)
 

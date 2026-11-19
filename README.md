@@ -50,7 +50,7 @@ Settings → Manage configurations → Markdown template opens the template edit
 {text}
 ```
 
-Exported sessions include invisible HTML boundaries and metadata for reopening custom layouts. Keep those comments when editing notes in Obsidian. Changes to text inside the original layout can be reloaded; removing the markers or changing the template structure may prevent recognition. Legacy notes using the earlier fixed headings remain discoverable. Switching sessions asks before transferring the current screenshots; the file is updated only when saving.
+Exported Markdown contains no hidden markers. The app remembers its sessions in an index in Application Support (plus an extended attribute on the file) and finds edited sessions by heading and image links. Changes to text inside the original layout can be reloaded; changing the template structure may prevent recognition. Older notes with `<!-- screenshot-note -->` comments stay readable; unmodified ones lose the comment once. Legacy notes using the earlier fixed headings remain discoverable. Switching sessions asks before transferring the current screenshots; the file is updated only when saving.
 
 ## Build
 
@@ -234,7 +234,7 @@ Under Settings → Manage folders, local folders export on this Mac. Cloud folde
 load from your connected account; optionally assign a different local download
 directory on each Mac. Directories cannot be shared by two local/cloud entries.
 Existing notes and notes added by other Macs download automatically into
-`<session UUID>/Note.md` and `assets/`. Local edits are preserved and are not
+`YYYY-MM-DD Title/YYYY-MM-DD Title.md` and `assets/`. Sessions trashed on the web move to `.trash/`. Local edits are preserved and are not
 uploaded back. See [folder synchronization](docs/LOCAL-CLOUD-FOLDERS.md).
 
 Cloud folder creation/rename requires the corresponding server migration and

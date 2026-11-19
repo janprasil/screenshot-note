@@ -10,8 +10,18 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
+  CloudLibrary.shared.onEditConflict={id,fields in CloudFolders.shared.keepLocalEdit(id,fields)}
+  TrashNotifier.shared.install()
+  // Plné úložiště ohlásíme jednou za hodinu, ne při každém dalším pokusu.
+  var quotaShown:(String,Date)?
+  CloudLibrary.shared.onQuotaFailure={message in
+   if let shown=quotaShown,shown.0==message,Date().timeIntervalSince(shown.1)<3600{return}
+   quotaShown=(message,Date());DispatchQueue.main.async{showError(message)}
+  }
   folderTimer=Timer.scheduledTimer(withTimeInterval:5,repeats:true){[weak self] _ in self?.refreshCloudFolders()}
   refreshCloudFolders()
+  // Starší místní poznámky jednou přijdou o skryté značky.
+  for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
   settings=SettingsController(hotkeys:hotkeys)
   item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength);item.button?.image=NSImage(systemSymbolName:"camera.viewfinder",accessibilityDescription:"Screenshot Note")
   let menu=NSMenu();menu.delegate=self
@@ -44,7 +54,22 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   guard Date()>=nextFolderRefresh,!CloudFolders.shared.syncing else{return};nextFolderRefresh=Date().addingTimeInterval(60)
   Task{@MainActor in
    if CloudLibrary.shared.pendingCount>0{await CloudLibrary.shared.sync()}
+   await FolderTransfers.shared.resume()
    await CloudFolders.shared.refresh(CloudLibrary.shared.connection)
+   await TemplateDefaults.shared.refresh()
+   if NSApp.modalWindow==nil{await FolderDialogs.resolveHeld()}
+   if NSApp.modalWindow==nil{await FolderDialogs.confirmDeletes()}
+   if self.composer==nil,NSApp.modalWindow==nil{FolderDialogs.resolveDeleted()}
+   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.offerRepair()}
+   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.mapUnmapped()}
+   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil,let c=CloudLibrary.shared.connection,let owner=c.ownerID,!Topics.local.isEmpty {
+    let key="folder-transfer-offer:"+sessionFingerprint(Data((c.endpoint+owner.uuidString).utf8))
+    if !UserDefaults.standard.bool(forKey:key) {
+     let alert=NSAlert();alert.messageText=L("Přesunout lokální složky do cloudu?");alert.informativeText=L("Můžeš přesunout všechny lokální složky tohoto Macu. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované.");alert.addButton(withTitle:L("Přesunout všechny"));alert.addButton(withTitle:L("Teď ne"))
+     let choice=alert.runModal();UserDefaults.standard.set(true,forKey:key)
+     if choice == .alertFirstButtonReturn{await FolderDialogs.move(Topics.local)}
+    }
+   }
   }
  }
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
@@ -78,7 +103,16 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  @objc func quit(){if composer != nil || capturing{showError(L("Nejprve ulož nebo zavři rozpracované okno."));return};NSApp.terminate(nil)}
  func workingCopy() throws -> (Draft,URL){
   var draft=try readDraft(draftRoot)
-  if draft.topic == nil {draft.topic=Topics.defaultTopic}
+  // Rozpracovaná relace navázaná na smazanou nebo přesunutou uloženou relaci.
+  switch resolveDraftTarget(draft) {
+  case .current(let resolved):if resolved.previous != draft.previous || resolved.topic != draft.topic{draft=resolved;try stage(draft,root:draftRoot)}
+  case .stale(let title):
+   NSApp.activate(ignoringOtherApps:true)
+   let alert=NSAlert();alert.messageText=LF("Rozpracovaná relace „%@“ už neexistuje (byla smazána). Co s rozpracovanými změnami?",title)
+   alert.addButton(withTitle:L("Uložit jako novou relaci"));alert.addButton(withTitle:L("Zahodit"))
+   draft=try applyStaleChoice(draft,keep:alert.runModal() == .alertFirstButtonReturn,root:draftRoot)
+  }
+  if draft.topic == nil {draft.topic=Topics.initialTopic}
   let root=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-"+UUID().uuidString)
   try fm.createDirectory(at:root,withIntermediateDirectories:true)
   do {for image in draft.images {try fm.copyItem(at:draftRoot.appendingPathComponent(image),to:root.appendingPathComponent(image));try copyAnnotationSidecar(from:draftRoot.appendingPathComponent(image),to:root.appendingPathComponent(image))}}catch{try? fm.removeItem(at:root);throw error}
@@ -97,7 +131,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  func chooseSavedSession(root:URL)throws->Draft?{
   browsingSavedSessions=true;defer{browsingSavedSessions=false}
   var saved:[(Topic,PreviousSession)]=[]
-  for configuration in Topics.all where configuration.savesLocally{saved += try previousSessions(in:configuration.destination).map{(configuration,$0)}}
+  for configuration in Topics.all where configuration.savesLocally{saved += try previousSessions(for:configuration).map{(configuration,$0)}}
   saved.sort{$0.1.modified>$1.1.modified}
   var rows=[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku."))]
   rows += saved.map{configuration,session in
@@ -105,7 +139,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    return SessionChoice(title:session.title,detail:configuration.name+" · "+session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})
   }
   guard let index=SessionChoiceDialog().run(title:L("Vybrat relaci"),choices:rows) else{return nil}
-  if index==0{return Draft(images:[],comment:"",topic:Topics.defaultTopic)}
+  if index==0{return Draft(images:[],comment:"",topic:Topics.initialTopic)}
   return try workingDraft(from:saved[index-1].1,topic:saved[index-1].0,root:root)
  }
 
@@ -168,7 +202,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}
    let upload = result == 2 && draft.topic?.savesToCloud == true
-   let cloudOnly = upload && (draft.topic?.cloudFolderID != nil || draft.topic?.savesLocally == false) && draft.previous == nil
+   let cloudFolder = draft.topic?.cloudFolderID != nil
+   // Cloudová složka se zapisuje jen přes stahování, i při doplnění uložené relace.
+   let cloudOnly = upload && (cloudFolder || (draft.topic?.savesLocally == false && draft.previous == nil))
    do {
     if upload { try CloudLibrary.shared.requireAccount() }
     if result != 0 {
@@ -176,7 +212,18 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
      if result == 2 {
       let stored=try readDraft(draftRoot)
       if cloudOnly {
-       try CloudLibrary.shared.enqueue(stored,root:draftRoot)
+       if cloudFolder,let previous=stored.previous,let topic=stored.topic {
+        guard let (id,shas)=CloudFolders.shared.serverImages(for:previous,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
+        if stored.images.count==shas.count {
+         // Bez nových snímků jde jen o úpravu textu (PATCH s revizí).
+         guard let (original,revision)=CloudFolders.shared.editBase(id,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
+         try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision)
+        } else {
+         // Doplnění posílá aktuální šablonu složky, server ji zapíše z manifestu.
+         var current=stored;if let folder=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==topic.cloudFolderID}){current.topic?.markdownTemplate=folder.markdownTemplate}
+         try CloudLibrary.shared.enqueue(current,root:draftRoot,sessionID:id,base:shas)
+        }
+       } else {try CloudLibrary.shared.enqueue(stored,root:draftRoot)}
        clearDraft(stored,root:draftRoot)
       } else {
        try finishSession(stored,root:draftRoot)
@@ -188,6 +235,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     view.window.makeKeyAndOrderFront(nil)
     return
    }
+   Topics.rememberLast(draft.topic)
    if upload {
     do {
      if !cloudOnly { try CloudLibrary.shared.enqueue(draft,root:root) }
@@ -208,9 +256,20 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 
 if CommandLine.arguments.contains("--language-check"){print(AppLanguage.current);exit(0)}
 
+// Testy a náhledy pracují s vlastním dočasným indexem.
+if CommandLine.arguments.contains(where:{($0.hasSuffix("-test") && $0 != "--preview-test") || $0=="--design-export"}){
+ SessionIndex.shared=SessionIndex(file:fm.temporaryDirectory.appendingPathComponent("sn-index-"+UUID().uuidString+".json"))
+ TemplateDefaults.shared=TemplateDefaults(store:UserDefaults(suiteName:"sn-test-"+UUID().uuidString)!,connection:{nil})
+}
 if CommandLine.arguments.contains("--folder-sync-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
  Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed.\n",stderr);exit(1)}}
+ dispatchMain()
+}
+
+if CommandLine.arguments.contains("--folder-transfer-self-test") {
+ _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
+ Task{@MainActor in do{try await folderTransferTests();exit(0)}catch{fputs("Folder transfer test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 
@@ -233,7 +292,7 @@ if CommandLine.arguments.contains("--self-test") {
  for n in 1...5{let name="\(n).png";try Data([UInt8(n)]).write(to:root.appendingPathComponent(name));draft.images.append(name);try stage(draft,root:root);let loaded=try readDraft(root);assert(loaded.images.count == n && loaded.title == "Můj nadpis")}
  let dest=root.appendingPathComponent("output");try finish(draft,root:root,dest:dest)
  let md=try fm.contentsOfDirectory(at:dest,includingPropertiesForKeys:nil).first{$0.pathExtension == "md"}!
- let content=try String(contentsOf:md,encoding:.utf8);assert(content.contains("# Můj nadpis\n\n# Screenshots\n"));assert(content.contains("# Description\n\nČeský komentář"));assert(content.components(separatedBy:"![[assets/").count == 6)
+ let content=try String(contentsOf:md,encoding:.utf8);assert(content.contains("# Můj nadpis\n\n# Screenshots\n"));assert(content.contains("# Description\n\nČeský komentář"));assert(content.components(separatedBy:"](<assets/").count == 6 && content.contains("![Screenshot 1](<assets/") && !content.contains("![[assets/"))
  let empty=try readDraft(root);assert(empty.images.isEmpty)
  // Old drafts without a title remain readable.
  try Data("{\"images\":[],\"comment\":\"původní\"}".utf8).write(to:root.appendingPathComponent("draft.json"));let old=try readDraft(root);assert(old.title == nil)
@@ -435,11 +494,12 @@ if CommandLine.arguments.contains("--self-test") {
   for i in 0..<count {let filename="source_\(i).png";try Data([UInt8(count)]).write(to:namingRoot.appendingPathComponent(filename));names.append(filename)}
   try finish(Draft(images:names,comment:"Test",title:"Český nadpis"),root:namingRoot,dest:namingDest)
  }
- for filename in ["Cesky nadpis.md","Cesky nadpis_2.md","Cesky nadpis_3.md","Cesky nadpis_4.md"] {assert(fm.fileExists(atPath:namingDest.appendingPathComponent(filename).path))}
- let expectedImages=["Cesky nadpis.png","Cesky nadpis_2.png","Cesky nadpis_1.png","Cesky nadpis_2_2.png","Cesky nadpis_1_2.png","Cesky nadpis_2_3.png"]
+ let readable=readableSessionName("Český nadpis",created:Date())
+ for filename in [readable+".md",readable+" 2.md",readable+" 3.md",readable+" 4.md"] {assert(fm.fileExists(atPath:namingDest.appendingPathComponent(filename).path))}
+ let expectedImages=[readable+"-1.png",readable+" 2-1.png",readable+" 3-1.png",readable+" 3-2.png",readable+" 4-1.png",readable+" 4-2.png"]
  for filename in expectedImages {assert(fm.fileExists(atPath:namingDest.appendingPathComponent("assets").appendingPathComponent(filename).path))}
- let collisionMD=try String(contentsOf:namingDest.appendingPathComponent("Cesky nadpis_4.md"),encoding:.utf8)
- assert(collisionMD.contains("assets/Cesky nadpis_1_2.png") && collisionMD.contains("assets/Cesky nadpis_2_3.png"))
+ let collisionMD=try String(contentsOf:namingDest.appendingPathComponent(readable+" 4.md"),encoding:.utf8)
+ assert(collisionMD.contains("assets/"+readable+" 4-1.png") && collisionMD.contains("assets/"+readable+" 4-2.png"))
  print("PASS: title filenames, diacritics, unsafe characters, single/multiple images and independent collisions")
  let topicRoot=root.appendingPathComponent("topic-sessions");try fm.createDirectory(at:topicRoot,withIntermediateDirectories:true)
  let topicDest=topicRoot.appendingPathComponent("chosen-folder")
@@ -456,10 +516,10 @@ if CommandLine.arguments.contains("--self-test") {
  let aggregate=try String(contentsOf:topicDest.appendingPathComponent("Spolecny.md"),encoding:.utf8)
  assert(aggregate.hasPrefix("# Původní obsah") && aggregate.contains("Relace 1") && aggregate.contains("Relace 2"))
  let aggregateFiles=try fm.contentsOfDirectory(at:topicDest,includingPropertiesForKeys:nil);assert(aggregateFiles.filter{$0.pathExtension=="md"}.count==1)
- assert(aggregate.components(separatedBy:"![[assets/").count==4)
+ assert(aggregate.components(separatedBy:"](<assets/").count==4)
  var separate=topic;separate.combined=false;separate.folder=topicRoot.appendingPathComponent("separate").path
  for _ in 0..<2{try Data([1]).write(to:topicRoot.appendingPathComponent("one.png"));try finishSession(Draft(images:["one.png"],comment:"",title:"Stejný",topic:separate),root:topicRoot)}
- let separateFiles=try fm.contentsOfDirectory(atPath:separate.folder);assert(separateFiles.contains("Stejny.md") && separateFiles.contains("Stejny_2.md"))
+ let separateFiles=try fm.contentsOfDirectory(atPath:separate.folder);let same=readableSessionName("Stejný",created:Date());assert(separateFiles.contains(same+".md") && separateFiles.contains(same+" 2.md"))
  let deleteRoot=topicRoot.appendingPathComponent("deletion");try fm.createDirectory(at:deleteRoot,withIntermediateDirectories:true)
  for name in ["a.png","b.png"]{try Data([1]).write(to:deleteRoot.appendingPathComponent(name));try Data([2]).write(to:annotationSidecar(deleteRoot.appendingPathComponent(name)))}
  let compose=Composer(draft:Draft(images:["a.png","b.png"],comment:"Zachovat",title:"Nadpis",topic:topic),root:deleteRoot)
@@ -474,14 +534,16 @@ if CommandLine.arguments.contains("--self-test") {
  let hoverActions=thumbnail.subviews.compactMap{$0 as? ThumbnailActionButton}
  assert(hoverActions.count==2)
  let annotate=hoverActions[0],note=hoverActions[1]
- assert(annotate.isHidden && !note.isHidden && note.frame.maxY<=28)
+ assert(annotate.isHidden && note.isHidden)
+ assert(annotate.frame.minY==note.frame.maxY && annotate.frame.width==note.frame.width && annotate.frame.height==note.frame.height)
+ assert(thumbnail.notePreview.stringValue=="# Per-image note **Detail**" && thumbnail.notePreview.lineBreakMode == .byTruncatingTail && thumbnail.notePreview.maximumNumberOfLines==1)
  thumbnail.setHovered(true);assert(!annotate.isHidden)
  assert(annotate.action == #selector(Composer.edit) && note.action == #selector(Composer.editImageNote))
  annotate.setExpanded(true,animated:false)
- assert(annotate.title==L("Upravit") && annotate.frame.width>annotate.collapsedFrame.width && annotate.frame.maxX==annotate.collapsedFrame.maxX)
+ assert(annotate.expandedTitle==L("Anotace") && note.expandedTitle==L("Poznámka") && annotate.frame==annotate.collapsedFrame && annotate.overlayOpacity>note.overlayOpacity)
  let notePoint=thumbnail.convert(NSPoint(x:note.frame.midX,y:note.frame.midY),to:thumbnail.superview)
  assert(thumbnail.hitTest(notePoint) === note)
- thumbnail.setHovered(false);assert(annotate.isHidden && !note.isHidden && annotate.frame==annotate.collapsedFrame)
+ thumbnail.setHovered(false);assert(annotate.isHidden && note.isHidden && annotate.frame==annotate.collapsedFrame)
  compose.setImageNote("",for:"b.png");assert(compose.draft.imageNotes?["b.png"]==nil)
  print("PASS: thumbnail hover actions and per-image notes independent of PNG editing")
 
@@ -607,12 +669,12 @@ if CommandLine.arguments.contains("--self-test") {
   try finish(Draft(images:["capture.png"],comment:"Uživatelský komentář",title:"Český uživatelský nadpis"),root:translatedRoot,dest:translatedOutput)
  }
  let bilingual=try previousSessions(in:translatedOutput);assert(bilingual.count==2 && bilingual.allSatisfy{$0.title=="Český uživatelský nadpis" && $0.comment=="Uživatelský komentář"})
- AppLanguage.override="en";let exported=try String(contentsOf:translatedOutput.appendingPathComponent("Cesky uzivatelsky nadpis.md"),encoding:.utf8);assert(exported.contains("# Description") && exported.contains("# Český uživatelský nadpis"))
+ AppLanguage.override="en";let exported=try String(contentsOf:translatedOutput.appendingPathComponent(readableSessionName("Český uživatelský nadpis",created:Date())+".md"),encoding:.utf8);assert(exported.contains("# Description") && exported.contains("# Český uživatelský nadpis"))
  AppLanguage.override="cs";assert(L("Uložit")=="Uložit")
  print("PASS: Czech/English system-language resolution, complete translation catalogs, bilingual Markdown discovery and unchanged user content")
  let manyRoot=root.appendingPathComponent("many");try fm.createDirectory(at:manyRoot,withIntermediateDirectories:true)
  let customDestination=manyRoot.appendingPathComponent("output")
- var customTopic=topic;customTopic.folder=customDestination.path;customTopic.combined=true;customTopic.combinedFile="All.md";customTopic.markdownTemplate="{text}\n\n### {title}\n\n{screenshots}\n"
+ var customTopic=topic;customTopic.folder=customDestination.path;customTopic.combined=true;customTopic.combinedFile="All.md";customTopic.markdownTemplate="{text}\n\n### {title}\n\n{screenshots}\n";customTopic.combinedTemplate="{sessions}"
  var many=Draft(images:[],comment:"Comment with literal {title}",title:"Custom layout",topic:customTopic,imageNotes:[:])
  for i in 0..<12{let name="image-\(i).png";try Data([UInt8(i)]).write(to:manyRoot.appendingPathComponent(name));many.images.append(name);many.imageNotes?[name]="Caption \(i)\n**Detail**"}
  try stage(many,root:manyRoot);let loadedMany=try readDraft(manyRoot);assert(loadedMany.images.count==12 && loadedMany.imageNotes?["image-11.png"]=="Caption 11\n**Detail**")
@@ -620,7 +682,7 @@ if CommandLine.arguments.contains("--self-test") {
  let persisted=try readDraft(persistedRoot);assert(persisted.images.count==12 && persisted.imageNotes?[persisted.images[11]]=="Caption 11\n**Detail**")
  try finishSession(persisted,root:persistedRoot)
  let customMD=try String(contentsOf:customDestination.appendingPathComponent("All.md"),encoding:.utf8)
- assert(customMD.contains("Comment with literal {title}\n\n### Custom layout") && customMD.contains("]]\n\nCaption 11\n**Detail**"))
+ assert(customMD.contains("Comment with literal {title}\n\n### Custom layout") && customMD.contains(">)\n\nCaption 11\n**Detail**"))
  let customSessions=try previousSessions(in:customDestination);assert(customSessions.count==1 && customSessions[0].images.count==12 && customSessions[0].imageNotes.count==12 && customSessions[0].comment==many.comment)
  // Mix a legacy section and the new arbitrary-template format in the same Markdown file.
  let mixed="# Legacy\n\n## Screenshot\n\n![[assets/"+customSessions[0].images[0]+"]]\n\n## Comment\n\nLegacy comment\n\n---\n\n"+customMD
@@ -637,6 +699,22 @@ if CommandLine.arguments.contains("--self-test") {
  try finishSession(reopened,root:reopenRoot)
  let afterReopening=try previousSessions(in:customDestination);assert(afterReopening.count==2 && afterReopening.contains{$0.title=="Legacy" && $0.comment=="Legacy comment"} && afterReopening.contains{$0.title=="Custom layout" && $0.images.count==12})
  print("PASS: reopening saved sessions without capture, including per-image notes and updates in a shared Markdown file")
+ // Šablona společného souboru: hlavička při vytvoření, nové relace před patičkou.
+ let fileRoot=root.appendingPathComponent("file-template");try fm.createDirectory(at:fileRoot,withIntermediateDirectories:true)
+ var fileTopic=topic;fileTopic.name="Složka";fileTopic.detail="";fileTopic.folder=fileRoot.appendingPathComponent("out").path;fileTopic.combinedFile="Spolu.md";fileTopic.combinedTemplate="# {folderName}\n\n{folderDescription}\n\n{sessions}\n\n_Konec {folderName}_\n"
+ for title in ["První","Druhá"]{try Data([7]).write(to:fileRoot.appendingPathComponent("f.png"));try finishSession(Draft(images:["f.png"],comment:title+" komentář",title:title,topic:fileTopic),root:fileRoot)}
+ let fileMD=try String(contentsOf:fileRoot.appendingPathComponent("out/Spolu.md"),encoding:.utf8)
+ assert(fileMD.hasPrefix("# Složka\n\n# První\n") && !fileMD.contains("<!--") && fileMD.hasSuffix("komentář\n\n\n_Konec Složka_\n") && fileMD.components(separatedBy:"_Konec").count==2)
+ assert(fileMD.range(of:"První komentář")!.lowerBound<fileMD.range(of:"Druhá komentář")!.lowerBound)
+ let fileSessions=try previousSessions(in:fileRoot.appendingPathComponent("out"));assert(fileSessions.count==2)
+ let firstFileSession=fileSessions.first{$0.title=="První"}!
+ let fileReopen=root.appendingPathComponent("file-reopen");try fm.createDirectory(at:fileReopen,withIntermediateDirectories:true)
+ var extendedFile=try workingDraft(from:firstFileSession,topic:fileTopic,root:fileReopen);try Data([8]).write(to:fileReopen.appendingPathComponent("new.png"));extendedFile.images.append("new.png");extendedFile.comment="Upraveno"
+ try finishSession(extendedFile,root:fileReopen)
+ let fileAfter=try String(contentsOf:fileRoot.appendingPathComponent("out/Spolu.md"),encoding:.utf8)
+ assert(fileAfter.hasSuffix("_Konec Složka_\n") && fileAfter.contains("Upraveno") && (try! previousSessions(in:fileRoot.appendingPathComponent("out"))).contains{$0.title=="První" && $0.images.count==2})
+ assert(combinedTemplateParts(defaultCombinedTemplate,folderName:"A",folderDescription:"").0=="# A\n\n" && validCombinedTemplate(defaultCombinedTemplate) && !validCombinedTemplate("{sessions}{sessions}") && !validCombinedTemplate("# x"))
+ print("PASS: combined file template header/footer, insertion before footer, precise updates and discovery")
  let removeNote=NSButton();removeNote.tag=0;let noteComposer=Composer(draft:loadedMany,root:manyRoot);noteComposer.removeImage(removeNote);assert(noteComposer.draft.imageNotes?["image-0.png"]==nil && noteComposer.draft.images.count==11)
  print("PASS: 12 screenshots, per-image notes, draft remapping, custom template roundtrip, literal tokens and mixed legacy/new sessions")
  if !interactiveUITests{assert(!NSApp.windows.contains{$0.isVisible});print("PASS: default regression checks opened no visible windows")}

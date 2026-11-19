@@ -21,22 +21,43 @@ mapping state is preserved and cannot be silently replaced.
 
 A cloud save queues the owner-bound immutable manifest, including folder UUID.
 There is one local materialization path: the downloader. After upload confirmation
-it downloads into `<session UUID>/Note.md` and `assets/1.png…` inside the chosen
-directory. Offline saves stay in the durable outbox until the server confirms
-them. The periodic refresh retries pending uploads using the existing backoff. Existing cloud notes and notes from other Macs use the same download path.
+it downloads into `YYYY-MM-DD Title/YYYY-MM-DD Title.md` and `assets/1.png…`
+(local date of `created_at`, sanitised, deduplicated with ` 2`). Combined mode
+writes the combined file with images `assets/YYYY-MM-DD Title-N.png`. Renaming a
+session on the web does not rename existing folders. Markdown has no hidden markers.
+
+Identity lives in `Session Index.json` in Application Support (0600, bounded):
+path → session ID, `updated_at`, file fingerprints and, for combined files, block
+ranges and headings. The xattr `cz.janprasil.screenshotnote.session` on folders and
+Markdown is a secondary hint; edited blocks are found by heading and image links.
+Unknown files are never modified or deleted. The same index serves local folders.
+Older `<uuid>/Note.md`, `<uuid>-<fingerprint>` and `assets/<uuid>/N.png` downloads
+are renamed once when unmodified; edited ones stay where they are.
+
+Trash: a session trashed on the web moves to `<dir>/.trash/` (in combined mode its
+block leaves the combined file and becomes `.trash/YYYY-MM-DD Title.md` with images
+in `.trash/assets/`), but only when unmodified; otherwise it stays with one notice.
+Moving it back out of `.trash/` calls `POST /restore`; a web restore moves it back;
+a purged session (detail 404) is removed from `.trash/` only when unmodified. Only
+entries known to the index are touched, so Obsidian's own `.trash` coexists.
+Without the server trash API the downloader falls back to the previous behaviour.
+
+Local deletion propagates to the web Trash (`POST /trash`): moving a session into
+`.trash/` is sent after one scan; deleting it (Finder, rm) after two scans at least
+10 s apart in which it is missing from the whole mapped tree (xattr, volume+inode,
+fingerprint). Renames and moves inside the folder only update the index. In combined
+mode a removed block is trashed; a deleted combined file is just regenerated.
+Nothing propagates when the root is missing, unreadable or replaced, or while the
+session has unsent uploads. More than 5 sessions or over half of the folder at once
+are held until confirmed under Cloud Library → Missing sessions. Nothing local is
+deleted by this.
 
 Downloads use only our REST API and device credential. JSON is bounded, image
 responses are limited to 50 MiB and a note to 100 MB / 30 images. The account and
 current mapping are rechecked after awaited image reads and before publication.
-A prepared hidden directory is moved into place only when complete. Receipts
-prevent repeated downloads; the server ID and content fingerprint prevent
-unintended overwrites after crashes or manual edits.
-
-Local Markdown edits are retained and do not propagate upstream. When a fresh
-copy is needed and files conflict, a separate fingerprinted directory is used.
-If that directory also contains different files, the app reports a conflict.
-Cloud deletion does not delete already exported local files. Cloud-folder
-deletion and bidirectional content editing are outside this first contract.
+A prepared hidden directory is moved into place only when complete.
+Local Markdown edits are retained and do not propagate upstream. When a newer
+server version arrives for an edited copy, it goes into a new readable folder.
 
 ## Validation
 

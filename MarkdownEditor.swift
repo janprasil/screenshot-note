@@ -56,11 +56,38 @@ final class LiveMarkdownView:NSTextView,NSTextViewDelegate {
 }
 final class MarkdownEditor:NSObject,NSWindowDelegate {
  var window:NSWindow!;var text:LiveMarkdownView!;var accepted=false
- func run(_ initial:String,title:String?=nil,hint:String?=nil)->String? {
+ private var hintLabel:NSTextField!;private var tabs:[(title:String,text:String,hint:String)]=[];private var tabButtons:[AppButton]=[];private(set) var selectedTab=0
+ func run(_ initial:String,title:String?=nil,hint:String?=nil,apply:String?=nil)->String? {
+  build(initial,title:title,hint:hint,apply:apply)
+  if isExportingDesign{exportDesignWindow(window,name:"comment");return nil}
+  NSApp.runModal(for:window);window.orderOut(nil);return accepted ? text.string:nil
+ }
+ /// Editor s více záložkami, třeba šablona relace a šablona souboru.
+ func run(title:String,tabs:[(title:String,text:String,hint:String)],selected:Int=0,apply:String?=nil,present:Bool=true)->[String]? {
+  self.tabs=tabs;selectedTab=selected;build(tabs[selected].text,title:title,hint:tabs[selected].hint,apply:apply,present:present)
+  let width:CGFloat=170
+  for (i,tab) in tabs.enumerated().reversed(){
+   let button=styledButton(tab.title,role:i==selected ? .selected:.quiet,frame:NSRect(x:772-CGFloat(tabs.count-i)*(width+6)+6,y:580,width:width,height:32),target:self,action:#selector(switchTab(_:)))
+   button.tag=i;button.autoresizingMask=[.minXMargin,.minYMargin];window.contentView!.addSubview(button);tabButtons.insert(button,at:0)
+  }
+  guard present else{return nil}
+  if isExportingDesign{exportDesignWindow(window,name:"template-tabs");return nil}
+  NSApp.runModal(for:window);window.orderOut(nil);guard accepted else{return nil}
+  self.tabs[selectedTab].text=text.string;return self.tabs.map(\.text)
+ }
+ @objc func switchTab(_ sender:NSButton){select(sender.tag)}
+ func select(_ index:Int){
+  guard tabs.indices.contains(index),index != selectedTab else{return}
+  tabs[selectedTab].text=text.string;selectedTab=index
+  text.string=tabs[index].text;text.renderMarkdown();hintLabel.stringValue=tabs[index].hint
+  for (i,button) in tabButtons.enumerated(){button.role=i==index ? .selected:.quiet;button.needsDisplay=true}
+  window.makeFirstResponder(text)
+ }
+ private func build(_ initial:String,title:String?,hint:String?,apply applyTitle:String?,present:Bool=true){
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:800,height:640),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Komentář");window.minSize=NSSize(width:650,height:460);window.delegate=self
   let view=installDesignRoot(window,headerHeight:154,showClose:false)
-  let heading=designLabel(title ?? L("Komentář"),NSRect(x:28,y:580,width:744,height:32),size:24,weight:.semibold);heading.autoresizingMask=[.minYMargin];view.addSubview(heading)
-  let hint=designLabel(hint ?? L("Markdown se formátuje přímo při psaní."),NSRect(x:28,y:553,width:744,height:22),size:12,color:AppPalette.secondary);hint.autoresizingMask=[.minYMargin];view.addSubview(hint)
+  let heading=designLabel(title ?? L("Komentář"),NSRect(x:28,y:580,width:tabs.isEmpty ? 744:360,height:32),size:24,weight:.semibold);heading.autoresizingMask=[.minYMargin];view.addSubview(heading)
+  hintLabel=designLabel(hint ?? L("Markdown se formátuje přímo při psaní."),NSRect(x:28,y:553,width:744,height:22),size:12,color:AppPalette.secondary);hintLabel.autoresizingMask=[.minYMargin];view.addSubview(hintLabel)
   let toolbar=DesignSurface(frame:NSRect(x:28,y:499,width:744,height:42),fill:AppPalette.accent.withAlphaComponent(0.085),radius:9);toolbar.autoresizingMask=[.width,.minYMargin];view.addSubview(toolbar)
   let tools=[("textformat.size",L("Nadpis")),("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("list.bullet",L("Seznam")),("link",L("Odkaz")),("chevron.left.forwardslash.chevron.right",L("Kód"))]
   for(i,tool) in tools.enumerated(){let button=styledButton("",symbol:tool.0,role:.quiet,frame:NSRect(x:5+CGFloat(i)*42,y:5,width:34,height:32),target:self,action:#selector(format));button.tag=i;button.toolTip=tool.1;toolbar.addSubview(button)}
@@ -68,10 +95,8 @@ final class MarkdownEditor:NSObject,NSWindowDelegate {
   text=LiveMarkdownView(frame:NSRect(x:0,y:0,width:scroll.contentSize.width,height:scroll.contentSize.height));text.backgroundColor=AppPalette.paper;text.textContainerInset=NSSize(width:28,height:25);text.isVerticallyResizable=true;text.isHorizontallyResizable=false;text.autoresizingMask=[.width];text.textContainer?.widthTracksTextView=true;text.textContainer?.containerSize=NSSize(width:scroll.contentSize.width,height:CGFloat.greatestFiniteMagnitude);text.string=initial;scroll.documentView=text;view.addSubview(scroll);text.renderMarkdown()
   view.addSubview(DesignDivider(NSRect(x:28,y:66,width:744,height:1)))
   let cancel=styledButton(L("Zrušit"),role:.quiet,frame:NSRect(x:28,y:22,width:90,height:34),target:self,action:#selector(cancel));cancel.keyEquivalent="\u{1b}";view.addSubview(cancel)
-  let apply=styledButton(L("Použít komentář"),symbol:"checkmark",role:.primary,frame:NSRect(x:600,y:22,width:172,height:34),target:self,action:#selector(apply));apply.autoresizingMask=[.minXMargin];apply.keyEquivalent="\r";apply.keyEquivalentModifierMask=[.command];view.addSubview(apply)
-  presentScreenshotPanel(window);window.makeFirstResponder(text)
-  if isExportingDesign{exportDesignWindow(window,name:"comment");return nil}
-  NSApp.runModal(for:window);window.orderOut(nil);return accepted ? text.string:nil
+  let apply=styledButton(applyTitle ?? L("Použít komentář"),symbol:"checkmark",role:.primary,frame:NSRect(x:600,y:22,width:172,height:34),target:self,action:#selector(apply));apply.autoresizingMask=[.minXMargin];apply.keyEquivalent="\r";apply.keyEquivalentModifierMask=[.command];view.addSubview(apply)
+  if present{presentScreenshotPanel(window)};window.makeFirstResponder(text)
  }
  @objc func format(_ button:NSButton){switch button.tag{case 0:text.prefixLine("# ");case 1:text.wrap("**","**");case 2:text.wrap("*","*");case 3:text.prefixLine("- ");case 4:text.wrap("[","](https://)");default:text.wrap("`","`")};window.makeFirstResponder(text)}
  @objc func apply(){accepted=true;NSApp.stopModal()};@objc func cancel(){NSApp.stopModal()}

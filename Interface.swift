@@ -178,33 +178,29 @@ final class ThumbnailActionButton:AppButton {
  var expandedTitle=""
  var collapsedFrame=NSRect.zero
  var expandsLeft=false
-
- func setExpanded(_ expanded:Bool,animated:Bool){
-  hovered=expanded
-  title=expanded ? expandedTitle:""
-  imagePosition=expanded ? .imageLeading:.imageOnly
-  var target=collapsedFrame
-  if expanded{
-   let font=NSFont.systemFont(ofSize:13,weight:.medium)
-   target.size.width=max(target.width,ceil((title as NSString).size(withAttributes:[.font:font]).width)+43)
-   if expandsLeft{target.origin.x=collapsedFrame.maxX-target.width}
-  }
-  if animated{animateDesign{self.animator().frame=target}}else{frame=target}
-  needsDisplay=true
- }
- override func mouseEntered(with event:NSEvent){setExpanded(true,animated:true)}
- override func mouseExited(with event:NSEvent){setExpanded(false,animated:true)}
+ var overlayOpacity:CGFloat{hovered ? 0.76:0.48}
+ func setExpanded(_ expanded:Bool,animated:Bool){hovered=expanded;needsDisplay=true}
+ override func mouseEntered(with event:NSEvent){setExpanded(true,animated:false)}
+ override func mouseExited(with event:NSEvent){setExpanded(false,animated:false)}
  override func draw(_ dirtyRect:NSRect){
-  super.draw(dirtyRect)
-  if hovered{
-   let outline=NSBezierPath(roundedRect:bounds.insetBy(dx:0.5,dy:0.5),xRadius:8,yRadius:8)
-   AppPalette.accent.withAlphaComponent(0.12).setFill();outline.fill()
-   AppPalette.accent.setStroke();outline.stroke()
-  }
+  NSColor.black.withAlphaComponent(overlayOpacity).setFill();bounds.fill()
+  let symbol=image?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:17,weight:.medium))
+  let font=NSFont.systemFont(ofSize:13,weight:.semibold)
+  let text=expandedTitle as NSString,textWidth=text.size(withAttributes:[.font:font]).width
+  let width=textWidth+27,x=(bounds.width-width)/2,y=(bounds.height-20)/2
+  drawAdaptiveSymbol(symbol,in:NSRect(x:x,y:y,width:20,height:20),color:.white)
+  text.draw(in:NSRect(x:x+27,y:y+2,width:textWidth+1,height:19),withAttributes:[.font:font,.foregroundColor:NSColor.white])
  }
 }
 
 final class ScreenshotThumbnailButton:NSButton {
+ let notePreview=NSTextField(labelWithString:"")
+ var imageDisplayRect:NSRect{
+  let space=NSRect(x:7,y:39,width:bounds.width-14,height:bounds.height-46)
+  guard let image,image.size.width>0,image.size.height>0 else{return space}
+  let scale=min(space.width/image.size.width,space.height/image.size.height),size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
+  return NSRect(x:space.midX-size.width/2,y:space.midY-size.height/2,width:size.width,height:size.height)
+ }
  private var hover=false
  private var hoverActions:[NSButton]=[]
  private var hoverTracking:NSTrackingArea?
@@ -229,8 +225,7 @@ final class ScreenshotThumbnailButton:NSButton {
  override func draw(_ dirtyRect:NSRect){
   let card=NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:10,yRadius:10)
   AppPalette.raised.setFill();card.fill()
-  let space=NSRect(x:7,y:25,width:bounds.width-14,height:bounds.height-32)
-  if let image=image{let factor=min(space.width/image.size.width,space.height/image.size.height);let size=NSSize(width:image.size.width*factor,height:image.size.height*factor);let r=NSRect(x:space.midX-size.width/2,y:space.midY-size.height/2,width:size.width,height:size.height);image.draw(in:r)}
+  if let image{image.draw(in:imageDisplayRect)}
   (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:7),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:10,weight:.medium),.foregroundColor:AppPalette.secondary])
   if hover{AppPalette.accent.withAlphaComponent(0.8).setStroke();card.lineWidth=1.5;card.stroke()}
  }
@@ -268,7 +263,7 @@ final class Composer:NSObject,NSWindowDelegate {
  var selectionText:[String:(String,String)]=[:]
 
 
- init(draft:Draft,root:URL){self.draft=draft;self.root=root;if self.draft.topic == nil{self.draft.topic=Topics.defaultTopic}}
+ init(draft:Draft,root:URL){self.draft=draft;self.root=root;if self.draft.topic == nil{self.draft.topic=Topics.initialTopic}}
  func show(present:Bool=true){
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:800,height:586),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title="";window.titleVisibility = .hidden;window.isReleasedWhenClosed=false;window.delegate=self
   let view=installDesignRoot(window,headerHeight:108,showClose:false)
@@ -315,7 +310,7 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  @objc func refreshSavedSessions(){refreshPreviousSessions()}
  func refreshPreviousSessions(){
-  do{let topic=draft.topic ?? Topics.defaultTopic;previousChoices=topic.savesLocally ? try previousSessions(in:topic.destination):[];sessionPicker.toolTip=L("Přidat k uložené relaci nebo vytvořit novou")}catch{previousChoices=[];sessionPicker.toolTip=error.localizedDescription}
+  do{let topic=draft.topic ?? Topics.defaultTopic;previousChoices=try previousSessions(for:topic);sessionPicker.toolTip=L("Přidat k uložené relaci nebo vytvořit novou")}catch{previousChoices=[];sessionPicker.toolTip=error.localizedDescription}
   sessionPicker.removeAllItems();sessionPicker.addItem(withTitle:L("Nová relace"))
   sessionPicker.addItems(withTitles:previousChoices.map{$0.display})
   if let target=draft.previous,let index=previousChoices.firstIndex(where:{$0.target.id==target.id}){sessionPicker.selectItem(at:index+1)}else{sessionPicker.selectItem(at:0)}
@@ -400,20 +395,16 @@ final class Composer:NSObject,NSWindowDelegate {
   thumbnails.frame=NSRect(x:0,y:0,width:max(744,CGFloat(draft.images.count)*238-14),height:226)
   for(i,image) in draft.images.enumerated(){
    let button=ScreenshotThumbnailButton(frame:NSRect(x:CGFloat(i)*238,y:0,width:224,height:226));button.image=NSImage(contentsOf:root.appendingPathComponent(image));button.imageScaling = .scaleProportionallyUpOrDown;button.imagePosition = .imageOnly;button.tag=i;button.target=self;button.action=#selector(edit);button.toolTip=L("Kliknutím zvětšit a upravit");thumbnails.addSubview(button);buttons.append(button)
-   let annotated=fm.fileExists(atPath:annotationSidecar(root.appendingPathComponent(image)).path)
-   let hasNote = !(draft.imageNotes?[image] ?? "").isEmpty
-   let noteInHeader=annotated || hasNote
-   let annotate=ThumbnailActionButton(title:"",target:self,action:#selector(edit))
-   annotate.image=NSImage(systemSymbolName:"pencil.tip",accessibilityDescription:nil);annotate.imagePosition = .imageOnly
-   annotate.expandedTitle=L(annotated ? "Upravit":"Anotovat");annotate.setAccessibilityLabel(annotate.expandedTitle)
-   annotate.collapsedFrame=NSRect(x:noteInHeader ? 92:69,y:181,width:40,height:32)
-   annotate.expandsLeft=true;annotate.frame=annotate.collapsedFrame;annotate.tag=i;button.addHoverAction(annotate)
-   let note=ThumbnailActionButton(title:"",target:self,action:#selector(editImageNote))
-   note.image=NSImage(systemSymbolName:hasNote ? "text.bubble.fill":"text.bubble",accessibilityDescription:nil);note.imagePosition = .imageOnly
-   note.expandedTitle=L(hasNote ? "Upravit":"Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
-   note.collapsedFrame=noteInHeader ? NSRect(x:164,y:4,width:28,height:24):NSRect(x:115,y:181,width:40,height:32)
-   note.expandsLeft=noteInHeader;note.frame=note.collapsedFrame
-   if noteInHeader{button.addSubview(note)}else{button.addHoverAction(note)}
+   let text=draft.imageNotes?[image] ?? ""
+   let preview=button.notePreview;preview.stringValue=text.components(separatedBy:.newlines).joined(separator:" ");preview.toolTip=text
+   preview.frame=NSRect(x:34,y:5,width:180,height:23);preview.font = .systemFont(ofSize:11);preview.textColor=AppPalette.secondary;preview.usesSingleLineMode=true;preview.maximumNumberOfLines=1;preview.lineBreakMode = .byTruncatingTail;button.addSubview(preview)
+   let area=button.imageDisplayRect
+   let annotate=ThumbnailActionButton(title:"",target:self,action:#selector(edit));annotate.image=NSImage(systemSymbolName:"pencil.tip",accessibilityDescription:nil)
+   annotate.expandedTitle=L("Anotace");annotate.setAccessibilityLabel(annotate.expandedTitle);annotate.tag=i
+   annotate.frame=NSRect(x:area.minX,y:area.midY,width:area.width,height:area.height/2);annotate.collapsedFrame=annotate.frame;button.addHoverAction(annotate)
+   let note=ThumbnailActionButton(title:"",target:self,action:#selector(editImageNote));note.image=NSImage(systemSymbolName:text.isEmpty ? "text.bubble":"text.bubble.fill",accessibilityDescription:nil)
+   note.expandedTitle=L("Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
+   note.frame=NSRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2);note.collapsedFrame=note.frame;button.addHoverAction(note)
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
   }
   if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Přidej výřez nebo snímek celé obrazovky."),NSRect(x:8,y:102,width:720,height:24)))}

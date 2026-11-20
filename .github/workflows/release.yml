@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # denní RC
+    - cron: "0 4 * * 1" # pondělní povýšení RC na stabilní verzi
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: rc = nový release candidate, promote = povýšit RC na stabilní verzi
+        type: choice
+        options: [rc, promote]
+        default: rc
+      min_age_days:
+        description: Minimální stáří RC pro promote (0 = hotfix hned)
+        default: "7"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      build: ${{ steps.plan.outputs.build }}
+      sha: ${{ steps.plan.outputs.sha }}
+      rc_tag: ${{ steps.plan.outputs.rc_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then mode="$INPUT_MODE"
+          elif [ "$SCHEDULE" = "0 4 * * 1" ]; then mode=promote
+          else mode=rc; fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          MIN_AGE: ${{ inputs.min_age_days || '7' }}
+        run: python3 scripts/release.py "$MODE" --min-age-days "$MIN_AGE" --notes release-notes.md
+      - if: steps.plan.outputs.release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && needs.plan.outputs.mode == 'rc'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      # Self-testy počítají s češtinou jako jazykem systému.
+      - run: defaults write -g AppleLanguages -array cs en
+      - id: build
+        env:
+          SCREENSHOT_NOTE_VERSION: ${{ needs.plan.outputs.version }}
+          SCREENSHOT_NOTE_BUILD: ${{ needs.plan.outputs.build }}
+        run: |
+          set -o pipefail
+          ./build.sh | tee build.log
+          echo "app=$(sed -n 's/^Vytvořeno: //p' build.log)" >> "$GITHUB_OUTPUT"
+      # Název DMG je bez -rc, aby šel při povýšení použít beze změny.
+      - env:
+          APP: ${{ steps.build.outputs.app }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          mkdir dist
+          dmg="dist/Screenshot-Note-$VERSION.dmg"
+          hdiutil create -volname "Screenshot Note" -srcfolder "$APP" -ov -format UDZO "$dmg"
+          (cd dist && shasum -a 256 "$(basename "$dmg")" > "$(basename "$dmg").sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-rc:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: gh release create "$TAG" dist/* -R "$REPO" --target "$SHA" --prerelease --title "Screenshot Note ${TAG#v}" --notes-file release-notes/release-notes.md
+
+  promote:
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && needs.plan.outputs.mode == 'promote'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      # Stabilní verze nese stejné binárky, jaké týden běžely jako RC.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          RC_TAG: ${{ needs.plan.outputs.rc_tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          gh release download "$RC_TAG" -R "$REPO" -D dist
+          gh release create "$TAG" dist/* -R "$REPO" --target "$SHA" --latest --title "Screenshot Note ${TAG#v}" --notes-file release-notes.md

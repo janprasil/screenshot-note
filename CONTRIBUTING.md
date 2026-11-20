@@ -6,8 +6,10 @@
 
 PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat: …`, `fix: …`, `docs: …`, `ci: …`, `feat!: …` for breaking changes). PRs are
-squash-merged and the title becomes the commit on `main`. Versions and the changelog
-are generated from these titles by release-please.
+squash-merged and the title becomes the commit on `main`. Versions and release notes
+are generated from these titles: a release candidate (`vX.Y.Z-rc.N`) is published nightly
+when `main` has new `feat`/`fix`/`perf` changes, and every Monday the newest RC that is at
+least 7 days old is promoted to the stable `vX.Y.Z` release with the same binaries.
 
 Keep PRs focused. For larger changes, open an issue first.
 Security issues: see [SECURITY.md](SECURITY.md).

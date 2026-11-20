@@ -25,4 +25,5 @@ jobs:
       # build.sh spouští i test lokalizací a self-testy aplikace.
       - run: ./build.sh
       - run: python3 tests/build-config.py
+      - run: python3 tests/release.py
       # tests/cloud-rest.py zatím chybí, fixture neumí cloudovou složku (folder_required).

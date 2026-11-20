@@ -451,3 +451,5 @@
 "Zahodit rozpracovanou poznámku?" = "Discard the draft note?";
 "Zkusit znovu" = "Try Again";
 "Zpět k poznámce" = "Back to Note";
+"Požadavek je pro cloud příliš velký (překračuje limit serveru). Opakování nepomůže; poznámka zůstává uložená lokálně." = "The request is too large for the cloud (it exceeds a server limit). Retrying will not help; the note stays saved locally.";
+"Relace „%@“ se nenahrála: %@" = "The session “%@” was not uploaded: %@";

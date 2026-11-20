@@ -451,3 +451,5 @@
 "Zahodit rozpracovanou poznámku?" = "Zahodit rozpracovanou poznámku?";
 "Zkusit znovu" = "Zkusit znovu";
 "Zpět k poznámce" = "Zpět k poznámce";
+"Požadavek je pro cloud příliš velký (překračuje limit serveru). Opakování nepomůže; poznámka zůstává uložená lokálně." = "Požadavek je pro cloud příliš velký (překračuje limit serveru). Opakování nepomůže; poznámka zůstává uložená lokálně.";
+"Relace „%@“ se nenahrála: %@" = "Relace „%@“ se nenahrála: %@";

@@ -1231,7 +1231,7 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let dropped=try queue.enqueue(Draft(images:["old.png"],comment:"",title:"Zahodit",topic:topic),root:shots,folders:[topic])
  refuse[dropped.uuidString.lowercased()]=(409,"job_conflict");clock=clock.addingTimeInterval(4000);await queue.sync()
  try queue.discardParked(queue.parkedItems[0]);assert(queue.parkedItems.isEmpty && queue.pendingCount==0)
- assert(CloudLibrary.classify(URLError(.timedOut)) == .timeout && CloudLibrary.classify(CloudFailure("x",status:413)) == .stop && CloudLibrary.classify(CloudFailure("x",status:415)) == .permanent && CloudLibrary.classify(CloudFailure("x",status:503)) == .transient && CloudLibrary.classify(CloudFailure("x",status:429)) == .stop && CloudLibrary.classify(CloudFailure.invalid) == .permanent)
+ assert(CloudLibrary.classify(URLError(.timedOut)) == .timeout && CloudLibrary.classify(CloudFailure("x",status:413,code:"billing_storage_limit")) == .stop && CloudLibrary.classify(CloudFailure("x",status:413,code:"resource_limit")) == .permanent && CloudLibrary.classify(CloudFailure("x",status:413)) == .permanent && CloudLibrary.classify(CloudFailure("x",status:415)) == .permanent && CloudLibrary.classify(CloudFailure("x",status:503)) == .transient && CloudLibrary.classify(CloudFailure("x",status:429)) == .stop && CloudLibrary.classify(CloudFailure.invalid) == .permanent)
  // Jen výpadek připojení zastaví celou frontu, ostatní síťové chyby jsou chybou úlohy.
  assert([URLError.Code.notConnectedToInternet,.networkConnectionLost,.cannotConnectToHost,.cannotFindHost,.dnsLookupFailed,.internationalRoamingOff,.dataNotAllowed].allSatisfy{CloudLibrary.classify(URLError($0)) == .stop})
  assert(CloudLibrary.classify(URLError(.badServerResponse)) == .transient && CloudLibrary.classify(URLError(.secureConnectionFailed)) == .transient)
@@ -1241,7 +1241,7 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let quotaFirst=UUID(uuidString:"00000000-0000-4000-8000-000000000001")!,quotaLater=UUID(uuidString:"ffffffff-ffff-4fff-8fff-ffffffffffff")!
  try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Plno 1",topic:topic),root:shots,sessionID:quotaFirst,folders:[topic])
  try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Plno 2",topic:topic),root:shots,sessionID:quotaLater,folders:[topic])
- refuse[quotaFirst.uuidString.lowercased()]=(413,"resource_limit")
+ refuse[quotaFirst.uuidString.lowercased()]=(413,"billing_storage_limit")
  for _ in 0..<4 {
   clock=clock.addingTimeInterval(1000);ReviewStub.log=[];await quota.sync()
   assert(!ReviewStub.log.contains{$0.1.contains(quotaLater.uuidString.lowercased())} && quota.retryAt>=clock.addingTimeInterval(890) && quota.parkedItems.isEmpty && quota.pendingCount==2)
@@ -1250,6 +1250,15 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  refuse[quotaFirst.uuidString.lowercased()]=nil;clock=clock.addingTimeInterval(1000);await quota.sync()
  assert(quota.pendingCount==0 && committed[quotaFirst.uuidString.lowercased()] != nil && committed[quotaLater.uuidString.lowercased()] != nil)
  print("PASS: 413 account quota stops the whole queue with a long backoff, never parks, and uploads automatically once space is freed")
+ // 413 resource_limit: příliš velký požadavek se odloží hned, ostatní úlohy pokračují, žádné hlášení o plném úložišti.
+ let tooBig=UUID(uuidString:"00000000-0000-4000-8000-000000000002")!,afterBig=UUID(uuidString:"ffffffff-ffff-4fff-8fff-fffffffffffe")!
+ try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Příliš velká",topic:topic),root:shots,sessionID:tooBig,folders:[topic])
+ try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Další",topic:topic),root:shots,sessionID:afterBig,folders:[topic])
+ refuse[tooBig.uuidString.lowercased()]=(413,"resource_limit");clock=clock.addingTimeInterval(1000);await quota.sync()
+ let bigParked=quota.parkedItems
+ assert(quotaMessages==4 && committed[afterBig.uuidString.lowercased()] != nil && quota.pendingCount==0 && bigParked.count==1 && bigParked[0].sessionID==tooBig && bigParked[0].reason?.contains("Příliš velká")==true && bigParked[0].reason?.contains(L("Požadavek je pro cloud příliš velký (překračuje limit serveru). Opakování nepomůže; poznámka zůstává uložená lokálně."))==true && quota.lastError?.contains("nezbývá místo") != true)
+ try quota.discardParked(bigParked[0])
+ print("PASS: 413 resource_limit parks only that job at once with a too-large reason, other jobs proceed, no storage-full alert")
  // Po odpojení nebo pod jiným účtem fronta nezmizí: položky jsou viditelné jako osiřelé a jdou uložit lokálně.
  let waiting=try queue.enqueue(Draft(images:["old.png"],comment:"",title:"Čeká",topic:topic),root:shots,folders:[topic])
  let otherVault=CloudMemoryVault();otherVault.value=cloudFixtureConnection()
@@ -1282,13 +1291,13 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
 
  // 9 + 10: úprava bez revize nejdřív načte revizi (nikdy null); po sloučení je základem verze serveru; 400 úpravu odloží.
  let edit=UUID(),editPath="/api/v1/sessions/"+edit.uuidString.lowercased()
- var server=["title":"T0","comment":"C0","captions":[""],"revision":"4"] as [String:Any],patches:[[String:Any]]=[],patchStatus:Int?=nil,concurrent=false
+ var server=["title":"T0","comment":"C0","captions":[""],"revision":"4"] as [String:Any],patches:[[String:Any]]=[],patchStatus:Int?=nil,patchCode="invalid_parameters",concurrent=false
  ReviewStub.handler={method,path,body in
   if path=="/api/v1/me"{return (200,["data":["id":owner.uuidString]])}
   guard path==editPath else{return (404,["error":["code":"not_found"]])}
   if method=="PATCH" {
    let sent=json(body);patches.append(sent)
-   if let status=patchStatus{return (status,["error":["code":"invalid_parameters"]])}
+   if let status=patchStatus{return (status,["error":["code":patchCode]])}
    if concurrent && patches.count==2{server["revision"]="8";server["captions"]=[""];return (409,["error":["code":"session_changed"]])}
    guard sent["revision"] as? String==server["revision"] as? String else{return (409,["error":["code":"session_changed"]])}
    for key in ["title","comment","captions"]{server[key]=sent[key]};server["revision"]=String(Int(server["revision"] as! String)!+1)
@@ -1311,13 +1320,19 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  assert(patches.count==1 && edits.pendingCount==0 && edits.parkedItems.count==1 && edits.parkedItems[0].kind == .edit && edits.parkedItems[0].reason != nil)
  patchStatus=nil;try edits.retryParked(edits.parkedItems[0]);clock=clock.addingTimeInterval(4000);await edits.sync()
  assert(edits.pendingCount==0 && edits.parkedItems.isEmpty && server["title"] as? String=="T3")
- // 413 u úpravy: úprava zůstává ve frontě, neodkládá se a po odstupu projde.
- patchStatus=413
+ // Plné úložiště u úpravy: úprava zůstává ve frontě, neodkládá se a po odstupu projde.
+ patchStatus=413;patchCode="billing_storage_limit"
  try edits.enqueueEdit(Draft(images:["old.png"],comment:"C0",title:"T4"),root:shots,sessionID:edit,base:shas,original:Fields(title:"T3",comment:"C0",captions:[""]),revision:server["revision"] as? String)
  clock=clock.addingTimeInterval(4000);await edits.sync()
  assert(edits.pendingCount==1 && edits.parkedItems.isEmpty && edits.retryAt>=clock.addingTimeInterval(890))
  patchStatus=nil;clock=clock.addingTimeInterval(1000);await edits.sync()
  assert(edits.pendingCount==0 && server["title"] as? String=="T4")
+ // Příliš dlouhý text (413 resource_limit): úprava se odloží hned.
+ patchStatus=413;patchCode="resource_limit"
+ try edits.enqueueEdit(Draft(images:["old.png"],comment:"C0",title:"T5"),root:shots,sessionID:edit,base:shas,original:Fields(title:"T4",comment:"C0",captions:[""]),revision:server["revision"] as? String)
+ clock=clock.addingTimeInterval(4000);await edits.sync()
+ assert(edits.pendingCount==0 && edits.parkedItems.count==1 && edits.parkedItems[0].kind == .edit && edits.retryAt<clock.addingTimeInterval(890))
+ try edits.discardParked(edits.parkedItems[0]);patchStatus=nil;patchCode="invalid_parameters"
  print("PASS: PATCH without a stored revision fetches it first, merged edits rebase on the server version, 400 parks the edit and Retry sends it")
 
  // 6: druhá offline úprava se položí na čekající, nic se neztratí.

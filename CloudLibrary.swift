@@ -78,6 +78,8 @@ struct CloudFailure: LocalizedError {
  var code: String? = nil
  init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0, code: String? = nil) { self.message = message; self.status = status; self.retryAfter = retryAfter; self.code = code }
  var errorDescription: String? { message }
+ // Kvóta účtu (tarif nebo plné úložiště); 413 resource_limit je jen příliš velký požadavek.
+ var isQuota: Bool { status == 402 || (status == 413 && code == "billing_storage_limit") }
  static var keychain: Self { Self(L("Přístup do Keychain se nezdařil. Připojení nebylo změněno.")) }
  static var invalid: Self { Self(L("Server vrátil neplatnou odpověď. Lokální data zůstávají zachovaná."),code:"invalid_response") }
 }
@@ -120,7 +122,8 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
    switch http.statusCode {
     case 401, 403: message = L("Zařízení nemá přístup. Zkontroluj připojení na webu nebo jej spáruj znovu.")
     case 402: message = L("Nahrávání do cloudu vyžaduje aktivní tarif nebo trial. Poznámka zůstává uložená lokálně.")
-    case 413: message = L("V cloudu už pro tuto relaci nezbývá místo. Poznámka zůstává uložená lokálně; uvolni místo nebo zvyš tarif na webu.")
+    case 413 where code == "billing_storage_limit": message = L("V cloudu už pro tuto relaci nezbývá místo. Poznámka zůstává uložená lokálně; uvolni místo nebo zvyš tarif na webu.")
+    case 413: message = L("Požadavek je pro cloud příliš velký (překračuje limit serveru). Opakování nepomůže; poznámka zůstává uložená lokálně.")
     case 415: message = L("Server nepřijal obrázek. Lokální relace zůstává ve frontě.")
     case 429: message = L("Příliš mnoho požadavků. Další pokus počká na povolený interval.")
     case 503: message = L("Cloud je teď nedostupný. Poznámky počkají na Macu a nahrají se později.")
@@ -223,7 +226,7 @@ final class CloudLibrary {
  private(set) var retryAt = Date.distantPast
  private var nextPoll = Date.distantPast
  var lastError: String?
- // Chyby tarifu (402/413) hlásíme hned po uložení, ne jen v okně cloudu.
+ // Chyby tarifu (402, 413 billing_storage_limit) hlásíme hned po uložení, ne jen v okně cloudu.
  var onQuotaFailure: ((String) -> Void)?
  var didChange: (() -> Void)?
 
@@ -468,7 +471,7 @@ final class CloudLibrary {
    catch let failure as CloudFailure where failure.status==404 || failure.status==405 {
     let reason=L("Úpravu relace se nepodařilo nahrát: server ji nepodporuje nebo relace neexistuje. Úprava zůstala odložená ve frontě.");parkEdit(file,edit,reason:reason);lastError=reason
    }
-   catch let failure as CloudFailure where failure.status==400 {
+   catch let failure as CloudFailure where failure.status==400 || (failure.status==413 && !failure.isQuota) {
     // Odmítnutý obsah se opakováním nespraví; úprava se odloží a zobrazí.
     let reason=LF("Server odmítl úpravu relace „%@“: %@",edit.fields.title,failure.message);parkEdit(file,edit,reason:reason);clearFailure(key);lastError=reason
    }
@@ -534,9 +537,9 @@ final class CloudLibrary {
  enum FailureKind{case permanent,timeout,transient,stop}
  static func classify(_ error:Error)->FailureKind {
   if let failure=error as? CloudFailure {
-   // Přístup, tarif, kvóta účtu (413) a rate limit platí pro celou frontu.
-   if [401,402,403,413,429].contains(failure.status){return .stop}
-   if [400,415].contains(failure.status) || failure.code=="invalid_response"{return .permanent}
+   // Přístup, tarif, plné úložiště účtu a rate limit platí pro celou frontu.
+   if [401,403,429].contains(failure.status) || failure.isQuota{return .stop}
+   if [400,413,415].contains(failure.status) || failure.code=="invalid_response"{return .permanent}
    return .transient
   }
   if let failure=error as? URLError {
@@ -555,7 +558,8 @@ final class CloudLibrary {
   entry.message=(error as? CloudFailure)?.message ?? error.localizedDescription
   let backoff=min(3600,30*pow(2,Double(min(entry.count,8)-1)))
   entry.next=now().timeIntervalSince1970+max((error as? CloudFailure)?.retryAfter ?? 0,backoff)
-  let park=entry.permanent>=3 || entry.timeouts>=5
+  // Příliš velký požadavek (413 mimo kvótu) se opakováním nespraví; odloží se hned.
+  let park=entry.permanent>=3 || entry.timeouts>=5 || (error as? CloudFailure)?.status==413
   if park{all.removeValue(forKey:key)}else{all[key]=entry}
   saveFailures(all);return (false,park)
  }
@@ -610,7 +614,7 @@ final class CloudLibrary {
    if (error as? CloudFailure)?.status == 401 { markRevoked(token: c.token);return }
    lastError = (error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
    // Tarif nebo plné úložiště: celá fronta počká déle a pak to zkusí sama znovu.
-   let quota = (error as? CloudFailure).map { [402, 413].contains($0.status) } ?? false
+   let quota = (error as? CloudFailure)?.isQuota ?? false
    if quota, let failure = error as? CloudFailure { onQuotaFailure?(failure.message) }
    let delay = max(quota ? 900 : 5, (error as? CloudFailure)?.retryAfter ?? 15)
    retryAt = now().addingTimeInterval(delay + Double.random(in:0...2))
@@ -621,7 +625,7 @@ final class CloudLibrary {
   let (stop,parkIt)=noteFailure(error,key:key)
   if stop{return true}
   let message=(error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
-  if parkIt{let reason=LF("Nahrání relace „%@“ opakovaně selhalo: %@",job.manifest.title,message);try park(directory,job,reason:reason);lastError=reason}
+  if parkIt{let reason=(error as? CloudFailure)?.status==413 ? LF("Relace „%@“ se nenahrála: %@",job.manifest.title,message):LF("Nahrání relace „%@“ opakovaně selhalo: %@",job.manifest.title,message);try park(directory,job,reason:reason);lastError=reason}
   else{drainFailure=message}
   return false
  }

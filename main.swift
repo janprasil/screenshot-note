@@ -624,6 +624,13 @@ if CommandLine.arguments.contains("--self-test") {
  let captureProbe=Composer(draft:Draft(images:[],comment:"",title:"",topic:topic),root:deleteRoot);captureProbe.show(present:false)
  assert(captureProbe.topicLink.superview != nil && captureProbe.addShotButton.superview != nil)
  assert(captureProbe.sessionLink.superview == nil && captureProbe.laterButton.superview == nil)
+ assert(captureProbe.copyLinkButton.superview != nil && captureProbe.copyLinkButton.isHidden && captureProbe.shareableSessionID() == nil)
+ // Viditelné tlačítko se nepřekrývá s konfigurací, odkazem relace ani snímáním.
+ captureProbe.copyLinkButton.isHidden=false;captureProbe.layoutContextRow()
+ assert(!captureProbe.copyLinkButton.frame.intersects(captureProbe.topicLink.frame) && !captureProbe.copyLinkButton.frame.intersects(captureProbe.captureGroup.frame))
+ captureProbe.window.contentView!.addSubview(captureProbe.sessionLink);captureProbe.layoutContextRow()
+ assert(!captureProbe.copyLinkButton.frame.intersects(captureProbe.sessionLink.frame) && !captureProbe.copyLinkButton.frame.intersects(captureProbe.captureGroup.frame))
+ captureProbe.sessionLink.removeFromSuperview()
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
  print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")

@@ -115,10 +115,10 @@ The checks cover filenames and collisions, export modes, persistent drafts, prev
 |---|---|
 | `main.swift` | Menu bar app, capture workflow and regression checks |
 | `CaptureNote.swift` | Drafts, filenames and Markdown export |
-| `CloudLibrary.swift` | Device pairing, Keychain, REST uploads and persistent outbox |
+| `CloudLibrary.swift` | Device pairing, Keychain, REST uploads, persistent outbox and share links |
 | `CloudSettings.swift` | Native cloud connection and retry controls |
 | `CloudTests.swift` | Offline and loopback native cloud checks |
-| `Interface.swift` | Capture window, settings and shortcuts |
+| `Interface.swift` | Capture window (incl. Copy link), settings and shortcuts |
 | `SessionPicker.swift` | Configuration/session selection dialogs |
 | `ImageNoteEditor.swift` | Per-image note dialog and Markdown expansion |
 | `CenteredFields.swift` | Centered text fields and window close actions |
@@ -252,6 +252,10 @@ with Try Again, Save Locally and Discard. Cancelling or closing a note with
 unsaved work asks first; the draft is backed up after every capture and
 restored after a crash. Deleting a folder whose directory also holds other
 files moves only Screenshot Note notes and images to the Trash.
+
+Copy link appears in the note window for a saved session in a cloud folder of the
+connected account once the server has it (not trashed). It creates or reuses the
+session's public link and copies its URL to the clipboard; revoking links happens on the web.
 
 Forget connection removes only local access. Revoke an active Mac in web
 Settings. [Transport, tests and release acceptance](docs/CLOUD-REST.md) explain

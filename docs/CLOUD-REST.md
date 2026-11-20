@@ -93,19 +93,21 @@ additive and behind server flags `TEAMS_ENABLED` / `SHARING_ENABLED` (default fa
   dropped, retried in a loop or sent to another folder silently. The user can
   retry after rejoining or discard the job explicitly. `403 role_forbidden` (for
   example appending to another member's note) is shown and not retried.
-- Sessions carry `author: {id, name}`. The template variable `{author}` renders the
-  name (empty when unknown). Built-in templates do not include it.
+- Sessions carry `author: {id, name}`. The template variable `{author}` (single braces,
+  like `{title}`) renders the name, empty when unknown. Built-in templates do not
+  include it, so older app versions never print it literally.
 
 ### Copy link
 
-A committed cloud session (`cloudSessionID`, `isCommitted`) gets **Copy link** next
-to the session link. It calls `POST /api/v1/sessions/{id}/share` (default audience
-`public`; `team` offered for team folders once phase 7 ships) and puts `url` on
-`NSPasteboard`. Repeated calls return the same URL. Requires a `library:write`
-device; `403`/`404` show an error, `429` honours `Retry-After`. Revocation lives
+A committed cloud session (`cloudSessionID`, `isCommitted`) gets a button next to the
+session link, localization key „Kopírovat odkaz“ (en “Copy link”). It calls
+`POST /api/v1/sessions/{id}/share` (default audience `public`; `team` for team folders
+only after the server's team-audience phase) and puts `url` on `NSPasteboard`.
+Repeated calls return the same URL. Requires a `library:write` device; `403`, `404`
+and `409 session_trashed` show an error, `429` honors `Retry-After`. Revocation lives
 on the web and in a later Mac menu (`DELETE …/share/{link_id}`). Shared links and
 other people's shared content are never listed or downloaded by the Mac app.
-Strings are localised cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
+Strings are localized cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
 gains `/me` libraries, a team folder, `library_id`, `author` and the share endpoint.
 
 ## Validation and remaining acceptance

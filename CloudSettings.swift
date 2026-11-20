@@ -2,7 +2,7 @@ import AppKit
 import QuartzCore
 
 final class CloudSettings: NSObject, NSWindowDelegate {
- private enum Phase: Equatable { case disconnected, pending, connected }
+ private enum Phase: Equatable { case disconnected, pending, connected, expired }
  private(set) var window: NSWindow?
  private var subtitle: NSTextField!
  private let hero = NSImageView()
@@ -21,6 +21,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  private var browser: AppButton!
  private var cancel: AppButton!
  private var held: AppButton!
+ private var parked: AppButton!
  private var timer: Timer?
  private var lastPhase: Phase?
  private let suppliedLibrary: CloudLibrary?
@@ -52,7 +53,8 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   browser=styledButton(L("Otevřít web"),frame:.zero,target:self,action:#selector(openBrowser))
   cancel=styledButton(L("Zrušit párování"),role:.quiet,frame:.zero,target:self,action:#selector(cancelPending))
   held=styledButton(L("Zmizelé relace…"),role:.primary,frame:.zero,target:self,action:#selector(resolveHeld))
-  for b in [connectButton!,forget!,retry!,browser!,cancel!,held!] { view.addSubview(b) }
+  parked=styledButton(L("Odložené…"),role:.primary,frame:.zero,target:self,action:#selector(resolveParked))
+  for b in [connectButton!,forget!,retry!,browser!,cancel!,held!,parked!] { view.addSubview(b) }
   library.didChange={ [weak self] in self?.refresh() }
   refresh();startPolling();presentScreenshotPanel(panel)
  }
@@ -75,7 +77,8 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  private func refresh() {
   guard connectButton != nil else { return }
   let c=library.connection, busy=library.syncing || library.connecting
-  let phase:Phase = c == nil ? .disconnected : c?.ownerID == nil ? .pending : .connected
+  let phase:Phase = c == nil ? .disconnected : c?.ownerID == nil ? .pending : library.needsRepair ? .expired : .connected
+  let parkedCount=library.parkedItems.count
   switch phase {
   case .disconnected:
    subtitle.stringValue=L("Zálohuj poznámky do cloudu a měj je i na webu.")
@@ -89,6 +92,12 @@ final class CloudSettings: NSObject, NSWindowDelegate {
    heroTitle.stringValue=L("Čekám na potvrzení")
    heroDetail.stringValue=L("Na webu zkontroluj, že se kód shoduje.")
    footnote.stringValue=""
+  case .expired:
+   subtitle.stringValue=L("Poznámky ve frontě počkají, dokud Mac znovu nepřipojíš.")
+   hero.image=symbol("exclamationmark.icloud.fill",.systemOrange,34)
+   heroTitle.stringValue=L("Připojení vypršelo nebo bylo odvoláno")
+   heroDetail.stringValue=library.signedInEmail ?? ""
+   footnote.stringValue=L("Připojit znovu zachová cloudové složky i frontu tohoto Macu.")
   case .connected:
    subtitle.stringValue=L("Poznámky se automaticky nahrávají do cloudu.")
    hero.image=symbol("checkmark.circle.fill",.systemGreen,34)
@@ -110,9 +119,11 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   if let error=library.lastError { text=error;icon="exclamationmark.triangle.fill";tint = .systemOrange }
   else if library.connecting { text=L("Ověřuji připojení…");icon="arrow.triangle.2.circlepath";tint=AppPalette.accent }
   else if phase == .connected && library.syncing { text=L("Nahrávám poznámky…");icon="arrow.up.circle";tint=AppPalette.accent }
-  else if phase == .connected && library.pendingCount > 0 { text=LF("Čeká na nahrání: %ld",library.pendingCount);icon="clock";tint=AppPalette.secondary }
+  else if (phase == .connected || phase == .expired) && library.pendingCount > 0 { text=LF("Čeká na nahrání: %ld",library.pendingCount);icon="clock";tint=AppPalette.secondary }
   else if phase == .connected { text=L("Vše je nahrané v cloudu.");icon="checkmark.icloud";tint = .systemGreen }
   else { text="";icon="";tint=AppPalette.secondary }
+  if parkedCount > 0 { text += (text.isEmpty ? "" : "\n") + LF("Odložené položky: %ld. Vyřeš je tlačítkem Odložené…",parkedCount);if icon.isEmpty || tint == .systemGreen {icon="exclamationmark.triangle.fill";tint = .systemOrange} }
+  if let error=SessionIndex.shared.writeError { text += (text.isEmpty ? "" : "\n") + error }
   if library.legacyPendingCount > 0 { text += (text.isEmpty ? "" : "\n") + L("Starší nebo nečitelné položky fronty zůstávají lokálně; automaticky se neodesílají.") }
   if let error=CloudFolders.shared.lastError { text += (text.isEmpty ? "" : "\n") + error }
   for notice in CloudFolders.shared.notices { text += (text.isEmpty ? "" : "\n") + notice }
@@ -120,17 +131,23 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   statusIcon.image=icon.isEmpty ? nil : symbol(icon,tint,13);statusIcon.isHidden=text.isEmpty
 
   let right=NSRect(x:364,y:20,width:190,height:32), middle=NSRect(x:184,y:20,width:170,height:32), left=NSRect(x:26,y:20,width:140,height:32)
-  connectButton.isHidden=phase != .disconnected;connectButton.frame=right
-  connectButton.isEnabled = !busy && Date() >= library.retryAt
+  connectButton.isHidden=phase != .disconnected && phase != .expired;connectButton.frame=right
+  connectButton.title=phase == .expired ? L("Připojit znovu") : L("Připojit Mac")
+  connectButton.isEnabled = !busy && (phase == .expired || Date() >= library.retryAt)
   cancel.isHidden=phase != .pending;cancel.frame=left;cancel.isEnabled = !busy
-  forget.isHidden=phase != .connected;forget.frame=left;forget.isEnabled = !busy
+  forget.isHidden=phase != .connected && phase != .expired;forget.frame=left;forget.isEnabled = !busy
   let canRetry=phase == .connected && library.pendingCount > 0
   retry.isHidden = !canRetry;retry.frame=right;retry.isEnabled = !busy && Date() >= library.retryAt
-  browser.isHidden=phase == .disconnected;browser.isEnabled = !busy
-  browser.frame=canRetry ? middle : right;browser.role=phase == .pending ? .primary : .secondary;browser.needsDisplay=true
-  // Zadržené hromadné smazání nahradí tlačítko webu.
-  held.isHidden=phase != .connected || CloudFolders.shared.heldFolders.isEmpty;held.frame=browser.frame
-  if !held.isHidden{browser.isHidden=true}
+  browser.role=phase == .pending ? .primary : .secondary;browser.needsDisplay=true;browser.isEnabled = !busy
+  // Volná místa vpravo a uprostřed dostanou podle priority: zmizelé relace, odložené položky, web.
+  held.isHidden=true;parked.isHidden=true;browser.isHidden=true
+  var slots:[NSRect]=[]
+  if phase == .connected { slots=canRetry ? [middle] : [right,middle] } else if phase == .pending { slots=[right] } else { slots=[middle] }
+  var extras:[AppButton]=[]
+  if phase == .connected && !CloudFolders.shared.heldFolders.isEmpty { extras.append(held) }
+  if parkedCount > 0 { extras.append(parked) }
+  if phase == .connected || phase == .pending { extras.append(browser) }
+  for (button,frame) in zip(extras,slots) { button.isHidden=false;button.frame=frame }
 
   if lastPhase == .pending && phase == .connected { celebrate() }
   lastPhase=phase
@@ -160,6 +177,8 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   window?.makeFirstResponder(nil)
   Task { @MainActor in
    do {
+    // Nové párování po odvolání: staré pověření zmizí, složky a fronta zůstávají.
+    if library.needsRepair { try library.forgetConnection() }
     try await library.startPairing(endpoint:library.endpoint,name:Host.current().localizedName ?? "Mac")
     openBrowser()
    } catch { library.lastError=(error as? CloudFailure)?.message ?? L("Připojení se nezdařilo. Zkus to později znovu.") }
@@ -186,6 +205,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
    refresh()
   }
  }
+ @objc private func resolveParked() { Task { @MainActor in FolderDialogs.resolveParked(library:library);refresh() } }
  @objc private func resolveHeld() {Task { @MainActor in await FolderDialogs.resolveHeld(manual:true);refresh() }}
  @objc private func sync() { Task { @MainActor in await library.sync() } }
  func windowWillClose(_ notification:Notification) { timer?.invalidate();timer=nil }

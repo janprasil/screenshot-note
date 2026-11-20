@@ -57,7 +57,7 @@ enum Topics {
   for topic in list where topic.savesLocally {
    let target=try checkedDestination(topic.folder)
    if let other=checked.first(where:{sameDestination($0.1,target)}) {
-    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.0.name,topic.name))
+    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.0.displayName,topic.displayName))
    }
    checked.append((topic,target))
   }
@@ -68,7 +68,7 @@ enum Topics {
   let target=try checkedDestination(folder.path)
   for other in list where other.id != topic.id && other.savesLocally {
    if sameDestination(target,try checkedDestination(other.folder)) {
-    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.name,topic.name))
+    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.displayName,topic.displayName))
    }
   }
  }
@@ -259,7 +259,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  /// Smaže složku: cloudovou i na webu (30 dní v Koši), adresář jde do Koše v macOS.
  @objc func deleteTopic(){
   guard let topic=list.first(where:{$0.id==editingID}) else{return}
-  let alert=NSAlert();alert.messageText=LF("Smazat složku „%@“?",topic.name)
+  let alert=NSAlert();alert.messageText=LF("Smazat složku „%@“?",topic.displayName)
   alert.informativeText=topic.cloudFolderID != nil ? L("Složka se smaže i v cloudu (bude 30 dní v Koši na webu). Lokální soubory se přesunou do Koše v macOS."):L("Složka zmizí z aplikace a její lokální soubory se přesunou do Koše v macOS.")
   alert.addButton(withTitle:L("Smazat"));alert.addButton(withTitle:L("Zrušit"));alert.buttons[0].hasDestructiveAction=true
   guard alert.runModal() == .alertFirstButtonReturn else{return}

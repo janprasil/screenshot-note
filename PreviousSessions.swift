@@ -267,7 +267,7 @@ func resolveDraftTarget(_ draft:Draft,folders:CloudFolders = .shared)->DraftTarg
  var current=topic
  if let folder=topic.cloudFolderID {
   // Cloudová relace musí v indexu existovat, nebýt v koši ani smazaná z disku.
-  guard let live=folders.allTopics.first(where:{$0.cloudFolderID==folder}),!live.folder.isEmpty,let base=try? Topics.checkedDestination(live.folder) else{return .stale(title)}
+  guard let live=folders.topics.first(where:{$0.cloudFolderID==folder && $0.cloudOwnerID==topic.cloudOwnerID}) ?? folders.allTopics.first(where:{$0.cloudFolderID==folder}),!live.folder.isEmpty,let base=try? Topics.checkedDestination(live.folder) else{return .stale(title)}
   current=live
   if let session=previous.session {
    guard let id=UUID(uuidString:session),let record=SessionIndex.shared.cloud(id,base:base),record.trashed != true,record.askDelete != true,record.missingSince==nil,record.held != true,fm.fileExists(atPath:record.file) else{return .stale(title)}

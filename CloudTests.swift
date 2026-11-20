@@ -234,6 +234,30 @@ func cloudFolderUnitTests()throws {
  // 429 bez Retry-After čeká 30 s; po odpojení účtu se zámek nepoužije.
  let bare=await shareFailure("00000000-0000-4000-8000-000000000430");assert(bare?.status==429 && abs(sharer.shareRetryAt.timeIntervalSince(clock)-30)<1)
  try sharer.forgetConnection();assert(sharer.shareRetryAt == .distantPast);try vault.save(original)
+ // Týmová složka proti fixture: /me libraries, owner pole, library_id, author, ztráta a návrat týmu.
+ // Vlastní hodiny: sdílené hodiny testu hlídají platnost párování fixture.
+ var teamClock=clock
+ let teamLib=CloudLibrary(queue:root.appendingPathComponent("team-queue"),vault:vault,endpoint:endpoint,now:{teamClock})
+ let teamFolders=CloudFolders(file:root.appendingPathComponent("team-folders.json"),connection:{teamLib.connection},localTopics:{[]},pending:{teamLib.hasPending($0)},storedLocal:{[]},saveLocal:{_ in})
+ teamLib.folderInfo={teamFolders.folderInfo($0)}
+ func membership(_ value:Bool)async throws{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/fixture/team",method:"POST",token:original.token,body:Data((value ? #"{"member":true}"#:#"{"member":false}"#).utf8))}
+ await teamFolders.refresh(teamLib.connection);assert(teamFolders.lastError==nil)
+ guard let team=teamFolders.topics.first(where:{$0.cloudTeam==true}) else{throw CloudFailure.invalid}
+ assert(team.displayName==LF("%@ · %@","Fixture tým","Bugy") && team.cloudRole=="member" && !team.canManageCloudFolder && team.cloudOwnerID != original.ownerID)
+ let teamDir=root.appendingPathComponent("team-dir");try teamFolders.setFolder(team,path:teamDir.path);await teamFolders.refresh(teamLib.connection)
+ let teamFiles=try fm.contentsOfDirectory(atPath:teamDir.path).filter{$0.hasSuffix(".md")}
+ assert(teamFolders.lastError==nil && teamFiles.count==1 && ((try? String(contentsOf:teamDir.appendingPathComponent(teamFiles[0]),encoding:.utf8)) ?? "").contains("Autor: Fixture Bob"))
+ // Ztráta členství: složka skrytá, soubory zůstávají; upload skončí jednou 404 a znovu se automaticky nezkouší.
+ try await membership(false);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.lastError==nil && teamFolders.topics.isEmpty && teamFolders.isUnavailable(team) && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ try teamLib.enqueue(Draft(images:["shot.png"],comment:"Týmová poznámka",title:"Team upload",topic:team),root:root,folders:[team])
+ await teamLib.sync();assert(teamLib.pendingCount==1 && teamLib.lastError?.contains("Fixture tým · Bugy")==true)
+ teamClock=teamClock.addingTimeInterval(120);await teamLib.sync();assert(teamLib.pendingCount==1 && teamLib.lastError?.contains("Bugy")==true)
+ // Návrat do týmu: mapování se obnoví a ruční Nahrát teď úlohu odešle.
+ try await membership(true);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.topics.first{$0.cloudTeam==true}?.folder==teamDir.path && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ teamClock=teamClock.addingTimeInterval(120);await teamLib.sync(manual:true);assert(teamLib.pendingCount==0 && teamLib.lastError==nil)
+ print("PASS: team folder over REST: /me libraries, owner fields, library_id listing, {author}, membership loss hides the folder and blocks the upload without a retry loop, rejoin restores the mapping")
  let token="sn_share_v1_"+String(repeating:"a",count:43)
  assert(CloudLibrary.shareURL("https://evil.test/s/"+token,endpoint:endpoint)==nil)
  assert(CloudLibrary.shareURL(raw+"/s/short",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"?x=1",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"a",endpoint:endpoint)==nil)

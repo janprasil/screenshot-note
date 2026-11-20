@@ -194,7 +194,7 @@ enum FolderDialogs {
   NSApp.activate(ignoringOtherApps:true)
   let alert=NSAlert();alert.messageText=L("Znovu propojit složky s cloudem?")
   alert.informativeText=L("Tyto lokální složky dřív patřily do cloudu tohoto účtu. Místní relace se nahrají, cloudové se stáhnou a rozdílné verze se uloží vedle jako _cloud.md.")
-  let boxes=candidates.map{topic->NSButton in let box=NSButton(checkboxWithTitle:topic.name,target:nil,action:nil);box.state = .on;return box}
+  let boxes=candidates.map{topic->NSButton in let box=NSButton(checkboxWithTitle:topic.displayName,target:nil,action:nil);box.state = .on;return box}
   let stack=NSStackView(views:boxes);stack.orientation = .vertical;stack.alignment = .leading;stack.frame=NSRect(x:0,y:0,width:330,height:CGFloat(boxes.count)*24);alert.accessoryView=stack
   alert.addButton(withTitle:L("Propojit"));alert.addButton(withTitle:L("Teď ne"))
   let accepted=alert.runModal() == .alertFirstButtonReturn

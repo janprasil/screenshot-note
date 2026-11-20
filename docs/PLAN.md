@@ -1,3 +1,18 @@
+# Integrace stacku kolaborace s main (#11, #12) — 20. 11. 2026
+
+- `origin/main` (#12 sync robustness/parked items/extension revision, #11 CI) mergnut do
+  `feat/collab-docs`, dál merge commity do `feat/collab-p2-copy-link` a `feat/collab-p6-team-folders`
+  (bez rebase/force).
+- Sjednocení: týmové `blocked.json` + „Zahodit zablokované…“ (fáze 6) nahrazeno odloženými položkami
+  z #12. Týmový 404 / 403 `role_forbidden` úlohu odloží s důvodem `<Tým> · <Složka>` (Zkusit znovu /
+  Uložit lokálně / Zahodit). `role_forbidden` se chytá před obecnou klasifikací, takže 403 nezastaví frontu.
+  402/413 týmové složky dostane předponu a projde klasifikací #12 (kvóta zastaví frontu, `resource_limit` odloží).
+  PATCH s `role_forbidden` se odloží s důvodem. Do `renderSessionTemplate` jde `{author}` přes `serverTitle`
+  (escaping z #12). Limity JSON z #12 platí i pro týmový seznam relací.
+- Ověřeno na každé úrovni: `./build.sh`, `python3 tests/cloud-rest.py <binárka>`, `tests/build-config.py`,
+  `tests/release.py` (totéž co CI + loopback). Na samotném main `tests/cloud-rest.py` padá
+  (`folder_required`), proto ho `ci.yml` nespouští; od fáze 2 projde.
+
 # Týmové složky — fáze 6 kolaborace, Mac (20. 11. 2026)
 
 - Stav: hotovo ve větvi `feat/collab-p6-team-folders` (stack nad fází 2, nepushnuto).
@@ -16,8 +31,8 @@
   a mapování zůstávají a rezervují adresáře (i po odpojení), draft → výchozí složka
   s hláškou. Souběhy: chybějící týmová složka v katalogu i 404 detailu ověří `/me`
   znovu, než by se cokoli označilo za smazané. Návrat obnoví mapování bez duplikátů.
-- Upload: 404 / 403 `role_forbidden` → `blocked.json` u úlohy, hláška se jménem složky,
-  automatický drain ji přeskakuje, „Nahrát teď“ zkusí znovu. 402/413 týmové složky
+- Upload: 404 / 403 `role_forbidden` v týmové složce → úloha odložená (`.conflicts/`, Odložené…
+  z #12; původní `blocked.json` nahrazen při integraci), hláška se jménem složky. 402/413 týmové složky
   s předponou složky. `{author}` v souhrnu/detailu a v `renderSessionTemplate`.
 - Ověřeno: `./build.sh` (59 PASS řádků včetně 6 nových týmových, lokalizace),
   `python3 tests/cloud-rest.py <binárka>` (nový PASS týmového wire kontraktu),
@@ -28,7 +43,7 @@
   403 se odloží jednou), doplnění cizí relace odmítnuto; odhlášení nechá týmové složky jako
   skrytý záznam (žádný reconnect/`invalid`), `former-cloud:<účet>:<složka>` pro týmové;
   fixture vrací pro nedostupnou library prázdný seznam a pokrývá souběh prázdný seznam →
-  404 → nové `/me`; „Zahodit zablokované…“ s potvrzením (Koš v macOS); blokace jen pro
+  404 → nové `/me`; zahození přes Odložené… (Koš v macOS); odložení jen pro
   týmové složky; `LibraryKind`/`LibraryRole`, `isRoleForbidden`, jedna nápověda šablon.
 - `--folder-sync-self-test` proti živému Next (web `test:folders` z c88bd1d): živá část čekala starou
   strukturu podsložek a padala na assertu, výstup do roury byl blokově bufferovaný. Opraveno na

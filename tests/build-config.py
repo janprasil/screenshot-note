@@ -25,5 +25,12 @@ class BuildConfiguration(unittest.TestCase):
             with self.subTest(origin=origin), self.assertRaises(ValueError):
                 config.configuration("test", origin)
 
+    def test_release_version(self):
+        self.assertEqual(config.version(None, None), {})
+        self.assertEqual(config.version("4.5.0", "123"), {"CFBundleShortVersionString": "4.5.0", "CFBundleVersion": "123"})
+        for short, build in [("4.5.0", None), (None, "1"), ("4.5.0-rc.1", "1"), ("4.5", "1"), ("04.5.0", "1"), ("4.5.0", "0"), ("4.5.0", "1a")]:
+            with self.subTest(short=short, build=build), self.assertRaises(ValueError):
+                config.version(short, build)
+
 
 unittest.main()

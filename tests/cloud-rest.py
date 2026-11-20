@@ -302,7 +302,7 @@ try:
     assert len(share_calls) == 12 and share_statuses == [201, 200, 200]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
-    print('PASS: team folder wire contract (/me libraries, owner fields, library_id, author, membership loss → hidden folder and blocked upload without retry loop)')
+    print('PASS: team folder wire contract (/me libraries, owner fields, library_id, author, membership loss → hidden folder and parked upload without retry loop)')
     print('PASS: loopback-only wire contract, share endpoint (POST public, 201/200 same URL, Retry-After honored), no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')
 finally:
     server.shutdown()

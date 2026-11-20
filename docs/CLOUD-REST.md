@@ -16,7 +16,10 @@ contains the token. The dialog displays the comparison code and asks the user
 to check both code and account. Pending status is polled no faster than five
 seconds, with Retry-After/backoff on errors. Closing the window stops polling;
 reopening resumes the saved pending credential. Active credentials have no
-client refresh or hidden renewal. Re-pair after server expiry/revocation.
+client refresh or hidden renewal. An active Mac re-checks its pairing state at
+most every 15 minutes; a 401, `revoked`/`expired` state or a past `expires_at`
+switches the UI to Reconnect (queue and cloud folders are kept). Folder refresh
+backs off exponentially and honours Retry-After.
 
 Once active, `/me` supplies the owner UUID and display email; an existing owner
 binding cannot silently change. Every upload drain checks `/me` again. A
@@ -26,7 +29,10 @@ old `cloudWebURL` preferences and runtime environment variables are ignored.
 Local/test builds use origin-specific Keychain services; production retains the
 existing service. A stored credential for another origin is never loaded.
 See the README for build-time local/test configuration. Cookies, caches and redirects are disabled in the native transport.
-Responses are bounded to 512 KiB; PNG request bodies stream from local files.
+JSON responses are bounded (16 MiB for session list/detail/PATCH, 32 MiB for the
+folder list, 512 KiB elsewhere); PNG request bodies stream from local files.
+Image uploads/downloads use a separate URLSession with a 4 h resource timeout
+and a 70 s idle timeout; JSON calls keep the 75 s resource limit.
 
 Cancel pairing calls the pending DELETE endpoint. Forget connection removes
 only this Mac's Keychain item and leaves all queued data; it does **not** claim
@@ -59,7 +65,23 @@ with the matching UUID, pinned digest and complete index set permits removal.
 A lost commit reply is resolved by the repeated immutable manifest request.
 No timeout invents another session ID. HTTP429 honors Retry-After; temporary
 errors use bounded cooldown/jitter and manual retry. `upload_incomplete` waits
-at least 90 seconds. Trial/capacity/invalid-image errors retain the local job.
+at least 90 seconds. A failing job never blocks later jobs: each job keeps its
+own failure count and backoff (`.failures.json`). 401/402/403/429, account
+quota (402 and 413 `billing_storage_limit`, 15 min backoff, then automatic
+retry) and loss of connectivity
+stop the whole drain. 413 `resource_limit` (request too large) parks
+the job or edit at once. After three permanent failures (400, 415, invalid
+response) or five timeouts the job is parked in `.conflicts/` with a
+`reason.txt`. Extensions send the downloaded session `revision`; on
+`session_changed` the client re-fetches the session, 3-way merges title,
+comment and captions (base = downloaded text) and retries with the new
+revision, parking only on a same-field conflict. Text edits without a stored
+revision fetch it before PATCH; 400 and 413 `resource_limit` park the edit, a full account waits like uploads.
+
+Parked items and queue entries of another account (or after Disconnect) are
+listed under Cloud Library → Set Aside… and in the menu bar. Each offers Try
+Again (own account only), Save Locally (writes Markdown + PNGs into a chosen
+folder) and Discard (macOS Trash).
 The drain rereads the queue after each completion, including notes added while
 an earlier request is in flight.
 
@@ -97,12 +119,14 @@ new fields are additive and behind server flags `TEAMS_ENABLED` / `SHARING_ENABL
   dropped, retried in a loop or sent to another folder silently. The user can retry
   after rejoining or discard the job explicitly. `403 role_forbidden` (for example
   appending to another member's note) is shown and not retried.
-  Implementation: the job gets a `blocked.json` marker and the Cloud Library status
-  names the folder (`<Team> · <Folder>`). Automatic drains skip blocked jobs; „Nahrát
-  teď“ (Upload now) clears the markers and tries once more; „Zahodit zablokované…“
-  (Discard blocked…) asks for confirmation and moves the jobs to the macOS Trash.
-  Only team folders are blocked; a 404 in a personal folder keeps the previous
-  behaviour (new upload: error with retry; extension: parked).
+  Implementation (unified with the parked items from #12): in a team folder a `404`
+  (lost membership, also for additions) or any `403 role_forbidden` parks the job in
+  `.conflicts/` with a `reason.txt` naming the folder (`<Team> · <Folder>`). It is
+  checked before the generic classification, so this `403` never stops the whole
+  drain. The job shows up under Set Aside… (Try Again after rejoining, Save Locally,
+  Discard to the macOS Trash) and is never retried automatically. There is no
+  separate blocked state. A 404 in a personal folder keeps the #12 behaviour (new
+  upload: per-job backoff; addition: parked).
 - Text edits (`PATCH`) of another member's note are not sent for a member: the edit
   stays in the local file with one notice, and adding screenshots to such a note is
   refused before queueing (author from `author.id`, unknown author = foreign). A
@@ -136,7 +160,7 @@ account/origin. Network errors only show a message.
 Strings are localized cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
 covers the share endpoint (phase 2) and, since phase 6, `/me` libraries, a team
 folder with owner fields, `library_id`, `author`, team loss (hidden folder, upload
-blocked after one 404) and rejoin.
+parked after one 404) and rejoin.
 
 ## Validation and remaining acceptance
 

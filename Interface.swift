@@ -509,7 +509,23 @@ final class Composer:NSObject,NSWindowDelegate {
  }
 
  func end(_ result:Int){snapshotFields();window.orderOut(nil);complete?(result,draft)}
- @objc func cancel(){end(0)};@objc func later(){end(1)};@objc func save(){end(2)}
+ // Vrací true, když by Zrušit ztratilo neuloženou práci.
+ var hasUnsavedWork:(()->Bool)?
+ enum CancelChoice{case keep,later,discard}
+ /// Zrušit s neuloženou prací se nejdřív zeptá; nil znamená pokračovat v úpravách.
+ func requestedCancel(confirm:()->CancelChoice)->Int? {
+  snapshotFields()
+  guard hasUnsavedWork?() ?? false else{return 0}
+  switch confirm(){case .discard:return 0;case .later:return 1;case .keep:return nil}
+ }
+ static func confirmDiscard()->CancelChoice {
+  let alert=NSAlert();alert.messageText=L("Zahodit rozpracovanou poznámku?");alert.informativeText=L("Neuložené snímky a text se ztratí. Můžeš je odložit a později otevřít z menu.")
+  alert.addButton(withTitle:L("Odložit na později"));let discard=alert.addButton(withTitle:L("Zahodit"));discard.hasDestructiveAction=true
+  let keep=alert.addButton(withTitle:L("Pokračovat v úpravách"));keep.keyEquivalent="\u{1b}"
+  alert.window.level = .modalPanel
+  switch alert.runModal(){case .alertFirstButtonReturn:return .later;case .alertSecondButtonReturn:return .discard;default:return .keep}
+ }
+ @objc func cancel(){if let result=requestedCancel(confirm:Self.confirmDiscard){end(result)}};@objc func later(){end(1)};@objc func save(){end(2)}
  func windowShouldClose(_ sender:NSWindow)->Bool{cancel();return false}
 }
 

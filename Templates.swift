@@ -81,7 +81,7 @@ func indexedSessionCount(_ topic:Topic)->Int {
    let sidecar=file.deletingLastPathComponent().appendingPathComponent(stem+"_template.md")
    if blocks.count==1 && !blocks[0].combined {
     var r=blocks[0];let next=body(r)
-    guard exact(r,ns),r.start==0,r.length==ns.length else{try? Data(next.utf8).write(to:sidecar,options:.atomic);edited+=1;continue}
+    guard exact(r,ns),r.start==0,r.length==ns.length else{_ = try? writeGeneratedCopy(Data(next.utf8),to:sidecar);edited+=1;continue}
     guard (try? Data(next.utf8).write(to:file,options:.atomic)) != nil else{continue}
     r.length=(next as NSString).length;r.hash=sessionFingerprint(Data(next.utf8));r.heading=firstLine(next);r.template=template;index.put(r);writeSessionTag(file,r.id);updated+=1
     continue
@@ -94,7 +94,7 @@ func indexedSessionCount(_ topic:Topic)->Int {
    var output=header,placed:[(SessionRecord,Int,String)]=[]
    for (i,r) in blocks.enumerated(){if i>0{output+="\n\n---\n\n"};let value=body(r);placed.append((r,(output as NSString).length,value));output+=value}
    output+=footer
-   if !pristine{try? Data(output.utf8).write(to:sidecar,options:.atomic);edited+=max(1,blocks.filter{!exact($0,ns)}.count);continue}
+   if !pristine{_ = try? writeGeneratedCopy(Data(output.utf8),to:sidecar);edited+=max(1,blocks.filter{!exact($0,ns)}.count);continue}
    guard (try? Data(output.utf8).write(to:file,options:.atomic)) != nil else{continue}
    for (r,start,value) in placed{var next=r;next.start=start;next.length=(value as NSString).length;next.hash=sessionFingerprint(Data(value.utf8));next.heading=firstLine(value);next.template=template;next.footer=footer;index.put(next);updated+=1}
    tagCombinedFile(file)

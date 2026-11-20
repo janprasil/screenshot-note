@@ -261,6 +261,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard let topic=list.first(where:{$0.id==editingID}) else{return}
   let alert=NSAlert();alert.messageText=LF("Smazat složku „%@“?",topic.displayName)
   alert.informativeText=topic.cloudFolderID != nil ? L("Složka se smaže i v cloudu (bude 30 dní v Koši na webu). Lokální soubory se přesunou do Koše v macOS."):L("Složka zmizí z aplikace a její lokální soubory se přesunou do Koše v macOS.")
+  // Cizí soubory v adresáři zůstávají; uživatel to ví předem.
+  if !topic.folder.isEmpty,CloudFolders.shared.hasUnknownFiles(topic.folder){alert.informativeText+="\n\n"+L("Adresář obsahuje i jiné soubory. Ty zůstanou na místě; do Koše v macOS se přesunou jen poznámky Screenshot Note.")}
   alert.addButton(withTitle:L("Smazat"));alert.addButton(withTitle:L("Zrušit"));alert.buttons[0].hasDestructiveAction=true
   guard alert.runModal() == .alertFirstButtonReturn else{return}
   Task{@MainActor in

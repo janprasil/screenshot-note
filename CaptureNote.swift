@@ -2,7 +2,31 @@ import AppKit
 import CoreGraphics
 import Darwin
 
-struct Draft: Codable { var images: [String]; var comment: String; var title: String? = nil; var topic:Topic? = nil; var previous:PreviousSessionTarget? = nil; var imageNotes:[String:String]? = nil }
+struct Draft: Codable { var images: [String]; var comment: String; var title: String? = nil; var topic:Topic? = nil; var previous:PreviousSessionTarget? = nil; var imageNotes:[String:String]? = nil
+ // Texty čekající cloudové úpravy, ze kterých koncept vznikl; nová úprava se na ně položí.
+ var cloudBase:CloudLibrary.CloudEdit.Fields? = nil
+}
+/// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
+func draftSignature(_ draft:Draft,root:URL)->String {
+ var parts=[draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",draft.comment]
+ for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image)}
+ return sessionFingerprint(Data(parts.joined(separator:"\u{0}").utf8))
+}
+let recoveryRoot = draftRoot.deletingLastPathComponent().appendingPathComponent("Draft Recovery", isDirectory: true)
+/// Text ze serveru nesmí v Markdownu vytvořit obrázek ani oddělovač relací.
+/// Escapování je vratné: před `[` za `!` a před `---` na samostatném řádku přibude vždy jedno zpětné lomítko.
+func escapeServerMarkdown(_ text:String)->String {
+ text.replacingOccurrences(of:"!(\\\\*)\\[",with:"!$1\\\\[",options:.regularExpression)
+  .replacingOccurrences(of:"(?m)^(\\\\*)(---[ \\t]*)$",with:"$1\\\\$2",options:.regularExpression)
+}
+func unescapeServerMarkdown(_ text:String)->String {
+ text.replacingOccurrences(of:"!(\\\\*)\\\\\\[",with:"!$1[",options:.regularExpression)
+  .replacingOccurrences(of:"(?m)^(\\\\*)\\\\(---[ \\t]*)$",with:"$1$2",options:.regularExpression)
+}
+/// Název ze serveru je vždy jeden řádek a nevloží obrázek.
+func serverTitle(_ title:String)->String {
+ escapeServerMarkdown(title.replacingOccurrences(of:"\r\n",with:" ").replacingOccurrences(of:"\n",with:" ").replacingOccurrences(of:"\r",with:" "))
+}
 let fm = FileManager.default
 let draftRoot = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Screenshot Note/Draft", isDirectory: true)
 var destination: URL { URL(fileURLWithPath: UserDefaults.standard.string(forKey:"destination") ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshot Note").path, isDirectory:true) }

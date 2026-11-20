@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Bake the web origin into the application before signing."""
+"""Bake the web origin and release version into the application before signing."""
 import os
+import re
 from pathlib import Path
 import plistlib
 import sys
@@ -33,13 +34,25 @@ def configuration(environment, override):
     return environment, url._replace(scheme=url.scheme, netloc=url.netloc.lower()).geturl().rstrip("/")
 
 
+def version(short, build):
+    """Release builds pass X.Y.Z and a numeric build; local builds keep Info.plist values."""
+    if short is None and build is None:
+        return {}
+    if short is None or build is None:
+        raise ValueError("Set both SCREENSHOT_NOTE_VERSION and SCREENSHOT_NOTE_BUILD")
+    if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", short) or not re.fullmatch(r"[1-9]\d{0,8}", build):
+        raise ValueError("Version must be X.Y.Z and build a positive integer")
+    return {"CFBundleShortVersionString": short, "CFBundleVersion": build}
+
+
 if __name__ == "__main__":
     try:
         environment, origin = configuration(os.environ.get("SCREENSHOT_NOTE_ENV", "production"), os.environ.get("SCREENSHOT_NOTE_WEB_ORIGIN"))
         path = Path(sys.argv[1])
         data = plistlib.loads(path.read_bytes())
-        data.update(ScreenshotNoteEnvironment=environment, ScreenshotNoteWebOrigin=origin)
+        release = version(os.environ.get("SCREENSHOT_NOTE_VERSION"), os.environ.get("SCREENSHOT_NOTE_BUILD"))
+        data.update(ScreenshotNoteEnvironment=environment, ScreenshotNoteWebOrigin=origin, **release)
         path.write_bytes(plistlib.dumps(data))
-        print(f"Build environment: {environment}; web origin: {origin}")
+        print(f"Build environment: {environment}; web origin: {origin}; version: {data['CFBundleShortVersionString']} ({data['CFBundleVersion']})")
     except (ValueError, IndexError) as error:
         sys.exit(str(error))

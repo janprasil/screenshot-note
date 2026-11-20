@@ -210,7 +210,7 @@ enum FolderDialogs {
   for record in folders.deletedRemotely {
    NSApp.activate(ignoringOtherApps:true)
    let alert=NSAlert();alert.messageText=LF("Složka %@ byla smazána v cloudu. Zachovat ji jako lokální, nebo smazat?",record.topic.displayName)
-   alert.informativeText=record.folder+(folders.hasUnknownFiles(record.folder) ? "\n\n"+L("Adresář obsahuje i jiné soubory; při smazání se do Koše v macOS přesune celý."):"")
+   alert.informativeText=record.folder+(folders.hasUnknownFiles(record.folder) ? "\n\n"+L("Adresář obsahuje i jiné soubory. Ty zůstanou na místě; do Koše v macOS se přesunou jen poznámky Screenshot Note."):"")
    alert.addButton(withTitle:L("Zachovat jako lokální"));alert.addButton(withTitle:L("Smazat"));alert.addButton(withTitle:L("Později"))
    // Obnovení na webu během dotazu dialog zavře.
    let observer=NotificationCenter.default.addObserver(forName:.cloudFoldersChanged,object:nil,queue:.main){_ in
@@ -266,11 +266,50 @@ enum FolderDialogs {
    while true {
     let candidate=root.appendingPathComponent(index==1 ? base:base+" \(index)",isDirectory:true)
     var directory:ObjCBool=false
-    let blocked=fm.fileExists(atPath:candidate.path,isDirectory:&directory) && !directory.boolValue
+    // Existující neprázdný adresář se nepřebírá, aby do něj stahování nepřimíchalo cizí soubory.
+    let exists=fm.fileExists(atPath:candidate.path,isDirectory:&directory)
+    let blocked=exists && (!directory.boolValue || ((try? fm.contentsOfDirectory(atPath:candidate.path)) ?? []).contains{!$0.hasPrefix(".")})
     if !blocked,(try? folders.setFolder(topic,path:candidate.path)) != nil{break}
     index+=1;guard index<=100 else{throw CloudFailure(LF("Pro „%@“ se nepodařilo najít volný adresář.",topic.displayName))}
    }
   }
+ }
+ /// Odložené a osiřelé položky cloudové fronty: Zkusit znovu, Uložit lokálně, Zahodit.
+ @MainActor static func resolveParked(library:CloudLibrary = .shared) {
+  for item in library.parkedItems {
+   NSApp.activate(ignoringOtherApps:true)
+   let alert=NSAlert()
+   alert.messageText=item.stranded ? LF("Relace „%@“ čeká ve frontě jiného účtu nebo odpojeného Macu.",item.title):LF("Relace „%@“ se nenahrála do cloudu.",item.title)
+   var info:[String]=[]
+   switch item.kind{case .upload:info.append(L("Nová relace se snímky."));case .addition:info.append(L("Doplnění relace o nové snímky."));case .edit:info.append(L("Úprava textu relace."))}
+   if let reason=item.reason{info.append(reason)}
+   if item.stranded{info.append(L("Nahraje se po připojení stejného účtu. Mezitím ji můžeš uložit lokálně."))}
+   alert.informativeText=info.joined(separator:"\n\n")
+   var actions:[String]=[]
+   if item.retryable{alert.addButton(withTitle:L("Zkusit znovu"));actions.append("retry")}
+   alert.addButton(withTitle:L("Uložit lokálně…"));actions.append("save")
+   alert.addButton(withTitle:L("Zahodit…"));actions.append("discard")
+   let later=alert.addButton(withTitle:L("Později"));later.keyEquivalent="\u{1b}";actions.append("later")
+   alert.window.level = .modalPanel
+   let choice=alert.runModal().rawValue-NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+   guard actions.indices.contains(choice),actions[choice] != "later" else{break}
+   do {
+    switch actions[choice] {
+    case "retry":try library.retryParked(item);Task{@MainActor in await library.sync()}
+    case "save":
+     let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Uložit sem")
+     panel.message=L("Vyber místní adresář; relace se do něj uloží jako Markdown se snímky.")
+     if let local=Topics.local.first(where:\.savesLocally){panel.directoryURL=local.destination}
+     guard panel.runModal() == .OK,let url=panel.url else{continue}
+     NSWorkspace.shared.activateFileViewerSelecting([try library.saveParkedLocally(item,to:url)])
+    default:
+     let confirm=NSAlert();confirm.messageText=LF("Zahodit relaci „%@“?",item.title);confirm.informativeText=L("Položka se přesune do Koše v macOS a do cloudu se nenahraje.")
+     confirm.addButton(withTitle:L("Zahodit")).hasDestructiveAction=true;confirm.addButton(withTitle:L("Zrušit"))
+     if confirm.runModal() == .alertFirstButtonReturn{try library.discardParked(item)}
+    }
+   } catch {showError(error.localizedDescription)}
+  }
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
  static func folderName(_ name:String)->String {
   let forbidden=CharacterSet(charactersIn:"/:\\").union(.controlCharacters)

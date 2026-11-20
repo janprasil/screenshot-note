@@ -16,7 +16,10 @@ contains the token. The dialog displays the comparison code and asks the user
 to check both code and account. Pending status is polled no faster than five
 seconds, with Retry-After/backoff on errors. Closing the window stops polling;
 reopening resumes the saved pending credential. Active credentials have no
-client refresh or hidden renewal. Re-pair after server expiry/revocation.
+client refresh or hidden renewal. An active Mac re-checks its pairing state at
+most every 15 minutes; a 401, `revoked`/`expired` state or a past `expires_at`
+switches the UI to Reconnect (queue and cloud folders are kept). Folder refresh
+backs off exponentially and honours Retry-After.
 
 Once active, `/me` supplies the owner UUID and display email; an existing owner
 binding cannot silently change. Every upload drain checks `/me` again. A
@@ -26,7 +29,10 @@ old `cloudWebURL` preferences and runtime environment variables are ignored.
 Local/test builds use origin-specific Keychain services; production retains the
 existing service. A stored credential for another origin is never loaded.
 See the README for build-time local/test configuration. Cookies, caches and redirects are disabled in the native transport.
-Responses are bounded to 512 KiB; PNG request bodies stream from local files.
+JSON responses are bounded (16 MiB for session list/detail/PATCH, 32 MiB for the
+folder list, 512 KiB elsewhere); PNG request bodies stream from local files.
+Image uploads/downloads use a separate URLSession with a 4 h resource timeout
+and a 70 s idle timeout; JSON calls keep the 75 s resource limit.
 
 Cancel pairing calls the pending DELETE endpoint. Forget connection removes
 only this Mac's Keychain item and leaves all queued data; it does **not** claim
@@ -59,7 +65,20 @@ with the matching UUID, pinned digest and complete index set permits removal.
 A lost commit reply is resolved by the repeated immutable manifest request.
 No timeout invents another session ID. HTTP429 honors Retry-After; temporary
 errors use bounded cooldown/jitter and manual retry. `upload_incomplete` waits
-at least 90 seconds. Trial/capacity/invalid-image errors retain the local job.
+at least 90 seconds. A failing job never blocks later jobs: each job keeps its
+own failure count and backoff (`.failures.json`). 401/402/403/429 and network
+loss stop the whole drain. After three permanent failures (400, 413, 415,
+invalid response) or five timeouts the job is parked in `.conflicts/` with a
+`reason.txt`. Extensions send the downloaded session `revision`; on
+`session_changed` the client re-fetches the session, 3-way merges title,
+comment and captions (base = downloaded text) and retries with the new
+revision, parking only on a same-field conflict. Text edits without a stored
+revision fetch it before PATCH; 400/413 park the edit.
+
+Parked items and queue entries of another account (or after Disconnect) are
+listed under Cloud Library → Set Aside… and in the menu bar. Each offers Try
+Again (own account only), Save Locally (writes Markdown + PNGs into a chosen
+folder) and Discard (macOS Trash).
 The drain rereads the queue after each completion, including notes added while
 an earlier request is in flight.
 

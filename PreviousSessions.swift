@@ -244,7 +244,7 @@ private func extractTemplateValues(_ template:String,from body:String,comments:B
 }
 
 /// Open an exported session without taking a new screenshot or touching its original assets.
-func workingDraft(from session:PreviousSession,topic:Topic,root:URL)throws->Draft{
+func workingDraft(from session:PreviousSession,topic:Topic,root:URL,queuedEdit:(UUID)->CloudLibrary.CloudEdit.Fields? = {CloudLibrary.shared.queuedEdit($0)})throws->Draft{
  _ = try checkedPreviousFile(session.target)
  let assets=URL(fileURLWithPath:session.target.path).deletingLastPathComponent().appendingPathComponent("assets")
  var target=session.target;target.imported=[:];var images:[String]=[];var notes:[String:String]=[:]
@@ -255,7 +255,17 @@ func workingDraft(from session:PreviousSession,topic:Topic,root:URL)throws->Draf
    try copyAnnotationSidecar(from:assets.appendingPathComponent(image),to:destination);target.imported[name]=image;notes[name]=session.imageNotes[image]
   }
  }catch{for name in images{removeAnnotatedImage(root.appendingPathComponent(name))};throw error}
- return Draft(images:images,comment:session.comment,title:session.title,topic:topic,previous:target,imageNotes:notes)
+ var draft=Draft(images:images,comment:session.comment,title:session.title,topic:topic,previous:target,imageNotes:notes)
+ if topic.cloudFolderID != nil {
+  // Cloudová relace: escapovaný text ze serveru se vrátí do původní podoby.
+  draft.title=unescapeServerMarkdown(session.title);draft.comment=unescapeServerMarkdown(session.comment);draft.imageNotes=notes.mapValues(unescapeServerMarkdown)
+  // Čekající úprava textu se zobrazí místo stažené verze, aby se druhou úpravou neztratila.
+  if let id=target.session.flatMap(UUID.init(uuidString:)),let queued=queuedEdit(id),queued.captions.count==images.count {
+   draft.title=queued.title;draft.comment=queued.comment;draft.cloudBase=queued
+   for (name,caption) in zip(images,queued.captions){draft.imageNotes?[name]=caption.isEmpty ? nil:caption}
+  }
+ }
+ return draft
 }
 
 /// Stav rozpracované relace navázané na uloženou: platná (případně s novou cestou), nebo zaniklá.

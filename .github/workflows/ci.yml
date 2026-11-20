@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      # Self-testy počítají s češtinou jako jazykem systému.
+      - run: defaults write -g AppleLanguages -array cs en
       # build.sh spouští i test lokalizací a self-testy aplikace.
       - run: ./build.sh
       - run: python3 tests/build-config.py

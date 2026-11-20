@@ -38,6 +38,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+      # Self-testy počítají s češtinou jako jazykem systému.
+      - if: matrix.build-mode == 'manual'
+        run: defaults write -g AppleLanguages -array cs en
       - if: matrix.build-mode == 'manual'
         run: ./build.sh
       - uses: github/codeql-action/analyze@v4

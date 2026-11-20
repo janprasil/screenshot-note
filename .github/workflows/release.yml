@@ -24,6 +24,8 @@ concurrency:
 
 jobs:
   plan:
+    # Vydává se jen z main, i při ručním spuštění.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -54,7 +56,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.mode.outputs.mode }}
           MIN_AGE: ${{ inputs.min_age_days || '7' }}
-        run: python3 scripts/release.py "$MODE" --min-age-days "$MIN_AGE" --notes release-notes.md
+        run: python3 scripts/release.py "$MODE" --head "$GITHUB_SHA" --min-age-days "$MIN_AGE" --notes release-notes.md
       - if: steps.plan.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -67,9 +69,9 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
+      # Build bere commit běhu (github.sha), ze kterého plan počítal verzi.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
       # Self-testy počítají s češtinou jako jazykem systému.
       - run: defaults write -g AppleLanguages -array cs en

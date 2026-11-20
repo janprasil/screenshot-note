@@ -108,20 +108,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(query)
         if path == '/api/v1/fixture/team':
             assert self.command == 'POST'
-            team_state['member'] = json.loads(self.body())['member']
+            body = json.loads(self.body())
+            team_state['member'] = body['member']
+            team_state['leave_after_folders'] = body.get('leave_after_folders', False)
             self.reply(dict(member=team_state['member']))
         elif path == '/api/v1/folders':
             assert self.command == 'GET'
             self.reply([dict(id=team_folder, name='Bugy', revision='1', description='', combined=False, combined_file='Bugy.md',
                              markdown_template=None, combined_template=None, owner_id=team, owner_kind='team',
                              owner_name='Fixture tým', role='member')] if team_state['member'] else [])
+            # Souběh: přístup zmizí hned po katalogu.
+            if team_state.pop('leave_after_folders', False):
+                team_state['member'] = False
+                team_state['raced'] = True
         elif path == '/api/v1/sessions':
             assert self.command == 'GET' and params['folder_id'] == [team_folder] and params['library_id'] == [team]
             team_lists.append(query)
-            if not team_state['member']:
-                self.error(404, 'not_found')
-                return True
-            items = [] if params.get('state') == ['trashed'] else [
+            # Nedostupná library vrací prázdný seznam (API-V1), ne 404.
+            items = [] if params.get('state') == ['trashed'] or not team_state['member'] else [
                 dict(id=team_note, updated_at='2026-11-20T00:00:00Z', created_at='2026-11-20T00:00:00Z', trashed_at=None,
                      author=dict(id=bob, name='Fixture Bob'))]
             self.send_list(items)
@@ -289,8 +293,9 @@ try:
     assert sum(1 for method, path in requests if method == 'DELETE') == 1
     assert len(jobs) == 4 and all(job['state'] == 'committed' for job in jobs.values())
     # Týmový upload po ztrátě členství: jeden 404, žádná smyčka, po návratu nahrán ručně.
-    assert len(team_rejects) == 1 and sum(1 for job in jobs.values() if (job['manifest'].get('folder_id') or '').lower() == team_folder) == 1
+    assert len(team_rejects) == 2 and sum(1 for job in jobs.values() if (job['manifest'].get('folder_id') or '').lower() == team_folder) == 1
     assert team_lists and all('library_id=' + team in query for query in team_lists)
+    assert team_state.get('raced') and any(path == '/api/v1/sessions/' + team_note for _, path in requests)
     assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
     assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
     # 12 volání: druhý pokus během Retry-After se na server nedostane.

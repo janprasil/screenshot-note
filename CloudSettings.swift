@@ -21,6 +21,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  private var browser: AppButton!
  private var cancel: AppButton!
  private var held: AppButton!
+ private var discard: AppButton!
  private var timer: Timer?
  private var lastPhase: Phase?
  private let suppliedLibrary: CloudLibrary?
@@ -52,7 +53,8 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   browser=styledButton(L("Otevřít web"),frame:.zero,target:self,action:#selector(openBrowser))
   cancel=styledButton(L("Zrušit párování"),role:.quiet,frame:.zero,target:self,action:#selector(cancelPending))
   held=styledButton(L("Zmizelé relace…"),role:.primary,frame:.zero,target:self,action:#selector(resolveHeld))
-  for b in [connectButton!,forget!,retry!,browser!,cancel!,held!] { view.addSubview(b) }
+  discard=styledButton(L("Zahodit zablokované…"),role:.quiet,frame:.zero,target:self,action:#selector(discardBlocked))
+  for b in [connectButton!,forget!,retry!,browser!,cancel!,held!,discard!] { view.addSubview(b) }
   library.didChange={ [weak self] in self?.refresh() }
   refresh();startPolling();presentScreenshotPanel(panel)
  }
@@ -131,6 +133,9 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   // Zadržené hromadné smazání nahradí tlačítko webu.
   held.isHidden=phase != .connected || CloudFolders.shared.heldFolders.isEmpty;held.frame=browser.frame
   if !held.isHidden{browser.isHidden=true}
+  // Zablokované nahrávání (ztráta týmu, role) lze výslovně zahodit; jinak místo tlačítka webu.
+  discard.isHidden=phase != .connected || !held.isHidden || library.blockedCount == 0;discard.frame=browser.frame;discard.isEnabled = !busy
+  if !discard.isHidden{browser.isHidden=true}
 
   if lastPhase == .pending && phase == .connected { celebrate() }
   lastPhase=phase
@@ -185,6 +190,15 @@ final class CloudSettings: NSObject, NSWindowDelegate {
    do { try await library.cancelPairing() } catch { library.lastError=(error as? CloudFailure)?.message ?? L("Párování nelze zrušit. Můžeš zapomenout místní připojení; nedokončené párování vyprší.") }
    refresh()
   }
+ }
+ @objc private func discardBlocked() {
+  let count=library.blockedCount;guard count>0 else{return}
+  let alert=NSAlert();alert.messageText=LP(count,"Zahodit %ld zablokovanou poznámku?","Zahodit %ld zablokované poznámky?","Zahodit %ld zablokovaných poznámek?",count)
+  alert.informativeText=L("Poznámky se do cloudu nenahrají. Jejich soubory se přesunou do Koše v macOS, odkud je lze obnovit.")
+  alert.addButton(withTitle:L("Zahodit"));alert.addButton(withTitle:L("Zrušit"));alert.buttons[0].hasDestructiveAction=true
+  guard alert.runModal() == .alertFirstButtonReturn else{return}
+  do{try library.discardBlocked()}catch{library.lastError=error.localizedDescription}
+  refresh()
  }
  @objc private func resolveHeld() {Task { @MainActor in await FolderDialogs.resolveHeld(manual:true);refresh() }}
  @objc private func sync() { Task { @MainActor in await library.sync(manual:true) } }

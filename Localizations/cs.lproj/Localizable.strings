@@ -429,7 +429,6 @@
 "%@ · %@" = "%@ · %@";
 "Tým" = "Tým";
 "Týmová složka" = "Týmová složka";
-"Týmová složka %@. Relace se nahrávají do cloudu a stahují sem." = "Týmová složka %@. Relace se nahrávají do cloudu a stahují sem.";
 "Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář." = "Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář.";
 "Týmovou složku může přejmenovat, nastavit nebo smazat jen vlastník nebo správce týmu." = "Týmovou složku může přejmenovat, nastavit nebo smazat jen vlastník nebo správce týmu.";
 "Na tuto akci nemáš v týmu oprávnění." = "Na tuto akci nemáš v týmu oprávnění.";
@@ -441,3 +440,12 @@
 "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@." = "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@.";
 "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}" = "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}";
 "Týmová složka %@: %@" = "Týmová složka %@: %@";
+"Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru." = "Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru.";
+"Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci." = "Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci.";
+"Úprava cizí relace v týmové složce zůstala jen v místním souboru." = "Úprava cizí relace v týmové složce zůstala jen v místním souboru.";
+"Zahodit zablokované…" = "Zahodit zablokované…";
+"Zahodit %ld zablokovanou poznámku?" = "Zahodit %ld zablokovanou poznámku?";
+"Zahodit %ld zablokované poznámky?" = "Zahodit %ld zablokované poznámky?";
+"Zahodit %ld zablokovaných poznámek?" = "Zahodit %ld zablokovaných poznámek?";
+"Poznámky se do cloudu nenahrají. Jejich soubory se přesunou do Koše v macOS, odkud je lze obnovit." = "Poznámky se do cloudu nenahrají. Jejich soubory se přesunou do Koše v macOS, odkud je lze obnovit.";
+"Složka týmu %@. Relace se nahrávají do cloudu a stahují sem." = "Složka týmu %@. Relace se nahrávají do cloudu a stahují sem.";

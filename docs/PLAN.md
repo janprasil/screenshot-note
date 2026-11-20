@@ -24,8 +24,13 @@
   `python3 tests/build-config.py`.
 - Neověřeno: proti skutečnému web serveru fáze 6, vizuální render ikon a disabled polí
   v `--design-export`, VoiceOver, instalovaná aplikace.
-- Otevřené: explicitní „Zahodit“ zablokované úlohy v UI chybí (zatím jen ruční opakování);
-  Mac neumí zakládat týmové složky ani `team` audience sdílení (pozdější fáze);
+- Review opravy (3. commit po review): PATCH cizí týmové relace se neposílá (lokální úprava,
+  403 se odloží jednou), doplnění cizí relace odmítnuto; odhlášení nechá týmové složky jako
+  skrytý záznam (žádný reconnect/`invalid`), `former-cloud:<účet>:<složka>` pro týmové;
+  fixture vrací pro nedostupnou library prázdný seznam a pokrývá souběh prázdný seznam →
+  404 → nové `/me`; „Zahodit zablokované…“ s potvrzením (Koš v macOS); blokace jen pro
+  týmové složky; `LibraryKind`/`LibraryRole`, `isRoleForbidden`, jedna nápověda šablon.
+- Otevřené: Mac neumí zakládat týmové složky ani `team` audience sdílení (pozdější fáze);
   člen nemůže složku „odebrat“ z Macu (jen přemapovat adresář); u týmové složky bez
   `author` (starší server) člen nic nepropaguje.
 

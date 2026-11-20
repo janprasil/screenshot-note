@@ -93,13 +93,20 @@ new fields are additive and behind server flags `TEAMS_ENABLED` / `SHARING_ENABL
   user. Plan/capacity errors (402/413) of a team folder are prefixed with the folder's
   `<Team> · <Folder>` name.
 - Losing membership makes the folder return `404 not_found` on manifest, image or
-  commit. The job gets a `blocked.json` marker in its queue directory and stays; the
-  Cloud Library status names the folder (`<Team> · <Folder>`). Automatic drains skip
-  blocked jobs (no retry loop) and never send them elsewhere; „Nahrát teď“ (Upload
-  now) clears the markers and tries once more. `403 role_forbidden` (for example
-  appending to another member's note) is blocked the same way with its own message.
-  A 404 on an extension job of a personal folder keeps the previous parking
-  behaviour. There is no explicit discard button yet (open item).
+  commit. The job is retained with a visible error naming the folder; it is never
+  dropped, retried in a loop or sent to another folder silently. The user can retry
+  after rejoining or discard the job explicitly. `403 role_forbidden` (for example
+  appending to another member's note) is shown and not retried.
+  Implementation: the job gets a `blocked.json` marker and the Cloud Library status
+  names the folder (`<Team> · <Folder>`). Automatic drains skip blocked jobs; „Nahrát
+  teď“ (Upload now) clears the markers and tries once more; „Zahodit zablokované…“
+  (Discard blocked…) asks for confirmation and moves the jobs to the macOS Trash.
+  Only team folders are blocked; a 404 in a personal folder keeps the previous
+  behaviour (new upload: error with retry; extension: parked).
+- Text edits (`PATCH`) of another member's note are not sent for a member: the edit
+  stays in the local file with one notice, and adding screenshots to such a note is
+  refused before queueing (author from `author.id`, unknown author = foreign). A
+  server `403 role_forbidden` on `PATCH` parks the edit once and keeps the local text.
 - `403 role_forbidden` maps to its own transport message instead of the device
   access message; sharing shows „In a team folder you can only share your own
   sessions“.

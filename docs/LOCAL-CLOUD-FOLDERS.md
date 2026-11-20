@@ -106,6 +106,12 @@ next to personal ones, personal first.
   from `/folders` while the team is still in `/me`, `/me` is read again before the
   folder is treated as deleted on the web; a session detail 404 in a team folder
   re-checks `/me` before anything is purged.
+- **Sign-out.** Disconnecting converts personal cloud folders to local ones as before,
+  but team folders stay as hidden records of that account with their mappings (they
+  still reserve directories). Signing in again resumes them without a reconnect
+  offer or duplicate downloads. A team folder deleted on the web and kept as local
+  gets the ID `former-cloud:<account>:<folder>` so two accounts never overwrite
+  each other; personal ones keep `former-cloud:<folder>`.
 - **Return.** When the same team reappears, `unavailable` is cleared and the old
   mapping and session index are reused; downloading resumes without duplicates.
 - **Author.** See `{author}` in CLOUD-REST.md; combined mode works unchanged.

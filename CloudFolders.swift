@@ -20,7 +20,7 @@ struct CloudFolderRecord:Codable {
  // Tým zmizel z /me: složka je skrytá, mapování a soubory zůstávají.
  var unavailable:Bool? = nil
  var account:UUID{accountID ?? owner}
- var isTeam:Bool{owner != account || ownerKind=="team"}
+ var isTeam:Bool{owner != account || ownerKind==LibraryKind.team.rawValue}
  enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable;case accountID="account"}
  var topic:Topic {
   var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes
@@ -162,7 +162,7 @@ final class CloudFolders {
  /// Katalog aktivního účtu. `libraries` z /me; nil (starší server) znamená jen osobní library.
  func accept(_ folders:[CloudFolderRecord],libraries:[CloudLibraryRef]?=nil)throws {
   guard let account else{throw CloudFailure.invalid}
-  let teams=Dictionary((libraries ?? []).filter{$0.kind=="team" && $0.id != account.0}.map{($0.id,$0)},uniquingKeysWith:{a,_ in a})
+  let teams=Dictionary((libraries ?? []).filter{$0.isTeam && $0.id != account.0}.map{($0.id,$0)},uniquingKeysWith:{a,_ in a})
   guard folders.count<=400,Set(folders.map{[$0.owner,$0.id]}).count==folders.count,
         folders.allSatisfy({$0.account==account.0 && $0.origin==account.1 && ($0.owner==account.0 || teams[$0.owner] != nil) && !$0.name.isEmpty && $0.name.unicodeScalars.count<=100 && !$0.name.contains("\0") && ($0.ownerName?.unicodeScalars.count ?? 0)<=100 && ($0.markdownTemplate?.utf8.count ?? 0)<=100000 && ($0.combinedTemplate?.utf8.count ?? 0)<=100000 && ($0.description?.utf8.count ?? 0)<=10000}) else{throw CloudFailure.invalid}
   var updated=records.filter{!mine($0)},lost:[CloudFolderRecord]=[]
@@ -171,8 +171,8 @@ final class CloudFolders {
    folder.folder=previous?.folder ?? "";folder.migratedLocalIDs=previous?.migratedLocalIDs;folder.confirmLocalDeletes=previous?.confirmLocalDeletes
    folder.accountID=account.0;folder.unavailable=nil
    // Týmová složka: chybějící název a role se doplní z /me.
-   if let team=teams[folder.owner]{folder.ownerKind="team";folder.ownerName=folder.ownerName ?? team.name;folder.role=folder.role ?? team.role}
-   else{folder.ownerKind="personal";folder.ownerName=nil;folder.role=nil}
+   if let team=teams[folder.owner]{folder.ownerKind=LibraryKind.team.rawValue;folder.ownerName=folder.ownerName ?? team.name;folder.role=folder.role ?? team.role}
+   else{folder.ownerKind=LibraryKind.personal.rawValue;folder.ownerName=nil;folder.role=nil}
    if let name=folder.combinedFile,!validCombinedFile(name){folder.combinedFile=nil}
    updated.append(folder)
   }
@@ -190,7 +190,8 @@ final class CloudFolders {
   }
  }
  private func localCopy(_ record:CloudFolderRecord)->Topic {
-  var topic=Topic(id:"former-cloud:"+record.id.uuidString.lowercased(),name:record.name,detail:record.description ?? "",folder:record.folder,combined:record.combined ?? false,combinedFile:record.combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:record.markdownTemplate,combinedTemplate:record.combinedTemplate)
+  // Týmovou složku mohou mít dva účty; její lokální kopie má v ID i účet.
+  var topic=Topic(id:"former-cloud:"+(record.isTeam ? record.account.uuidString.lowercased()+":":"")+record.id.uuidString.lowercased(),name:record.name,detail:record.description ?? "",folder:record.folder,combined:record.combined ?? false,combinedFile:record.combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:record.markdownTemplate,combinedTemplate:record.combinedTemplate)
   topic.formerCloudFolderID=record.id;topic.formerCloudOwnerID=record.owner;topic.formerCloudOrigin=record.origin
   return topic
  }
@@ -204,7 +205,8 @@ final class CloudFolders {
  /// Skryté týmové složky zůstávají záznamem, aby po návratu do týmu navázaly.
  @discardableResult func convertToLocal(owner:UUID,origin:String,only:Set<UUID>?=nil)throws->[String:String] {
   guard readable else{throw CloudFailure.invalid}
-  let chosen=records.filter{$0.account==owner && $0.origin==origin && $0.unavailable != true && (only?.contains($0.id) ?? true)}
+  // Při odhlášení zůstávají týmové složky skrytým záznamem s mapováním; po přihlášení navážou bez reconnectu.
+  let chosen=records.filter{record in record.account==owner && record.origin==origin && record.unavailable != true && (only.map{$0.contains(record.id)} ?? !record.isTeam)}
   guard !chosen.isEmpty else{return [:]}
   var local=storedLocal(),mapping:[String:String]=[:]
   for record in chosen where !record.folder.isEmpty {
@@ -240,7 +242,7 @@ final class CloudFolders {
  var repairCandidates:[Topic] {
   guard let account else{return []}
   let hidden=migratedLocalIDs,active=topics
-  return storedLocal().filter{local in local.formerCloudOrigin==account.1 && !hidden.contains(local.id) && active.contains{$0.cloudFolderID != nil && $0.cloudFolderID==local.formerCloudFolderID && $0.cloudOwnerID==local.formerCloudOwnerID}}
+  return storedLocal().filter{local in local.formerCloudOrigin==account.1 && local.formerCloudOwnerID==account.0 && !hidden.contains(local.id) && active.contains{$0.cloudFolderID != nil && $0.cloudFolderID==local.formerCloudFolderID && $0.cloudOwnerID==local.formerCloudOwnerID}}
  }
  /// Znovupropojení: místní relace se nahrají existující cestou přesunu, cloudové se stáhnou.
  @MainActor func repair(_ source:Topic,library:CloudLibrary = .shared,transfers:FolderTransfers = .shared)async throws->Bool {
@@ -290,6 +292,12 @@ final class CloudFolders {
   index.batch{if let local{index.remove(local)};index.put(record)}
   if source.combined{tagCombinedFile(file)}else if SessionIndex.key(directory)==SessionIndex.key(base){writeSessionTag(file,lower)}else{writeSessionTag(directory,lower);writeSessionTag(file,lower)}
  }
+ /// Upravit nebo doplnit relaci týmové složky smí autor nebo vlastník/správce; neznámý autor = cizí.
+ func mayChange(_ id:UUID,topic:Topic)->Bool {
+  guard !topic.canManageCloudFolder else{return true}
+  guard let account,!topic.folder.isEmpty,let base=try? Topics.checkedDestination(topic.folder),let record=SessionIndex.shared.cloud(id,base:base) else{return false}
+  return record.authorID==account.0.uuidString.lowercased()
+ }
  /// Původní texty a revize stažené cloudové relace pro úpravu PATCHem.
  func editBase(_ id:UUID,topic:Topic)->(CloudLibrary.CloudEdit.Fields,String?)? {
   guard !topic.folder.isEmpty,let base=try? Topics.checkedDestination(topic.folder),let r=SessionIndex.shared.cloud(id,base:base),r.trashed != true,r.askDelete != true else{return nil}
@@ -330,7 +338,7 @@ final class CloudFolders {
   let result=try JSONDecoder().decode(FolderEnvelope<RemoteFolder>.self,from:data).data
   guard currentConnection()?.token==c.token,result.id==id,result.name==name else{throw CloudFailure.invalid}
   var updated=records
-  if !updated.contains(where:{$0.id==id && $0.owner==owner && $0.account==owner && $0.origin==c.endpoint}){var created=result.record(owner:owner,origin:c.endpoint);created.ownerKind="personal";created.ownerName=nil;created.role=nil;guard created.owner==owner else{throw CloudFailure.invalid};updated.append(created)}
+  if !updated.contains(where:{$0.id==id && $0.owner==owner && $0.account==owner && $0.origin==c.endpoint}){var created=result.record(owner:owner,origin:c.endpoint);created.ownerKind=LibraryKind.personal.rawValue;created.ownerName=nil;created.role=nil;guard created.owner==owner else{throw CloudFailure.invalid};updated.append(created)}
   try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
   return updated.first{$0.id==id && $0.owner==owner && $0.account==owner && $0.origin==c.endpoint}!.topic
  }
@@ -381,12 +389,12 @@ final class CloudFolders {
    guard currentConnection()?.token==c.token else{throw CloudFailure.invalid}
    let remote=try JSONDecoder().decode(FolderEnvelope<[RemoteFolder]>.self,from:data).data
    // Zmizelá týmová složka může znamenat odchod z týmu těsně po /me; /me se ověří znovu.
-   let teamIDs:Set<UUID>=Set((libraries ?? []).filter{$0.kind=="team"}.map(\.id))
+   let teamIDs:Set<UUID>=Set((libraries ?? []).filter(\.isTeam).map(\.id))
    let listed:Set<[UUID]>=Set(remote.map{[$0.id,$0.owner_id ?? owner]})
    if records.contains(where:{record in mine(record) && record.isTeam && record.unavailable != true && record.remoteDeleted != true && teamIDs.contains(record.owner) && !listed.contains([record.id,record.owner])}) {
     libraries=try await self.libraries(endpoint:endpoint,token:c.token,owner:owner)
    }
-   let allowed=Set([owner]+(libraries ?? []).filter{$0.kind=="team"}.map(\.id))
+   let allowed=Set([owner]+(libraries ?? []).filter(\.isTeam).map(\.id))
    // Složka týmu, ke kterému už přístup není (souběh s /me), se v tomto průchodu vynechá.
    try accept(remote.map{$0.record(owner:owner,origin:c.endpoint)}.filter{allowed.contains($0.owner)},libraries:libraries)
    lastError=nil
@@ -404,14 +412,14 @@ final class CloudFolders {
   let me=try JSONDecoder().decode(FolderEnvelope<CloudOwner>.self,from:await request(endpoint,"/api/v1/me",token,524288)).data
   guard currentConnection()?.token==token,me.id==owner else{throw CloudFailure.invalid}
   guard let list=me.libraries else{return nil}
-  guard list.count<=100,Set(list.map(\.id)).count==list.count,list.allSatisfy({["personal","team"].contains($0.kind) && ($0.kind=="team" || $0.id==owner) && ($0.name?.unicodeScalars.count ?? 0)<=100}) else{throw CloudFailure.invalid}
+  guard list.count<=100,Set(list.map(\.id)).count==list.count,list.allSatisfy({LibraryKind(rawValue:$0.kind) != nil && ($0.isTeam || $0.id==owner) && ($0.name?.unicodeScalars.count ?? 0)<=100}) else{throw CloudFailure.invalid}
   return list
  }
  /// Před mazáním podle 404 v týmové složce se ověří, že tým v /me pořád je; jinak se složka skryje.
  @MainActor private func stillMember(_ topic:Topic,endpoint:CloudEndpoint,token:String)async throws->Bool {
   guard topic.cloudTeam==true,let account,let team=topic.cloudOwnerID else{return true}
   let list=try await libraries(endpoint:endpoint,token:token,owner:account.0)
-  if list?.contains(where:{$0.id==team && $0.kind=="team"})==true{return true}
+  if list?.contains(where:{$0.id==team && $0.isTeam})==true{return true}
   var updated=records,lost:[CloudFolderRecord]=[]
   for i in updated.indices where mine(updated[i]) && updated[i].owner==team{updated[i].unavailable=true;lost.append(updated[i])}
   try persist(updated)
@@ -451,7 +459,7 @@ final class CloudFolders {
     do{_ = try await send(endpoint,"/api/v1/sessions/"+record.id+"/restore","POST",token,Data("{}".utf8))}
     catch let failure as CloudFailure where failure.status==404{index.remove(record);continue}
     // Cizí relaci v týmu obnovit nelze; soubory zůstanou a znovu se to nezkouší.
-    catch let failure as CloudFailure where failure.status==403 && failure.code=="role_forbidden"{index.remove(record);say(LF("Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají.",record.title));continue}
+    catch let failure as CloudFailure where failure.isRoleForbidden{index.remove(record);say(LF("Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají.",record.title));continue}
     catch{continue}
     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
     adoptUserRestore(record,found:found,base:base)
@@ -595,7 +603,7 @@ final class CloudFolders {
   for (record,location) in gone {
    do{_ = try await send(endpoint,"/api/v1/sessions/"+record.id+"/trash","POST",token,Data("{}".utf8))}
    catch let failure as CloudFailure where failure.status==404{index.remove(record);removed.insert(record.id);continue}
-   catch let failure as CloudFailure where failure.status==403 && failure.code=="role_forbidden"{keepLocal(record);continue}
+   catch let failure as CloudFailure where failure.isRoleForbidden{keepLocal(record);continue}
    catch{continue}
    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
    var next=record;next.missingSince=nil;next.held=nil;next.confirmed=nil
@@ -849,7 +857,7 @@ final class CloudFolders {
   var next=record;next.trashed=false;next.trashNote=nil;next.trashHash=nil;next.noticed=nil;next.trashCopies=nil;SessionIndex.shared.put(next);return next
  }
  private func cloudRecord(_ id:UUID,topic:Topic,base:URL,body:String,images names:[String],note:RemoteNote)->SessionRecord {
-  SessionRecord(id:id.uuidString.lowercased(),file:"",start:0,length:(body as NSString).length,hash:sessionFingerprint(Data(body.utf8)),heading:firstLine(body),title:note.title,comment:note.comment,template:note.template,images:names,notes:Dictionary(zip(names,note.captions),uniquingKeysWith:{a,_ in a}),combined:false,footer:"",files:[:],seen:0,base:SessionIndex.key(base),folder:topic.cloudFolderID?.uuidString.lowercased(),owner:topic.cloudOwnerID?.uuidString.lowercased(),origin:topic.cloudOrigin,author:note.author?.name)
+  SessionRecord(id:id.uuidString.lowercased(),file:"",start:0,length:(body as NSString).length,hash:sessionFingerprint(Data(body.utf8)),heading:firstLine(body),title:note.title,comment:note.comment,template:note.template,images:names,notes:Dictionary(zip(names,note.captions),uniquingKeysWith:{a,_ in a}),combined:false,footer:"",files:[:],seen:0,base:SessionIndex.key(base),folder:topic.cloudFolderID?.uuidString.lowercased(),owner:topic.cloudOwnerID?.uuidString.lowercased(),origin:topic.cloudOrigin,author:note.author?.name,authorID:note.author?.id?.uuidString.lowercased())
  }
  /// Starší stažení `<uuid>/Note.md` se přejmenuje, pokud ho nikdo neupravil; upravené zůstává na místě.
  private func migrateSeparate(_ id:UUID,note:RemoteNote,created:String?,topic:Topic,base:URL,endpoint:CloudEndpoint,owner:UUID)->SessionRecord? {
@@ -923,7 +931,7 @@ final class CloudFolders {
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
    if unmodified,saved.shas==shas,saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
-    var same=saved;same.digest=digest;same.author=note.author?.name;same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;index.put(same);return
+    var same=saved;same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.

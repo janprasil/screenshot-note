@@ -78,6 +78,8 @@ struct CloudFailure: LocalizedError {
  var errorDescription: String? { message }
  static var keychain: Self { Self(L("Přístup do Keychain se nezdařil. Připojení nebylo změněno.")) }
  static var invalid: Self { Self(L("Server vrátil neplatnou odpověď. Lokální data zůstávají zachovaná.")) }
+ /// Viditelný obsah, ale role na akci nestačí; neopakovat.
+ var isRoleForbidden: Bool { status == 403 && code == "role_forbidden" }
 }
 
 final class CloudTransport: NSObject, URLSessionTaskDelegate {
@@ -131,7 +133,11 @@ private struct Pairing: Decodable {
 }
 private struct PairingStatus: Decodable { let state: String; let expires_at: String; let interval: Int }
 /// Library z /me: osobní (id = uživatel) nebo tým; role přihlášeného uživatele.
-struct CloudLibraryRef: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let role: String? }
+struct CloudLibraryRef: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let role: String?; var isTeam: Bool { kind == LibraryKind.team.rawValue } }
+/// Druh library v API (`kind`, `owner_kind`).
+enum LibraryKind: String { case personal, team }
+/// Role v library (TEAMS.md); složku spravuje vlastník a správce.
+enum LibraryRole: String { case owner, admin, member; static func manages(_ raw: String?) -> Bool { raw.flatMap(Self.init(rawValue:)).map { $0 != .member } ?? false } }
 /// Odpověď /me; `libraries` chybí u staršího serveru (jen osobní library).
 struct CloudOwner: Decodable { let id: UUID; let email: String?; var libraries: [CloudLibraryRef]? = nil }
 struct CloudManifest: Codable,Equatable {
@@ -382,6 +388,11 @@ final class CloudLibrary {
    return (url,edit)
   }
  }
+ /// Texty relace z konceptu ve tvaru úpravy.
+ static func editFields(_ draft:Draft)->CloudEdit.Fields {
+  let title=draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).replacingOccurrences(of:"\n",with:" ") ?? ""
+  return CloudEdit.Fields(title:title.isEmpty ? "Screenshot":title,comment:draft.comment,captions:draft.images.map{draft.imageNotes?[$0] ?? ""})
+ }
  /// Uložení znovu otevřené cloudové relace bez nových snímků: jen text, obrázky se nesmí změnit.
  @discardableResult func enqueueEdit(_ draft:Draft,root:URL,sessionID:UUID,base shas:[String],original:CloudEdit.Fields,revision:String?)throws->Bool {
   try requireAccount();guard let c=connection,let owner=c.ownerID else{throw CloudFailure.invalid}
@@ -390,7 +401,7 @@ final class CloudLibrary {
    let url=root.appendingPathComponent(filename),raw=try boundedData(url,max:52428800)
    guard sessionFingerprint(raw)==shas[index] || (try? cloudImage(url)).map(sessionFingerprint)==shas[index] else{throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit."))}
   }
-  let title=draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).replacingOccurrences(of:"\n",with:" ") ?? "",fields=CloudEdit.Fields(title:title.isEmpty ? "Screenshot":title,comment:draft.comment,captions:draft.images.map{draft.imageNotes?[$0] ?? ""})
+  let fields=Self.editFields(draft)
   func valid(_ s:String,_ points:Int,_ bytes:Int)->Bool{!s.contains("\0") && s.unicodeScalars.count<=points && s.utf8.count<=bytes}
   guard valid(fields.title,500,2000),valid(fields.comment,100000,100000),fields.captions.allSatisfy({valid($0,20000,20000)}),fields.captions.reduce(0,{$0+$1.utf8.count})<=300000 else{throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná."))}
   let file=editsDirectory.appendingPathComponent(sessionID.uuidString.lowercased()+".json")
@@ -426,6 +437,11 @@ final class CloudLibrary {
     }
     catch let failure as CloudFailure where failure.status==409 && ["session_trashed","folder_trashed"].contains(failure.code ?? "") {
      parkEdit(file,edit);lastError=L("Relace je na webu v koši. Úprava zůstala odložená ve frontě.");break
+    }
+    // Cizí týmová relace: úprava zůstane v místním souboru a znovu se neposílá.
+    catch let failure as CloudFailure where failure.isRoleForbidden {
+     parkEdit(file,edit);onEditConflict?(edit.sessionID,edit.fields)
+     lastError=LF("Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru.",edit.fields.title);break
     }
     catch let failure as CloudFailure where failure.status==404 || failure.status==405 {
      parkEdit(file,edit);lastError=L("Úpravu relace se nepodařilo nahrát: server ji nepodporuje nebo relace neexistuje. Úprava zůstala odložená ve frontě.");break
@@ -468,6 +484,13 @@ final class CloudLibrary {
     : LF("Cloudová složka „%@“ není dostupná (třeba po odchodu z týmu). Poznámka zůstává ve frontě; po obnovení přístupu ji nahraješ tlačítkem Nahrát teď.", item.folder)
   }
  }
+ var blockedCount: Int { jobs().filter { blocked($0.0) != nil }.count }
+ /// Zahodí zablokované úlohy aktivního účtu do Koše v macOS (lze je odtud obnovit).
+ func discardBlocked(recycle: (URL) throws -> Void = { try fm.trashItem(at: $0, resultingItemURL: nil) }) throws {
+  guard !syncing else { throw CloudFailure.invalid }
+  for (directory, _) in jobs() where blocked(directory) != nil { try recycle(directory) }
+  lastError = nil; didChange?()
+ }
  /// `manual` (Nahrát teď) zkusí znovu i zablokované úlohy.
  @MainActor func sync(manual: Bool = false) async {
   guard !syncing, !connecting, now() >= retryAt, let c = connection, let owner = c.ownerID, let endpoint = CloudEndpoint(c.endpoint) else { return }
@@ -485,7 +508,8 @@ final class CloudLibrary {
     do { try await upload(directory,original,endpoint:endpoint,connection:c,owner:owner) }
     // Tarif a kapacita týmové složky patří týmu; hláška ho jmenuje.
     catch let failure as CloudFailure where [402, 413].contains(failure.status) && original.manifest.folder_id.flatMap({ folderInfo($0)?.team }) == true {
-     throw CloudFailure(LF("Týmová složka %@: %@", original.manifest.folder_id.flatMap { folderInfo($0)?.name } ?? "", failure.message), status: failure.status, retryAfter: failure.retryAfter, code: failure.code)
+     guard let name = original.manifest.folder_id.flatMap({ folderInfo($0)?.name }) else { throw failure }
+     throw CloudFailure(LF("Týmová složka %@: %@", name, failure.message), status: failure.status, retryAfter: failure.retryAfter, code: failure.code)
     }
     catch let failure as CloudFailure where failure.status == 409 && failure.code == "session_changed" && original.manifest.base_images != nil && rebased[original.sessionID, default:0] < 3 {
      // Jiný Mac relaci mezitím doplnil, nové snímky se přesunou za jeho.
@@ -504,9 +528,9 @@ final class CloudLibrary {
      try park(directory,original)
      lastError = L("Relace je na webu v koši. Obnov ji na webu a snímky přidej znovu; nové snímky zůstaly odložené ve frontě.")
     }
-    // Ztráta přístupu ke složce (odchod z týmu) nebo nedostatečná role: úloha zůstává, bez smyčky.
-    catch let failure as CloudFailure where failure.status == 403 && failure.code == "role_forbidden" { try block(directory, original, code: "role_forbidden") }
-    catch let failure as CloudFailure where failure.status == 404 && (original.manifest.base_images == nil || original.manifest.folder_id.flatMap({ folderInfo($0)?.team }) == true) {
+    // Ztráta přístupu k týmové složce nebo nedostatečná role: úloha zůstává, bez smyčky. Osobní složky beze změny.
+    catch let failure as CloudFailure where failure.isRoleForbidden { try block(directory, original, code: "role_forbidden") }
+    catch let failure as CloudFailure where failure.status == 404 && original.manifest.folder_id.flatMap({ folderInfo($0)?.team }) == true {
      try block(directory, original, code: "not_found")
     }
     catch let failure as CloudFailure where (failure.status == 409 && failure.code == "job_conflict") || (failure.status == 404 && original.manifest.base_images != nil) {

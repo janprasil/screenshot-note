@@ -240,7 +240,7 @@ func cloudFolderUnitTests()throws {
  let teamLib=CloudLibrary(queue:root.appendingPathComponent("team-queue"),vault:vault,endpoint:endpoint,now:{teamClock})
  let teamFolders=CloudFolders(file:root.appendingPathComponent("team-folders.json"),connection:{teamLib.connection},localTopics:{[]},pending:{teamLib.hasPending($0)},storedLocal:{[]},saveLocal:{_ in})
  teamLib.folderInfo={teamFolders.folderInfo($0)}
- func membership(_ value:Bool)async throws{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/fixture/team",method:"POST",token:original.token,body:Data((value ? #"{"member":true}"#:#"{"member":false}"#).utf8))}
+ func membership(_ value:Bool,leaveAfterFolders:Bool=false)async throws{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/fixture/team",method:"POST",token:original.token,body:JSONSerialization.data(withJSONObject:["member":value,"leave_after_folders":leaveAfterFolders]))}
  await teamFolders.refresh(teamLib.connection);assert(teamFolders.lastError==nil)
  guard let team=teamFolders.topics.first(where:{$0.cloudTeam==true}) else{throw CloudFailure.invalid}
  assert(team.displayName==LF("%@ · %@","Fixture tým","Bugy") && team.cloudRole=="member" && !team.canManageCloudFolder && team.cloudOwnerID != original.ownerID)
@@ -257,6 +257,14 @@ func cloudFolderUnitTests()throws {
  try await membership(true);await teamFolders.refresh(teamLib.connection)
  assert(teamFolders.topics.first{$0.cloudTeam==true}?.folder==teamDir.path && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
  teamClock=teamClock.addingTimeInterval(120);await teamLib.sync(manual:true);assert(teamLib.pendingCount==0 && teamLib.lastError==nil)
+ // Souběh: přístup zmizí po katalogu; prázdný seznam a 404 detailu nic nesmažou, /me se ověří znovu a složka se skryje.
+ try await membership(true,leaveAfterFolders:true);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.isUnavailable(team) && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ // Zablokovanou úlohu lze výslovně zahodit (Koš v macOS).
+ try await membership(false);try teamLib.enqueue(Draft(images:["shot.png"],comment:"Zahodit",title:"Discard",topic:team),root:root,folders:[team])
+ teamClock=teamClock.addingTimeInterval(120);await teamLib.sync();assert(teamLib.blockedCount==1)
+ var recycled:[URL]=[];try teamLib.discardBlocked(recycle:{recycled.append($0);try fm.removeItem(at:$0)});assert(recycled.count==1 && teamLib.pendingCount==0)
+ try await membership(true)
  print("PASS: team folder over REST: /me libraries, owner fields, library_id listing, {author}, membership loss hides the folder and blocks the upload without a retry loop, rejoin restores the mapping")
  let token="sn_share_v1_"+String(repeating:"a",count:43)
  assert(CloudLibrary.shareURL("https://evil.test/s/"+token,endpoint:endpoint)==nil)
@@ -1034,12 +1042,13 @@ final class AcceptingUploadStub: URLProtocol {
 
 /// Server pro PATCH úprav: drží jednu relaci s revizí, při nesouhlasu revize vrací 409.
 final class EditStub: URLProtocol {
- static var owner=UUID(),remote:[String:Any]=[:],patches:[[String:Any]]=[]
+ static var owner=UUID(),remote:[String:Any]=[:],patches:[[String:Any]]=[],forbidden=false
  override class func canInit(with request:URLRequest)->Bool{true}
  override class func canonicalRequest(for request:URLRequest)->URLRequest{request}
  override func startLoading() {
   let path=request.url?.path ?? "";var status=200,body:[String:Any]
   if path=="/api/v1/me"{body=["data":["id":Self.owner.uuidString]]}
+  else if request.httpMethod=="PATCH" && Self.forbidden{Self.patches.append([:]);status=403;body=["error":["code":"role_forbidden"]]}
   else if request.httpMethod=="PATCH" {
    var data=request.httpBody ?? Data()
    if data.isEmpty,let stream=request.httpBodyStream{stream.open();var buffer=[UInt8](repeating:0,count:65536);while stream.hasBytesAvailable{let n=stream.read(&buffer,maxLength:buffer.count);if n<=0{break};data.append(buffer,count:n)};stream.close()}
@@ -1094,6 +1103,12 @@ final class EditStub: URLProtocol {
  await library.sync()
  let parked=((try? fm.contentsOfDirectory(atPath:root.appendingPathComponent("outbox/.conflicts").path)) ?? []).filter{$0.hasPrefix("edit-")}
  assert(conflicts==[id] && parked.count==1 && library.pendingCount==0 && EditStub.remote["title"] as? String=="Jinde" && library.lastError?.contains("Můj")==true)
+ // Cizí týmová relace: 403 role_forbidden se odloží jednou, text zůstane místní a znovu se neposílá.
+ EditStub.forbidden=true;defer{EditStub.forbidden=false};let foreign=UUID(),sentBefore=EditStub.patches.count
+ let member=CloudLibrary(queue:root.appendingPathComponent("outbox"),vault:vault,endpoint:CloudEndpoint(vault.value!.endpoint)!);member.onEditConflict={id,_ in conflicts.append(id)}
+ try member.enqueueEdit(Draft(images:["s.png"],comment:"Cizí text",title:"Cizí"),root:shots,sessionID:foreign,base:shas,original:Fields(title:"Původní",comment:"Text",captions:[""]),revision:"1")
+ await member.sync()
+ assert(EditStub.patches.count==sentBefore+1 && member.pendingCount==0 && !member.hasPending(foreign) && conflicts.last==foreign && member.lastError?.contains("Cizí")==true)
  // Změněný obrázek se úpravou textu poslat nedá.
  try cloudFixturePNG(0.9).write(to:shots.appendingPathComponent("s.png"))
  do{try library.enqueueEdit(Draft(images:["s.png"],comment:"x",title:"y"),root:shots,sessionID:id,base:shas,original:Fields(title:"a",comment:"b",captions:[""]),revision:nil);assertionFailure("Changed image accepted")}catch{}
@@ -1306,4 +1321,30 @@ final class EditStub: URLProtocol {
  assert(!defaultMarkdownTemplate.contains("{author}") && renderSessionTemplate("# {title}\n{author}\n{screenshots}\n{text}\n",title:"T",screenshots:"S",text:"X")=="# T\n\nS\nX\n")
  assert(parsedSession("# {title}\n{author}\n{screenshots}\n{text}\n","# T\nBob\n![[assets/a.png]]\nX\n")?.1=="X")
  print("PASS: legacy folder records migrate to account = owner, team records need a /me library, {author} renders the author or nothing")
+ // Člen smí upravit jen vlastní relaci týmové složky (autor z indexu), admin všechny.
+ conn=cA;await store.refresh(cA);let teamA=store.topics.first{$0.cloudTeam==true}!
+ assert(store.mayChange(notes[0],topic:teamA)==true || index.cloud(notes[0],base:baseA)==nil)
+ let otherNote=notes.first{index.cloud($0,base:baseA)?.authorID==userB.uuidString.lowercased()}
+ assert(otherNote.map{!store.mayChange($0,topic:teamA)} ?? true && !store.mayChange(UUID(),topic:teamA))
+ conn=cB;await store.refresh(cB);let teamB=store.topics.first{$0.cloudTeam==true}
+ assert(teamB.map{store.mayChange(UUID(),topic:$0)} ?? true)
+ // Odhlášení: týmová složka nezmění na lokální (žádný reconnect), mapování zůstane a po přihlášení naváže.
+ var local:[Topic]=[]
+ let signout=CloudFolders(file:root.appendingPathComponent("signout.json"),connection:{conn},localTopics:{local},request:{_,_,_,_ in throw CloudFailure.invalid},storedLocal:{local},saveLocal:{local=$0})
+ conn=cA;signout.activate(cA)
+ let personalRecord=CloudFolderRecord(id:UUID(),name:"Moje",owner:userA,origin:cA.endpoint,folder:root.appendingPathComponent("moje").path,accountID:userA)
+ var teamRecord=CloudFolderRecord(id:folderID,name:"Bugy",owner:team,origin:cA.endpoint,folder:root.appendingPathComponent("tym-a").path,accountID:userA);teamRecord.ownerKind="team"
+ try signout.accept([personalRecord,teamRecord],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"member")])
+ try signout.setFolder(signout.topics[0],path:root.appendingPathComponent("moje").path);try signout.setFolder(signout.topics[1],path:root.appendingPathComponent("tym-a").path)
+ signout.activate(nil);try signout.convertToLocal(owner:userA,origin:cA.endpoint)
+ assert(local.count==1 && local[0].formerCloudOwnerID==userA && signout.records.count==1 && signout.records[0].owner==team)
+ signout.activate(cA);assert(signout.repairCandidates.isEmpty)
+ try signout.accept([teamRecord],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"member")])
+ assert(signout.topics.first{$0.cloudTeam==true}?.folder==root.appendingPathComponent("tym-a").path)
+ // Smazanou týmovou složku zachovanou jako lokální mají dva účty pod různými ID.
+ var teamB2=teamRecord;teamB2.accountID=userB;teamB2.folder=root.appendingPathComponent("tym-b").path
+ signout.activate(cB);try signout.accept([teamB2],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"admin")]);try signout.setFolder(signout.topics[0],path:root.appendingPathComponent("tym-b").path)
+ for (c,user) in [(cA,userA),(cB,userB)] {signout.activate(c);try signout.accept([],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"admin")]);_ = try signout.keepDeleted(folderID);assert(local.contains{$0.id=="former-cloud:"+user.uuidString.lowercased()+":"+folderID.uuidString.lowercased()})}
+ assert(local.filter{$0.formerCloudFolderID==folderID}.count==2)
+ print("PASS: member edits only own team sessions, sign-out keeps team mappings for sign-in without reconnect, kept deleted team folders get account-scoped IDs")
 }

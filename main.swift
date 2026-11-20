@@ -216,7 +216,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
       if cloudOnly {
        if cloudFolder,let previous=stored.previous,let topic=stored.topic {
         guard let (id,shas)=CloudFolders.shared.serverImages(for:previous,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
-        if stored.images.count==shas.count {
+        // Cizí relace v týmové složce: text zůstane jen v místním souboru, snímky přidat nejde.
+        if !CloudFolders.shared.mayChange(id,topic:topic) {
+         guard stored.images.count==shas.count else{throw CloudFailure(L("Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci."))}
+         CloudFolders.shared.keepLocalEdit(id,CloudLibrary.editFields(stored))
+         CloudFolders.shared.notify(L("Úprava cizí relace v týmové složce zůstala jen v místním souboru."))
+        } else if stored.images.count==shas.count {
          // Bez nových snímků jde jen o úpravu textu (PATCH s revizí).
          guard let (original,revision)=CloudFolders.shared.editBase(id,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
          try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision)

@@ -26,6 +26,8 @@ struct SessionRecord:Codable,Equatable {
  // Smazání z disku čeká na odpověď uživatele (Přesunout do Koše / Obnovit na disku).
  var askDelete:Bool? = nil
  var isCloud:Bool{base != nil}
+ // Cloudové relace a rozpracovaná mazání se z indexu nikdy nevyřazují.
+ var pinned:Bool{isCloud || trashed==true || missingSince != nil || held==true || askDelete==true || confirmed==true}
  var directory:URL{URL(fileURLWithPath:file).deletingLastPathComponent()}
 }
 final class SessionIndex {
@@ -60,17 +62,33 @@ final class SessionIndex {
  private func flush() {
   guard var value=loaded else{return}
   dirty=false
-  // Index má pevný strop; nejdřív mizí záznamy bez souborů, pak nejstarší.
+  // Index má pevný strop; nejdřív mizí místní záznamy bez souborů, pak nejstarší místní.
+  func evict(_ count:Int) {
+   let pinned=value.records.filter(\.pinned),local=value.records.filter{!$0.pinned}.sorted{$0.seen>$1.seen}
+   value.records=pinned+local.prefix(max(0,local.count-count))
+  }
   if value.records.count>20000 {
-   value.records.removeAll{!fm.fileExists(atPath:$0.file) && $0.trashed != true}
-   if value.records.count>20000{value.records=Array(value.records.sorted{$0.seen>$1.seen}.prefix(20000))}
+   value.records.removeAll{!$0.pinned && !fm.fileExists(atPath:$0.file)}
+   if value.records.count>20000{evict(value.records.count-20000)}
   }
   var data=(try? JSONEncoder.sorted.encode(value)) ?? Data()
-  while data.count>30000000,!value.records.isEmpty{value.records=Array(value.records.sorted{$0.seen>$1.seen}.dropLast(max(1,value.records.count/10)));data=(try? JSONEncoder.sorted.encode(value)) ?? Data()}
+  while data.count>30000000,value.records.contains(where:{!$0.pinned}){evict(max(1,value.records.filter{!$0.pinned}.count/10));data=(try? JSONEncoder.sorted.encode(value)) ?? Data()}
   loaded=value
-  try? fm.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
-  if (try? data.write(to:file,options:.atomic)) != nil{try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)}
+  // Chyba zápisu se hlásí; data v paměti zůstávají a zapíšou se při další změně.
+  do {
+   try fm.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+   guard !data.isEmpty else{throw CloudFailure.invalid}
+   try data.write(to:file,options:.atomic);try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+   writeError=nil
+  } catch {
+   dirty=true
+   let message=LF("Index relací nejde uložit (%@). Synchronizace může relace zpracovat znovu.",error.localizedDescription)
+   if writeError != message{writeError=message;Self.onWriteFailure?(message)}
+  }
  }
+ /// Poslední chyba zápisu indexu; nil po úspěšném zápisu.
+ private(set) var writeError:String?
+ static var onWriteFailure:((String)->Void)?
  var all:[SessionRecord]{store.records}
  func records(file url:URL)->[SessionRecord]{let path=Self.key(url);return store.records.filter{$0.file==path}}
  func cloud(_ id:UUID,base:URL)->SessionRecord?{let lower=id.uuidString.lowercased(),path=Self.key(base);return store.records.first{$0.id==lower && $0.base==path}}
@@ -93,6 +111,7 @@ final class SessionIndex {
   store=value
  }
  func generated(_ url:URL)->String?{store.generated[Self.key(url)]}
+ var generatedFiles:[String]{Array(store.generated.keys)}
  func setGenerated(_ url:URL,_ fingerprint:String?){var value=store;value.generated[Self.key(url)]=fingerprint;store=value}
  func root(_ url:URL)->String?{store.roots?[Self.key(url)]}
  func setRoot(_ url:URL,_ identity:String){var value=store;var roots=value.roots ?? [:];guard roots[Self.key(url)] != identity else{return};roots[Self.key(url)]=identity;value.roots=roots;store=value}

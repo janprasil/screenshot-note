@@ -4,6 +4,7 @@ import CoreGraphics
 
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
+ var parkedEntry:NSMenuItem?
  let cloudSettings=CloudSettings()
  var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
@@ -11,6 +12,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   CloudLibrary.shared.onEditConflict={id,fields in CloudFolders.shared.keepLocalEdit(id,fields)}
+  // 401 při synchronizaci složek přepne Mac do stavu nového párování.
+  CloudFolders.shared.onUnauthorized={token in CloudLibrary.shared.markRevoked(token:token)}
+  SessionIndex.onWriteFailure={message in DispatchQueue.main.async{showError(message)}}
+  // Záloha konceptu z minulého běhu (pád, vynucené ukončení) se vrátí jako rozpracovaná poznámka.
+  do{if try restoreRecoveredDraft(){DispatchQueue.main.async{showError(L("Neuložená poznámka z minulého spuštění byla obnovena. Otevřeš ji v menu Otevřít rozpracovanou poznámku."))}}}catch{NSLog("Draft recovery failed: %@",error.localizedDescription)}
   TrashNotifier.shared.install()
   // Plné úložiště ohlásíme jednou za hodinu, ne při každém dalším pokusu.
   var quotaShown:(String,Date)?
@@ -41,6 +47,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    icon?.size=NSSize(width:18,height:18);icon?.isTemplate=true;entry.image=icon
    if symbol=="folder"{folderEntry=entry}
    menu.addItem(entry)
+   if symbol=="icloud" {
+    // Odložené položky fronty jsou vidět i bez otevřeného okna cloudu.
+    let parked=NSMenuItem(title:L("Odložené cloudové položky…"),action:#selector(openParked),keyEquivalent:"");parked.target=self
+    let mark=NSImage(systemSymbolName:"exclamationmark.icloud",accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
+    mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;parked.image=mark;parkedEntry=parked;menu.addItem(parked)
+   }
   }
   updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in self?.capture(full:id == 2)}
   let errors=CommandLine.arguments.contains("--preview-test") ? [] : hotkeys.register();if !errors.isEmpty{DispatchQueue.main.async{showError(errors.joined(separator:"\n"))}}
@@ -53,9 +65,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   guard Date()>=nextFolderRefresh,!CloudFolders.shared.syncing else{return};nextFolderRefresh=Date().addingTimeInterval(60)
   Task{@MainActor in
-   if CloudLibrary.shared.pendingCount>0{await CloudLibrary.shared.sync()}
+   let library=CloudLibrary.shared
+   // Aktivní připojení se občas ověří; odvolané nebo vypršelé přejde do stavu nového párování.
+   if library.connection?.ownerID != nil,!library.needsRepair{try? await library.refreshConnection()}
+   if library.needsRepair{return}
+   if library.pendingCount>0{await library.sync()}
    await FolderTransfers.shared.resume()
-   await CloudFolders.shared.refresh(CloudLibrary.shared.connection)
+   // Po chybě složky počkají na Retry-After nebo rostoucí odstup.
+   if Date()>=CloudFolders.shared.retryAt{await CloudFolders.shared.refresh(library.connection)}
    await TemplateDefaults.shared.refresh()
    if NSApp.modalWindow==nil{await FolderDialogs.resolveHeld()}
    if NSApp.modalWindow==nil{await FolderDialogs.confirmDeletes()}
@@ -74,9 +91,46 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
  @objc func openCloudSettings(){cloudSettings.show()}
+ @objc func openParked(){Task{@MainActor in FolderDialogs.resolveParked()}}
  @objc func preferences(){settings.show()}
  @objc func aboutApp(){AboutController.shared.show()}
- func menuNeedsUpdate(_ menu:NSMenu){if menu === item?.menu{updateFolderMenu()}}
+ func menuNeedsUpdate(_ menu:NSMenu){if menu === item?.menu{updateFolderMenu();parkedEntry?.isHidden=CloudLibrary.shared.parkedItems.isEmpty}}
+ /// Ukončení aplikace (i odhlášení systému) odloží otevřenou poznámku jako rozpracovanou.
+ func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
+  guard let composer,let root=session else{return .terminateNow}
+  composer.snapshotFields()
+  if composer.hasUnsavedWork?() ?? true {
+   do{try persist(composer.draft,root:root)}
+   catch {
+    let alert=NSAlert();alert.messageText=L("Rozpracovanou poznámku nejde uložit.");alert.informativeText=error.localizedDescription+"\n\n"+L("Po ukončení zůstane jen automatická záloha posledního snímku.")
+    alert.addButton(withTitle:L("Zpět k poznámce"));alert.addButton(withTitle:L("Přesto ukončit"))
+    if alert.runModal() == .alertFirstButtonReturn{composer.reveal();return .terminateCancel}
+    return .terminateNow
+   }
+  }
+  try? fm.removeItem(at:recoveryRoot);try? fm.removeItem(at:root);return .terminateNow
+ }
+ /// Po každém snímku se koncept zálohuje mimo dočasný adresář; po pádu se při spuštění obnoví.
+ func autosave(_ draft:Draft,root:URL) {
+  do{try persist(draft,root:root,to:recoveryRoot)}
+  catch {
+   // Poškozená předchozí záloha se nahradí novou.
+   try? fm.removeItem(at:recoveryRoot)
+   do{try persist(draft,root:root,to:recoveryRoot)}catch{NSLog("Draft autosave failed: %@",error.localizedDescription)}
+  }
+ }
+ /// Záloha z minulého běhu se přesune do rozpracované poznámky; vrací true, když něco obnovila.
+ @discardableResult func restoreRecoveredDraft(from recovery:URL=recoveryRoot,to storage:URL=draftRoot)throws->Bool {
+  let backup=recovery.appendingPathComponent("draft.json")
+  guard fm.fileExists(atPath:backup.path) else{return false}
+  // Novější uložený koncept má přednost; starší záloha by ho přepsala.
+  func modified(_ url:URL)->Date{(try? url.resourceValues(forKeys:[.contentModificationDateKey]))?.contentModificationDate ?? .distantPast}
+  let saved=storage.appendingPathComponent("draft.json")
+  if fm.fileExists(atPath:saved.path),modified(saved)>=modified(backup){try? fm.removeItem(at:recovery);return false}
+  let draft=try readDraft(recovery)
+  guard !draft.images.isEmpty || !draft.comment.isEmpty || !(draft.title ?? "").isEmpty else{try? fm.removeItem(at:recovery);return false}
+  try persist(draft,root:recovery,to:storage);try fm.removeItem(at:recovery);return true
+ }
  func updateFolderMenu(){
   guard let entry=folderEntry else{return}
   let configurations=Topics.all.filter(\.savesLocally)
@@ -176,11 +230,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     if let active=active {
      guard active.appendCapturedImage(file.lastPathComponent) else{removeAnnotatedImage(file);restoreWindows();restoreComposerSize();return}
+     active.snapshotFields();self.autosave(active.draft,root:root)
      // Keep an open annotation/Markdown editor in front. Otherwise show the new thumbnail.
      if !active.childEditorOpen {active.expandCompact()}
      restoreWindows()
      if !active.childEditorOpen {active.window.makeKeyAndOrderFront(nil)}
-    }else{restoreWindows();draft.images.append(file.lastPathComponent);self.present(draft,root:root)}
+    }else{restoreWindows();let before=draft;draft.images.append(file.lastPathComponent);self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
    }}
    // Give WindowServer a frame to remove our panels before taking the screenshot.
    DispatchQueue.main.asyncAfter(deadline:.now()+0.15){
@@ -196,8 +251,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   do {for image in draft.images{let name=UUID().uuidString+".png";let target=storage.appendingPathComponent(name);try fm.copyItem(at:root.appendingPathComponent(image),to:target);created.append(target);try copyAnnotationSidecar(from:root.appendingPathComponent(image),to:target);replacement.images.append(name);replacement.imageNotes?[name]=draft.imageNotes?[image];if let original=draft.previous?.imported[image]{replacement.previous?.imported[name]=original}};try stage(replacement,root:storage)}catch{for url in created{removeAnnotatedImage(url)};throw error}
   for name in old.images{removeAnnotatedImage(storage.appendingPathComponent(name))}
  }
- func present(_ draft:Draft,root:URL){
+ func present(_ draft:Draft,root:URL,baseline:Draft?=nil){
   let view=Composer(draft:draft,root:root);composer=view
+  // Zrušit se ptá jen tehdy, když se obsah liší od stavu, ze kterého okno vzniklo.
+  let pristine=draftSignature(baseline ?? draft,root:root)
+  view.hasUnsavedWork={[weak view] in view.map{draftSignature($0.draft,root:root) != pristine} ?? false}
   view.onCapture={[weak self] full in self?.capture(full:full,fromComposer:true)}
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}
@@ -209,6 +267,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     if upload { try CloudLibrary.shared.requireAccount() }
     if result != 0 {
      try self.persist(draft,root:root)
+     // Uložený koncept je novější než záloha; ta by ho po pádu přepsala.
+     try? fm.removeItem(at:recoveryRoot)
      if result == 2 {
       let stored=try readDraft(draftRoot)
       if cloudOnly {
@@ -217,11 +277,13 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         if stored.images.count==shas.count {
          // Bez nových snímků jde jen o úpravu textu (PATCH s revizí).
          guard let (original,revision)=CloudFolders.shared.editBase(id,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
-         try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision)
+         try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision,draftBase:stored.cloudBase)
         } else {
          // Doplnění posílá aktuální šablonu složky, server ji zapíše z manifestu.
          var current=stored;if let folder=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==topic.cloudFolderID}){current.topic?.markdownTemplate=folder.markdownTemplate}
-         try CloudLibrary.shared.enqueue(current,root:draftRoot,sessionID:id,base:shas)
+         // Revize a texty stažené verze chrání úpravy z webu před přepsáním.
+         let downloaded=CloudFolders.shared.editBase(id,topic:topic)
+         try CloudLibrary.shared.enqueue(current,root:draftRoot,sessionID:id,base:shas,revision:downloaded?.1,original:downloaded?.0)
         }
        } else {try CloudLibrary.shared.enqueue(stored,root:draftRoot)}
        clearDraft(stored,root:draftRoot)
@@ -242,7 +304,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
      Task { @MainActor in await CloudLibrary.shared.sync();await CloudFolders.shared.refresh(CloudLibrary.shared.connection) }
     } catch { showError(L("Poznámka je uložená lokálně. Cloudovou kopii se nepodařilo připravit.")+" "+error.localizedDescription) }
    }
-   try? fm.removeItem(at:root);self.session=nil;self.composer=nil
+   try? fm.removeItem(at:root);try? fm.removeItem(at:recoveryRoot);self.session=nil;self.composer=nil
   };view.show()
  }
  func previewTest(){
@@ -565,6 +627,31 @@ if CommandLine.arguments.contains("--self-test") {
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
  print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")
+ // Zrušit s neuloženou prací se ptá; Odložit uloží koncept, Zahodit zahodí, Pokračovat nechá okno otevřené.
+ let cancelRoot=root.appendingPathComponent("cancel");try fm.createDirectory(at:cancelRoot,withIntermediateDirectories:true);try Data([9]).write(to:cancelRoot.appendingPathComponent("c.png"))
+ let unsaved=Draft(images:["c.png"],comment:"Text",title:"Neuloženo",topic:topic)
+ let cancelProbe=Composer(draft:unsaved,root:cancelRoot);cancelProbe.show(present:false)
+ let pristine=draftSignature(Draft(images:[],comment:"",topic:topic),root:cancelRoot)
+ cancelProbe.hasUnsavedWork={draftSignature(cancelProbe.draft,root:cancelRoot) != pristine}
+ assert(cancelProbe.requestedCancel(confirm:{.keep})==nil && cancelProbe.requestedCancel(confirm:{.later})==1 && cancelProbe.requestedCancel(confirm:{.discard})==0)
+ let openedSignature=draftSignature(unsaved,root:cancelRoot);cancelProbe.hasUnsavedWork={draftSignature(cancelProbe.draft,root:cancelRoot) != openedSignature}
+ assert(cancelProbe.requestedCancel(confirm:{assertionFailure("Unchanged draft asked");return .keep})==0)
+ try Data([10]).write(to:cancelRoot.appendingPathComponent("c.png"));assert(cancelProbe.requestedCancel(confirm:{.keep})==nil)
+ cancelProbe.window.close()
+ // Záloha po snímku se při dalším spuštění vrátí jako rozpracovaná poznámka.
+ let recoveryProbe=AppDelegate(),recovered=root.appendingPathComponent("recovery"),storage=root.appendingPathComponent("storage")
+ try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered)
+ let didRestore=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(didRestore && !fm.fileExists(atPath:recovered.path))
+ let restoredDraft=try readDraft(storage);assert(restoredDraft.images.count==1 && restoredDraft.title=="Neuloženo" && restoredDraft.comment=="Text")
+ let again=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(!again)
+ // Novější uložený koncept má přednost před starší zálohou, záloha se zahodí.
+ var newer=unsaved;newer.title="Novější";try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered);try recoveryProbe.persist(newer,root:cancelRoot,to:storage)
+ try fm.setAttributes([.modificationDate:Date(timeIntervalSinceNow:-60)],ofItemAtPath:recovered.appendingPathComponent("draft.json").path)
+ let staleBackup=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(!staleBackup && (try! readDraft(storage)).title=="Novější" && !fm.fileExists(atPath:recovered.path))
+ try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered)
+ try fm.setAttributes([.modificationDate:Date(timeIntervalSinceNow:-120)],ofItemAtPath:storage.appendingPathComponent("draft.json").path)
+ let fresher=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(fresher && (try! readDraft(storage)).title=="Neuloženo")
+ print("PASS: cancel/close with unsaved work asks (keep/later/discard), unchanged drafts close directly, autosaved draft is recovered on next launch")
  assert(Shortcut(key:103,modifiers:UInt32(256),name:"\u{F70E}").display == "⌘F11")
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")
  print("PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels")

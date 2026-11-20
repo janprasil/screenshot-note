@@ -89,8 +89,7 @@ next to personal ones, personal first.
 - **Per-device mapping.** Each member's Mac (and each account on one Mac) maps the
   folder to its own directory; paths are never sent upstream and collision rules
   apply across personal, team and other accounts' entries. All authors' notes are
-  downloaded. Moving a local folder into the cloud only offers personal folders
-  (no team folder transfer in v1).
+  downloaded. Moving a local folder into a team folder is described above.
 - **Permissions.** Rename, description, mode, template and delete of a team folder
   are available only for `owner`/`admin`; a member can change only the local directory
   (Settings disables the fields; `update`/`trashFolder` refuse before any request).

@@ -383,7 +383,7 @@ final class CloudFolders {
   let owner=team?.id ?? account
   let directory=file.deletingLastPathComponent().appendingPathComponent("Cloud Folder Operations")
   try fm.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
-  let key=SHA256.hash(data:Data((c.endpoint+owner.uuidString+"\0"+name).utf8)).map{String(format:"%02x",$0)}.joined()
+  let key=SHA256.hash(data:Data((c.endpoint+(team == nil ? "":account.uuidString+":")+owner.uuidString+"\0"+name).utf8)).map{String(format:"%02x",$0)}.joined()
   let intent=directory.appendingPathComponent(key)
   let id:UUID
   if fm.fileExists(atPath:intent.path){guard let saved=UUID(uuidString:try String(contentsOf:intent,encoding:.utf8)) else{throw CloudFailure.invalid};id=saved}

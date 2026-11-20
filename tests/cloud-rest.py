@@ -17,6 +17,7 @@ import zlib
 
 owner = str(uuid.uuid4())
 connections, jobs, requests = {}, {}, []
+shares, share_calls, share_statuses = {}, [], []
 dropped = set()
 errors = []
 
@@ -73,6 +74,44 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
         return False
 
+    def error(self, status, code, retry=None):
+        body = json.dumps({'error': {'code': code, 'message': code}}).encode()
+        self.send_response(status)
+        if retry:
+            self.send_header('Retry-After', retry)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def share(self, token):
+        assert self.command == 'POST' and connections[token]['active']
+        assert self.headers['Content-Type'] == 'application/json'
+        assert json.loads(self.body()) == {'audience': 'public'}
+        ident = self.path.split('/')[4]
+        uuid.UUID(ident)
+        share_calls.append(ident)
+        address = 'http://127.0.0.1:' + str(self.server.server_port)
+        special = {'00000000-0000-4000-8000-000000000409': (409, 'session_trashed'),
+                   '00000000-0000-4000-8000-000000000403': (403, 'role_forbidden'),
+                   '00000000-0000-4000-8000-000000000429': (429, 'rate_limited')}
+        if ident in special:
+            self.error(*special[ident], retry='60' if ident.endswith('429') else None)
+            return
+        if ident == '00000000-0000-4000-8000-000000000400':
+            self.reply(dict(id=str(uuid.uuid4()), audience='public', image_urls=[], created_at='2026-11-20T00:00:00Z',
+                            url='https://foreign.invalid/s/sn_share_v1_' + secrets.token_urlsafe(32)), 201)
+            return
+        if ident not in jobs or jobs[ident]['state'] != 'committed':
+            self.error(404, 'not_found')
+            return
+        status = 200 if ident in shares else 201
+        share_statuses.append(status)
+        link = shares.setdefault(ident, dict(id=str(uuid.uuid4()), audience='public',
+                                             url=address + '/s/sn_share_v1_' + secrets.token_urlsafe(32),
+                                             created_at='2026-11-20T00:00:00Z'))
+        self.reply(dict(link, image_urls=[link['url'] + '/' + ident + '/1.png']), status)
+
     def serve(self):
         try:
             assert self.path.startswith('/api/v1/') and '?' not in self.path
@@ -112,6 +151,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self.reply(dict(state='active', expires_at='2099-01-01T00:00:00Z', interval=5))
             elif self.path == '/api/v1/me':
                 self.reply(dict(id=owner, email='fixture@example.test'))
+            elif self.path.startswith('/api/v1/sessions/') and self.path.endswith('/share'):
+                self.share(token)
             else:
                 parts = self.path.split('/')
                 assert parts[3] == 'uploads'
@@ -120,7 +161,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(parts) == 5:
                     assert self.command == 'PUT'
                     manifest = json.loads(self.body())
-                    assert set(manifest) == {'title', 'comment', 'configuration', 'template', 'captions', 'images'}
+                    assert set(manifest) - {'folder_id'} == {'title', 'comment', 'configuration', 'template', 'captions', 'images'}
                     assert len(manifest['images']) == len(manifest['captions']) == 1
                     if ident not in jobs:
                         digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
@@ -171,9 +212,13 @@ try:
     assert dropped == {'manifest', 'image', 'commit'}
     assert sum(1 for method, path in requests if method == 'DELETE') == 1
     assert len(jobs) == 3 and all(job['state'] == 'committed' for job in jobs.values())
+    assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
+    assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
+    # 8 volání: druhý pokus během Retry-After se na server nedostane.
+    assert len(share_calls) == 8 and share_statuses == [201, 200, 200]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
-    print('PASS: loopback-only wire contract, no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')
+    print('PASS: loopback-only wire contract, share endpoint (POST public, 201/200 same URL, Retry-After honored), no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')
 finally:
     server.shutdown()
     server.server_close()

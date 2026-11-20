@@ -277,7 +277,7 @@ if CommandLine.arguments.contains("--cloud-self-test") {
  _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
  Task { @MainActor in
   do { try await cloudIntegrationTest();exit(0) }
-  catch { fputs("Native REST integration failed.\n",stderr);exit(1) }
+  catch { fputs("Native REST integration failed: \(error)\n",stderr);exit(1) }
  }
  dispatchMain()
 }
@@ -562,6 +562,7 @@ if CommandLine.arguments.contains("--self-test") {
  let captureProbe=Composer(draft:Draft(images:[],comment:"",title:"",topic:topic),root:deleteRoot);captureProbe.show(present:false)
  assert(captureProbe.topicLink.superview != nil && captureProbe.addShotButton.superview != nil)
  assert(captureProbe.sessionLink.superview == nil && captureProbe.laterButton.superview == nil)
+ assert(captureProbe.copyLinkButton.superview != nil && captureProbe.copyLinkButton.isHidden && captureProbe.shareableSessionID() == nil)
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
  print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")

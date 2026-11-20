@@ -107,8 +107,13 @@ Repeated calls return the same URL. Requires a `library:write` device; `403`, `4
 and `409 session_trashed` show an error, `429` honors `Retry-After`. Revocation lives
 on the web and in a later Mac menu (`DELETE …/share/{link_id}`). Shared links and
 other people's shared content are never listed or downloaded by the Mac app.
+The button is shown only for a session in a cloud folder of the current account that the
+server already holds (downloaded index record or local commit receipt). The returned `url`
+must be `<API origin>/s/<token>`; anything else is rejected. Without `Retry-After`, a `429`
+waits 30 s; during the wait no request is sent. Network errors only show a message.
 Strings are localized cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
-gains `/me` libraries, a team folder, `library_id`, `author` and the share endpoint.
+covers the share endpoint (phase 2); `/me` libraries, a team folder, `library_id` and
+`author` follow in phase 6.
 
 ## Validation and remaining acceptance
 

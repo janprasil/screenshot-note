@@ -416,3 +416,11 @@
 "Rozpracovaná relace „%@“ už neexistuje (byla smazána). Co s rozpracovanými změnami?" = "The draft session “%@” no longer exists (it was deleted). What should happen to your unsaved changes?";
 "Uložit jako novou relaci" = "Save as new session";
 "Zahodit" = "Discard";
+"Kopírovat odkaz" = "Copy link";
+"Odkaz zkopírován" = "Link copied";
+"Zkopírovat veřejný odkaz na relaci do schránky" = "Copy a public link to this session to the clipboard";
+"Příliš mnoho požadavků na sdílení. Zkus to znovu za %ld s." = "Too many sharing requests. Try again in %ld s.";
+"Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny." = "You can’t share this session. Check on the web that this Mac is allowed to write to the library.";
+"Relace v cloudu není dostupná nebo je sdílení vypnuté." = "The session isn’t available in the cloud, or sharing is turned off.";
+"Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu." = "The session is in the trash. Restore it on the web, then copy the link again.";
+"Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu." = "Couldn’t get the link. Check your internet connection and try again.";

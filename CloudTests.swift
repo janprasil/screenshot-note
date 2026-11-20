@@ -186,18 +186,37 @@ func cloudFolderUnitTests()throws {
  try await resumed.refreshConnection();assert(resumed.connection?.ownerID != nil)
  let original=resumed.connection!
  let png=cloudFixturePNG();try png.write(to:root.appendingPathComponent("shot.png"))
- let draft=Draft(images:["shot.png"],comment:"Native **REST** fixture",title:"Native fixture",imageNotes:["shot.png":"Caption"])
- try resumed.enqueue(draft,root:root);assert(resumed.pendingCount == 1)
+ // Nová cloudová relace musí mít cloudovou složku.
+ let folder=UUID(),cloudTopic=Topic(id:"cloud",name:"Cloud",detail:"",folder:"",combined:false,combinedFile:"N.md",cloudFolderID:folder,cloudOwnerID:original.ownerID,cloudOrigin:original.endpoint)
+ let draft=Draft(images:["shot.png"],comment:"Native **REST** fixture",title:"Native fixture",topic:cloudTopic,imageNotes:["shot.png":"Caption"])
+ let shared=try resumed.enqueue(draft,root:root,folders:[cloudTopic]);assert(resumed.pendingCount == 1)
  for _ in 0..<5 { await resumed.sync();if resumed.pendingCount == 0 { break };clock=clock.addingTimeInterval(120) }
  guard resumed.pendingCount == 0 else { throw CloudFailure.invalid }
+ // Kopírovat odkaz: commitnutá relace, bearer token, stejná URL i při opakování.
+ assert(resumed.isCommitted(shared,folder:folder))
+ let link=try await resumed.shareLink(shared),again=try await resumed.shareLink(shared)
+ assert(link==again && link.absoluteString.hasPrefix(raw+"/s/sn_share_v1_"))
+ let board=NSPasteboard(name:NSPasteboard.Name("sn-share-test-"+UUID().uuidString));defer{board.releaseGlobally()}
+ copyShareLink(link,to:board);assert(board.string(forType:.string)==link.absoluteString)
+ func shareFailure(_ id:String)async->CloudFailure?{do{_ = try await resumed.shareLink(UUID(uuidString:id)!);return nil}catch{return error as? CloudFailure}}
+ let missing=await shareFailure(UUID().uuidString);assert(missing?.status==404)
+ let trashed=await shareFailure("00000000-0000-4000-8000-000000000409");assert(trashed?.status==409 && trashed?.code=="session_trashed")
+ let forbidden=await shareFailure("00000000-0000-4000-8000-000000000403");assert(forbidden?.status==403)
+ let foreign=await shareFailure("00000000-0000-4000-8000-000000000400");assert(foreign != nil && foreign?.status==0)
+ let throttled=await shareFailure("00000000-0000-4000-8000-000000000429");assert(throttled?.status==429 && resumed.shareRetryAt >= clock.addingTimeInterval(60))
+ // Během Retry-After klient na server vůbec nejde.
+ let early=await shareFailure(shared.uuidString);assert(early?.status==429)
+ clock=clock.addingTimeInterval(61);let later=try await resumed.shareLink(shared);assert(later==link)
+ assert(CloudLibrary.shareURL("https://evil.test/s/sn_share_v1_"+String(repeating:"a",count:43),endpoint:endpoint)==nil)
+ assert(CloudLibrary.shareURL(raw+"/s/short",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+String(repeating:"a",count:43)+"?x=1",endpoint:endpoint)==nil)
  let preserved = try Data(contentsOf:root.appendingPathComponent("shot.png")); assert(preserved == png)
- try resumed.enqueue(draft,root:root)
+ try resumed.enqueue(draft,root:root,folders:[cloudTopic])
  let drain = Task { @MainActor in await resumed.sync() }
  try await Task.sleep(nanoseconds:100_000_000)
  assert(resumed.syncing)
- try resumed.enqueue(draft,root:root);await resumed.sync();await drain.value
+ try resumed.enqueue(draft,root:root,folders:[cloudTopic]);await resumed.sync();await drain.value
  assert(resumed.pendingCount == 0)
- try resumed.enqueue(draft,root:root)
+ try resumed.enqueue(draft,root:root,folders:[cloudTopic])
  var wrong=original;wrong.ownerID=UUID();try vault.save(wrong)
  let switched=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock});assert(switched.pendingCount == 0)
  await switched.sync();assert(switched.lastError != nil)
@@ -214,6 +233,7 @@ func cloudFolderUnitTests()throws {
  assert(limited.retryAt >= clock.addingTimeInterval(60))
  do {try await limited.startPairing(endpoint:endpoint,name:"Rate fixture");assertionFailure("Rate limit retried early")} catch {}
  print("PASS: native REST pairing/vault/restart, owner identity, streamed PNG, lost manifest/image/commit responses, stable upload UUID/digest and account-switch isolation")
+ print("PASS: copy link posts public share with bearer token, idempotent URL, pasteboard text, 403/404/409 session_trashed messages, Retry-After gate and foreign URL rejection")
 }
 
 @MainActor func folderTransferTests() async throws {

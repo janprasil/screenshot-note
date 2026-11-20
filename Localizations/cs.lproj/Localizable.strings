@@ -416,3 +416,11 @@
 "Rozpracovaná relace „%@“ už neexistuje (byla smazána). Co s rozpracovanými změnami?" = "Rozpracovaná relace „%@“ už neexistuje (byla smazána). Co s rozpracovanými změnami?";
 "Uložit jako novou relaci" = "Uložit jako novou relaci";
 "Zahodit" = "Zahodit";
+"Kopírovat odkaz" = "Kopírovat odkaz";
+"Odkaz zkopírován" = "Odkaz zkopírován";
+"Zkopírovat veřejný odkaz na relaci do schránky" = "Zkopírovat veřejný odkaz na relaci do schránky";
+"Příliš mnoho požadavků na sdílení. Zkus to znovu za %ld s." = "Příliš mnoho požadavků na sdílení. Zkus to znovu za %ld s.";
+"Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny." = "Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny.";
+"Relace v cloudu není dostupná nebo je sdílení vypnuté." = "Relace v cloudu není dostupná nebo je sdílení vypnuté.";
+"Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu." = "Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu.";
+"Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu." = "Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu.";

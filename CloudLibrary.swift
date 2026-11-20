@@ -207,6 +207,7 @@ final class CloudLibrary {
  private(set) var syncing = false
  private(set) var connecting = false
  private(set) var retryAt = Date.distantPast
+ var shareRetryAt = Date.distantPast
  private var nextPoll = Date.distantPast
  var lastError: String?
  // Chyby tarifu (402/413) hlásíme hned po uložení, ne jen v okně cloudu.
@@ -553,3 +554,35 @@ final class CloudLibrary {
   _ = try fm.replaceItemAt(directory,withItemAt:staging)
  }
 }
+
+private struct CloudShareLink: Decodable { let id: UUID; let audience: String; let url: String; let image_urls: [String]?; let created_at: String }
+extension CloudLibrary {
+ /// Veřejná URL sdílené relace; server vrací pro aktivní odkaz pořád stejnou.
+ @MainActor func shareLink(_ id: UUID) async throws -> URL {
+  try requireAccount(); guard let c = connection, let endpoint = CloudEndpoint(c.endpoint), endpoint == self.endpoint else { throw CloudFailure.invalid }
+  func limited(_ wait: TimeInterval) -> CloudFailure { CloudFailure(LF("Příliš mnoho požadavků na sdílení. Zkus to znovu za %ld s.", max(1, Int(ceil(wait)))), status: 429, retryAfter: wait, code: "rate_limited") }
+  let wait = shareRetryAt.timeIntervalSince(now()); guard wait <= 0 else { throw limited(wait) }
+  let path = "/api/v1/sessions/" + id.uuidString.lowercased() + "/share", data: Data
+  do { data = try await CloudTransport.shared.request(endpoint, path, method: "POST", token: c.token, body: try JSONEncoder().encode(["audience": "public"]), limit: 65536) }
+  catch let failure as CloudFailure {
+   switch (failure.status, failure.code) {
+    case (403, _): throw CloudFailure(L("Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny."), status: 403, code: failure.code)
+    case (404, _): throw CloudFailure(L("Relace v cloudu není dostupná nebo je sdílení vypnuté."), status: 404, code: failure.code)
+    case (409, "session_trashed"): throw CloudFailure(L("Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu."), status: 409, code: failure.code)
+    case (429, _): let delay = failure.retryAfter > 0 ? failure.retryAfter : 30; shareRetryAt = now().addingTimeInterval(delay); throw limited(delay)
+    default: throw failure
+   }
+  } catch { throw CloudFailure(L("Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu."), code: "network") }
+  guard let link = try? JSONDecoder().decode(Envelope<CloudShareLink>.self, from: data).data, link.audience == "public",
+        let url = Self.shareURL(link.url, endpoint: endpoint) else { throw CloudFailure.invalid }
+  return url
+ }
+ /// Přijme jen odkaz `/s/<token>` na stejném originu jako API.
+ static func shareURL(_ raw: String, endpoint: CloudEndpoint) -> URL? {
+  let prefix = endpoint.url.absoluteString + "/s/"
+  guard raw.hasPrefix(prefix), raw.dropFirst(prefix.count).range(of: "^[A-Za-z0-9_-]{16,128}$", options: .regularExpression) != nil else { return nil }
+  return URL(string: raw)
+ }
+}
+/// Zapíše odkaz do schránky jako prostý text.
+func copyShareLink(_ url: URL, to pasteboard: NSPasteboard = .general) { pasteboard.clearContents(); pasteboard.setString(url.absoluteString, forType: .string) }

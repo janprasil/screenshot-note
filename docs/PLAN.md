@@ -1,3 +1,12 @@
+# Týmové složky a sdílení — kontrakt (20. 11. 2026)
+
+- Fáze 1 kolaborace, větev `feat/collab-docs`, jen dokumentace: týmové složky
+  s předponou „Tým · “ v [LOCAL-CLOUD-FOLDERS.md](LOCAL-CLOUD-FOLDERS.md#team-folders),
+  `/me` libraries, upload do týmové složky a „Kopírovat odkaz“ v [CLOUD-REST.md](CLOUD-REST.md).
+  Serverový model ve web repu (`docs/TEAMS.md`, `docs/SHARING.md`, `docs/PLAN.md`).
+- Mac implementace: „Kopírovat odkaz“ ve fázi 2, týmové složky a stav `unavailable`
+  ve fázi 6. Lokální soubory se při ztrátě členství nikdy nemažou.
+
 # Lokální a cloudové složky + Spaces (19. 11. 2026)
 
 - PR5 standardně merged; main/origin/main před lokální výměnou

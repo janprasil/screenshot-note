@@ -59,6 +59,43 @@ A prepared hidden directory is moved into place only when complete.
 Local Markdown edits are retained and do not propagate upstream. When a newer
 server version arrives for an edited copy, it goes into a new readable folder.
 
+## Team folders
+
+Approved contract (20 Nov 2026), not implemented yet. Server model in the web repo
+`docs/TEAMS.md`. There is no workspace switch: team folders appear next to
+personal ones.
+
+- **Name.** A team folder is shown as `<Team> · <Folder>` (e.g. „Tým · Bugy“) in the
+  picker, Settings and notices. The separator and order are localised (cs+en);
+  the local directory name is chosen by the user and is not prefixed.
+- **Records.** `CloudFolderRecord.owner` becomes the library UUID (user UUID for
+  personal, team UUID for team) and gains `account` = the signed-in user UUID.
+  Old records decode with `account = owner`. Records are matched by
+  `(origin, account, owner, folder id)`; `topics` returns personal and team
+  records of the active account. Topic IDs stay `cloud:<origin>:<owner>:<folder>`.
+  `accept()` allows owner ∈ {user id, team ids from `/me` libraries}.
+- **First appearance.** A new team folder goes through the same flow as a new
+  personal cloud folder: choose a local directory or keep it cloud only.
+- **Per-device mapping.** Each member's Mac maps the folder to its own directory;
+  paths are never sent upstream and the existing collision rules apply across
+  personal and team entries. Two members download the same notes from all authors.
+- **Permissions.** Rename, template and trash of a team folder are offered only for
+  owner/admin roles from the catalog. Local deletion propagates `POST /trash` only
+  for notes the user authored (or any note for admins); otherwise the local
+  deletion stays local and one notice explains it. A `403 role_forbidden` reply is
+  treated the same way and never retried in a loop.
+- **Unavailable.** When a team disappears from `/me` (left, removed, team deleted)
+  its records get `unavailable = true` and are hidden from topics, the picker,
+  `deletedRemotely` and sync. This is distinct from `remoteDeleted`. Download,
+  trash propagation and missing-session detection stop for those folders, so no
+  local change is inferred. Local directories and files are **never** deleted or
+  moved; mappings are kept and still reserve their directories. Draft topics
+  pointing to a hidden folder fall back to the default topic with a notice.
+- **Return.** When the same team reappears, `unavailable` is cleared and the old
+  mapping and session index are reused; downloading resumes without duplicates.
+- **Author.** `{author}` is available in session templates; combined mode works
+  unchanged.
+
 ## Validation
 
 `./build.sh` checks filesystem aliases, missing descendants, local/cloud and

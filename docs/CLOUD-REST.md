@@ -71,6 +71,43 @@ Their previous public project settings are ignored. Recovery/migration of an
 old queue requires a separate explicit owner/project mapping and user decision.
 Switching to a different account/origin never drains the previous account's jobs.
 
+## Teams and share links (approved contract, 20 Nov 2026)
+
+Phase 1 contract only; no client code yet. The server side is described in the web
+repo (`docs/TEAMS.md`, `docs/SHARING.md`, `docs/API-V1.md`). All new fields are
+additive and behind server flags `TEAMS_ENABLED` / `SHARING_ENABLED` (default false).
+
+- `/me` adds `libraries: [{id, kind, name, role}]`. The personal library has
+  `id` = user UUID. `CloudOwner` decodes it; a missing field means personal only.
+- The account binding stays the **user**: Keychain credential, `requireAccount`,
+  outbox `schemaVersion=1` jobs and receipts keep the user owner UUID. A team is
+  never an account; the device credential reaches team data through membership.
+- `/folders` returns personal and team folders, each with `owner_id`, `owner_kind`,
+  `owner_name` and the caller's `role`. Local folder handling is in
+  [LOCAL-CLOUD-FOLDERS.md](LOCAL-CLOUD-FOLDERS.md#team-folders).
+- Uploads keep the same manifest. The server derives the session owner from
+  `folder_id`, so a team folder upload is billed to the team and authored by the
+  user. Capacity errors from a team pool are shown with the team name.
+- Losing membership makes the folder return `404 not_found` on manifest, image or
+  commit. The job is retained with a visible error naming the folder; it is never
+  dropped, retried in a loop or sent to another folder silently. The user can
+  retry after rejoining or discard the job explicitly. `403 role_forbidden` (for
+  example appending to another member's note) is shown and not retried.
+- Sessions carry `author: {id, name}`. The template variable `{author}` renders the
+  name (empty when unknown). Built-in templates do not include it.
+
+### Copy link
+
+A committed cloud session (`cloudSessionID`, `isCommitted`) gets **Copy link** next
+to the session link. It calls `POST /api/v1/sessions/{id}/share` (default audience
+`public`; `team` offered for team folders once phase 7 ships) and puts `url` on
+`NSPasteboard`. Repeated calls return the same URL. Requires a `library:write`
+device; `403`/`404` show an error, `429` honours `Retry-After`. Revocation lives
+on the web and in a later Mac menu (`DELETE …/share/{link_id}`). Shared links and
+other people's shared content are never listed or downloaded by the Mac app.
+Strings are localised cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
+gains `/me` libraries, a team folder, `library_id`, `author` and the share endpoint.
+
 ## Validation and remaining acceptance
 
 `./build.sh` compiles for macOS13+, verifies its local signature and runs default

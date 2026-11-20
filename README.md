@@ -246,6 +246,12 @@ Cloud copies are converted to sRGB RGB/RGBA8 PNG, with at most 30 images and
 Interrupted transfers remain in the owner-bound local outbox. Retry preserves
 the same session ID and skips confirmed images. Older queued transfers remain
 on disk and are not silently sent under a new account.
+Transfers the server keeps rejecting, conflicting edits and queue entries of
+another account are listed under Set Aside… (Cloud Library and the menu bar)
+with Try Again, Save Locally and Discard. Cancelling or closing a note with
+unsaved work asks first; the draft is backed up after every capture and
+restored after a crash. Deleting a folder whose directory also holds other
+files moves only Screenshot Note notes and images to the Trash.
 
 Copy link appears in the note window for a saved session in a cloud folder of the
 connected account once the server has it (not trashed). It creates or reuses the

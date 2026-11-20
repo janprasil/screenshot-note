@@ -59,8 +59,9 @@ private struct DownloadReceipt:Codable {
 
 /// Markdown cloudové relace bez skrytých značek; obrázky podle zadaných názvů v assets/.
 func cloudSessionBody(_ note:RemoteNote,images names:[String])->String {
- let screenshots=screenshotsMarkdown(names,note.captions)
- return renderSessionTemplate(note.template,title:note.title,screenshots:screenshots,text:note.comment,comments:renderComments(note.comments ?? []))
+ let screenshots=screenshotsMarkdown(names,note.captions.map(escapeServerMarkdown))
+ let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at)}
+ return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments))
 }
 /// Tělo a metadata starého staženého souboru se značkami.
 func legacyCloudBody(_ text:String)->(String,SessionMetadata)? {
@@ -75,6 +76,18 @@ func cloudSessionID(_ original:String)->UUID? {
  let prefix="<!-- screenshot-note:begin "
  guard original.hasPrefix(prefix) else{return nil}
  return UUID(uuidString:String(original.dropFirst(prefix.count).prefix(36)))
+}
+/// Zapíše vygenerovanou kopii (_cloud, _template); ručně upravený soubor se nepřepíše a kopie dostane další volný název.
+@discardableResult func writeGeneratedCopy(_ data:Data,to url:URL)throws->URL {
+ let index=SessionIndex.shared,hash=sessionFingerprint(data),parent=url.deletingLastPathComponent(),ext=url.pathExtension
+ let stem=uniqueName(url.deletingPathExtension().lastPathComponent){candidate in
+  let file=parent.appendingPathComponent(candidate+"."+ext)
+  guard let current=fileHash(file) else{return false}
+  return current != hash && current != index.generated(file)
+ }
+ let target=parent.appendingPathComponent(stem+"."+ext)
+ if fileHash(target) != hash{try data.write(to:target,options:.atomic)}
+ index.setGenerated(target,hash);return target
 }
 func validCombinedFile(_ name:String)->Bool{!name.isEmpty && URL(fileURLWithPath:name).lastPathComponent==name && !name.hasPrefix(".") && name.lowercased().hasSuffix(".md") && !name.contains("\0") && name.utf8.count<=200}
 
@@ -181,15 +194,55 @@ final class CloudFolders {
  /// Na webu smazaná složka se přesune do Koše v macOS.
  func discardDeleted(_ id:UUID)throws {
   guard let record=deletedRemotely.first(where:{$0.id==id}) else{return}
-  if fm.fileExists(atPath:record.folder){try recycle(URL(fileURLWithPath:record.folder,isDirectory:true))}
+  try recycleFolder(record.folder)
   let old=superseded(record,storedLocal());if !old.isEmpty{try saveLocal(storedLocal().filter{!old.contains($0.id)})}
   try persist(without([record]));NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
- /// Adresář obsahuje i soubory, které aplikace nezná.
+ /// Soubory, které zapsala aplikace: Markdown relací, jejich obrázky (v kořeni i v podsložkách) a vygenerované kopie.
+ func knownFiles(_ directory:URL)->Set<String> {
+  let key=SessionIndex.key(directory),assets=directory.appendingPathComponent("assets")
+  var known=Set<String>()
+  func add(_ url:URL){if fm.fileExists(atPath:url.path){known.insert(SessionIndex.key(url))}}
+  for record in SessionIndex.shared.all where record.file.hasPrefix(key+"/") && !record.file.hasPrefix(key+"/.trash/") {
+   let markdown=URL(fileURLWithPath:record.file),parent=markdown.deletingLastPathComponent()
+   add(markdown)
+   // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
+   let flat=record.flat==true || SessionIndex.key(parent)==key
+   for image in record.images{add((flat ? assets:parent.appendingPathComponent("assets")).appendingPathComponent(image))}
+   if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
+  }
+  for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}
+  return known
+ }
+ /// Běžné soubory stromu bez skrytých položek (včetně .trash).
+ private func regularFiles(_ url:URL)->[URL] {
+  guard let walker=fm.enumerator(at:url,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles]) else{return []}
+  return walker.compactMap{$0 as? URL}.filter{(try? $0.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile==true}
+ }
+ /// Co jde do Koše: podsložka jen se soubory aplikace celá, jinak jednotlivé známé soubory.
+ func knownItems(_ directory:URL)->[URL] {
+  let known=knownFiles(directory);var items:[URL]=[]
+  for child in ((try? fm.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []).sorted(by:{$0.lastPathComponent<$1.lastPathComponent}) {
+   guard (try? child.resourceValues(forKeys:[.isDirectoryKey]))?.isDirectory==true else{if known.contains(SessionIndex.key(child)){items.append(child)};continue}
+   let inside=regularFiles(child)
+   if child.lastPathComponent != "assets",!inside.isEmpty,inside.allSatisfy({known.contains(SessionIndex.key($0))}){items.append(child)}
+   else{items+=inside.filter{known.contains(SessionIndex.key($0))}}
+  }
+  return items
+ }
+ /// Adresář (rekurzivně, i assets/ a podsložky) obsahuje soubory, které aplikace nezná.
  func hasUnknownFiles(_ path:String)->Bool {
-  let key=SessionIndex.key(URL(fileURLWithPath:path,isDirectory:true))
-  let names=Set(SessionIndex.shared.all.filter{$0.base==key}.flatMap{[URL(fileURLWithPath:$0.file).lastPathComponent,$0.directory.lastPathComponent]})
-  return ((try? fm.contentsOfDirectory(atPath:path)) ?? []).contains{!$0.hasPrefix(".") && $0 != "assets" && !names.contains($0)}
+  let directory=URL(fileURLWithPath:path,isDirectory:true),known=knownFiles(directory)
+  return regularFiles(directory).contains{!known.contains(SessionIndex.key($0))}
+ }
+ /// Celý adresář jde do Koše jen bez cizích souborů; jinak se přesunou jen soubory aplikace.
+ private func recycleFolder(_ path:String)throws {
+  guard !path.isEmpty,fm.fileExists(atPath:path) else{return}
+  let directory=URL(fileURLWithPath:path,isDirectory:true)
+  if !hasUnknownFiles(path){try recycle(directory);return}
+  for item in knownItems(directory){try recycle(item)}
+  let assets=directory.appendingPathComponent("assets")
+  if let left=try? fm.contentsOfDirectory(atPath:assets.path),left.allSatisfy({$0.hasPrefix(".")}){try recycle(assets)}
  }
  /// Lokální složky, které dřív patřily do cloudu tohoto účtu a ta složka na webu pořád je.
  var repairCandidates:[Topic] {
@@ -216,13 +269,13 @@ final class CloudFolders {
   guard currentConnection()?.token==c.token else{throw CloudFailure.invalid}
   let old=superseded(record,storedLocal());if !old.isEmpty{try saveLocal(storedLocal().filter{!old.contains($0.id)})}
   try persist(without([record]))
-  if !record.folder.isEmpty,fm.fileExists(atPath:record.folder){try recycle(URL(fileURLWithPath:record.folder,isDirectory:true))}
+  try recycleFolder(record.folder)
   NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
  /// Lokální složka zmizí z aplikace a její adresář jde do Koše v macOS.
  func deleteLocalFolder(_ topic:Topic)throws {
   guard topic.cloudFolderID==nil else{throw CloudFailure.invalid}
-  if !topic.folder.isEmpty,fm.fileExists(atPath:topic.folder){try recycle(URL(fileURLWithPath:topic.folder,isDirectory:true))}
+  try recycleFolder(topic.folder)
   try saveLocal(storedLocal().filter{$0.id != topic.id})
   NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
@@ -254,8 +307,8 @@ final class CloudFolders {
   for r in SessionIndex.shared.all where r.isCloud && r.id==id.uuidString.lowercased() && r.stem==nil && r.trashed != true {
    let file=URL(fileURLWithPath:r.file)
    guard fileHash(file)==r.files[file.lastPathComponent],r.images.count==fields.captions.count else{continue}
-   let screenshots=screenshotsMarkdown(r.images,fields.captions)
-   try? Data(renderSessionTemplate(r.template,title:fields.title,screenshots:screenshots,text:fields.comment).utf8).write(to:file,options:.atomic);writeSessionTag(file,r.id)
+   let screenshots=screenshotsMarkdown(r.images,fields.captions.map(escapeServerMarkdown))
+   try? Data(renderSessionTemplate(r.template,title:serverTitle(fields.title),screenshots:screenshots,text:escapeServerMarkdown(fields.comment)).utf8).write(to:file,options:.atomic);writeSessionTag(file,r.id)
   }
  }
  func finishTransfer(_ source:Topic,to target:Topic)throws {
@@ -323,26 +376,49 @@ final class CloudFolders {
   guard !syncing,readable,let c=connection,let owner=c.ownerID,let endpoint=CloudEndpoint(c.endpoint) else{return}
   syncing=true;defer{syncing=false;NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)}
   do {
-   let data=try await request(endpoint,"/api/v1/folders",c.token,524288)
+   // Až 200 složek se šablonami a popisy; limit s rezervou.
+   let data=try await request(endpoint,"/api/v1/folders",c.token,33554432)
    guard currentConnection()?.token==c.token else{throw CloudFailure.invalid}
    let remote=try JSONDecoder().decode(FolderEnvelope<[RemoteFolder]>.self,from:data).data
    try accept(remote.map{$0.record(owner:owner,origin:c.endpoint)})
    lastError=nil
+   // Chyba jedné složky nezastaví ostatní; ohlásí se první z nich.
+   var failure:Error?
    for topic in topics where topic.savesLocally {
-    try Topics.validateDestination(topic,folder:topic.destination,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
-    let active=try await notes(topic,state:nil,endpoint:endpoint,token:c.token).filter{$0.trashed_at==nil}
-    // Starší server koš nezná; bez seznamu koše se koš nesynchronizuje.
-    let trashed=try? await notes(topic,state:"trashed",endpoint:endpoint,token:c.token).filter{$0.trashed_at != nil}
-    try await reconcile(topic,active:active,trashed:trashed,endpoint:endpoint,token:c.token)
+    do {
+     try Topics.validateDestination(topic,folder:topic.destination,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
+     let active=try await notes(topic,state:nil,endpoint:endpoint,token:c.token).filter{$0.trashed_at==nil}
+     // Starší server koš nezná; bez seznamu koše se koš nesynchronizuje.
+     let trashed=try? await notes(topic,state:"trashed",endpoint:endpoint,token:c.token).filter{$0.trashed_at != nil}
+     try await reconcile(topic,active:active,trashed:trashed,endpoint:endpoint,token:c.token)
+    } catch {
+     failure=failure ?? error
+     if let cloud=error as? CloudFailure,[401,429].contains(cloud.status){break}
+    }
    }
-  } catch {lastError=(error as? CloudFailure)?.message ?? L("Cloudové složky se nepodařilo synchronizovat. Místní data zůstávají zachovaná.")}
+   if let failure{throw failure}
+   failures=0;retryAt = .distantPast
+  } catch {
+   lastError=(error as? CloudFailure)?.message ?? L("Cloudové složky se nepodařilo synchronizovat. Místní data zůstávají zachovaná.")
+   // Potíže serveru nebo sítě prodlužují odstup (Retry-After má přednost); vadná jedna relace ne.
+   let cloud=error as? CloudFailure
+   if error is URLError || (cloud.map{$0.status==401 || $0.status==429 || $0.status>=500 || $0.retryAfter>0} ?? false) {
+    failures+=1
+    retryAt=now().addingTimeInterval(max(cloud?.retryAfter ?? 0,min(3600,60*pow(2,Double(min(failures,7)-1)))))
+   } else{failures=0;retryAt = .distantPast}
+   if cloud?.status==401{onUnauthorized?(c.token)}
+  }
  }
+ /// Periodická synchronizace počká do tohoto času (Retry-After a backoff).
+ private(set) var retryAt=Date.distantPast
+ private var failures=0
+ var onUnauthorized:((String)->Void)?
  @MainActor private func notes(_ topic:Topic,state:String?,endpoint:CloudEndpoint,token:String)async throws->[RemoteNoteList.Note] {
   var page=1;var notes:[RemoteNoteList.Note]=[]
   while page<=10000 {
    guard currentConnection()?.token==token else{throw CloudFailure.invalid}
    let path="/api/v1/sessions?folder_id="+topic.cloudFolderID!.uuidString.lowercased()+(state.map{"&state="+$0} ?? "")+"&sort=oldest&page=\(page)"
-   let list=try JSONDecoder().decode(RemoteNoteList.self,from:await request(endpoint,path,token,524288))
+   let list=try JSONDecoder().decode(RemoteNoteList.self,from:await request(endpoint,path,token,CloudTransport.jsonLimit))
    notes+=list.data.filter{$0.deleting != true}
    if !list.pagination.has_more{break};page+=1
   }
@@ -376,7 +452,7 @@ final class CloudFolders {
    var checks=0
    for record in index.cloudRecords(base:base,folder:folderID) where !known.contains(record.id) {
     guard checks<20 else{break};checks+=1
-    do{_ = try await request(endpoint,"/api/v1/sessions/"+record.id,token,524288);continue}
+    do{_ = try await request(endpoint,"/api/v1/sessions/"+record.id,token,CloudTransport.jsonLimit);continue}
     catch let failure as CloudFailure where failure.status==404 {guard isCurrent(topic,token:token) else{throw CloudFailure.invalid};purge(record,base:base)}
     catch{continue}
    }
@@ -391,14 +467,20 @@ final class CloudFolders {
     active=try await propagateLocalDeletions(topic,active:active,base:base,endpoint:endpoint,token:token)
    }
   }
+  var failure:Error?
   if topic.combined{try await materializeCombined(active,trashed:trashed ?? [],topic:topic,base:base,endpoint:endpoint,token:token)}
   else {
-   for item in active{try await download(item,topic:topic,base:base,endpoint:endpoint,token:token)}
+   // Chyba jedné relace nezastaví stažení ostatních.
+   for item in active {
+    do{try await download(item,topic:topic,base:base,endpoint:endpoint,token:token)}
+    catch{failure=failure ?? error;guard isCurrent(topic,token:token) else{throw error}}
+   }
    flatten(topic,base:base)
    for item in trashed ?? []{trashSeparate(item.id,base:base)}
   }
   // Místní poznámky v cloudovém adresáři přijdou o staré značky až po přepsání cloudových souborů.
   migrateLegacyMarkers(in:base,skip:[topic.combinedFile,(topic.combinedFile as NSString).deletingPathExtension+"_cloud.md"])
+  if let failure{throw failure}
  }
  private func say(_ message:String){messages.append(message);if messages.count>5{messages.removeFirst()}}
  /// Adresáře zmapovaného stromu včetně .trash; obrázky a skryté položky se přeskakují.
@@ -630,10 +712,26 @@ final class CloudFolders {
    if (try? fm.moveItem(at:current,to:target)) != nil{next.file=SessionIndex.key(target)}
   }
   if let hash=next.files.removeValue(forKey:current.lastPathComponent){next.files[URL(fileURLWithPath:next.file).lastPathComponent]=hash}
+  var renamed:[String:String]=[:]
   for image in record.rootMoved ?? [] where fm.fileExists(atPath:trash.appendingPathComponent("assets/"+image).path) {
    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
    let name=uniqueName(stem){fm.fileExists(atPath:assets.appendingPathComponent($0+"."+ext).path)}+"."+ext
-   try? fm.createDirectory(at:assets,withIntermediateDirectories:true);try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))
+   try? fm.createDirectory(at:assets,withIntermediateDirectories:true)
+   if (try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))) != nil,name != image{renamed[image]=name}
+  }
+  if !renamed.isEmpty {
+   // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
+   next.images=next.images.map{renamed[$0] ?? $0}
+   next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
+   for (old,new) in renamed{if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}}
+   let markdown=URL(fileURLWithPath:next.file),key=markdown.lastPathComponent
+   if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {
+    let pristine=fileHash(markdown)==next.files[key],output=rewriteImageLinks(text,order:record.images,rename:renamed)
+    if output != text,(try? Data(output.utf8).write(to:markdown,options:.atomic)) != nil {
+     writeSessionTag(markdown,record.id)
+     if pristine{next.files[key]=sessionFingerprint(Data(output.utf8));next.length=(output as NSString).length;next.hash=sessionFingerprint(Data(output.utf8));next.heading=firstLine(output)}
+    }
+   }
   }
   removeTrashCopies(record,base:base)
   next.away=nil;next.rootMoved=nil;next.trashCopies=nil;SessionIndex.shared.put(next);return next
@@ -838,7 +936,7 @@ final class CloudFolders {
     let url=folderAssets.appendingPathComponent(name),hash=fileHash(url)
     if hash==nil{try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true);try bytes.write(to:url,options:.withoutOverwriting);links.append(name)}
     else if hash==sessionFingerprint(bytes){links.append(name)}
-    else{let copy=(name as NSString).deletingPathExtension+"_cloud.png";try bytes.write(to:folderAssets.appendingPathComponent(copy),options:.atomic);links.append(copy)}
+    else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent)}
    }
    let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
@@ -879,20 +977,32 @@ final class CloudFolders {
  @MainActor private func materializeCombined(_ items:[RemoteNoteList.Note],trashed:[RemoteNoteList.Note],topic:Topic,base:URL,endpoint:CloudEndpoint,token:String)async throws {
   guard isCurrent(topic,token:token),let owner=topic.cloudOwnerID,let folderID=topic.cloudFolderID else{throw CloudFailure.invalid}
   let index=SessionIndex.shared,assets=base.appendingPathComponent("assets",isDirectory:true)
-  var sections:[(SessionRecord,Int)]=[],refreshed=Set<String>()
+  var sections:[(SessionRecord,Int)]=[],refreshed=Set<String>(),failure:Error?
   func present(_ r:SessionRecord)->Bool{r.note != nil && !r.images.isEmpty && r.images.allSatisfy{fm.fileExists(atPath:assets.appendingPathComponent($0).path)}}
   for (order,item) in items.enumerated() {
    var record=index.cloud(item.id,base:base)
    if let saved=record,saved.stem==nil{record=nil}
    if let saved=record,saved.trashed==true{record=restoreCombined(saved,base:base)}
    if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,present(saved){sections.append((saved,order));continue}
-   let (note,stamp,digest)=try await fetchNote(item.id,endpoint:endpoint,token:token)
+   let fetched:(RemoteNote,RemoteNoteStamp?,String)
+   do{fetched=try await fetchNote(item.id,endpoint:endpoint,token:token)}
+   catch {
+    // Nedostupná relace: známý blok zůstává beze změny, nová se přidá při dalším průchodu.
+    guard isCurrent(topic,token:token),record?.note != nil || record==nil else{throw error}
+    failure=failure ?? error;if let saved=record{sections.append((saved,order))};continue
+   }
+   let (note,stamp,digest)=fetched
    let created=stamp?.created_at ?? item.created_at
    if record==nil{record=migrateCombined(item.id,created:created,topic:topic,base:base,endpoint:endpoint,owner:owner)}
    if var saved=record,saved.digest==digest,present(saved) {
     saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision;index.put(saved);sections.append((saved,order));continue
    }
-   let data=try await images(note,topic:topic,endpoint:endpoint,token:token)
+   let data:[Data]
+   do{data=try await images(note,topic:topic,endpoint:endpoint,token:token)}
+   catch {
+    guard isCurrent(topic,token:token),record?.note != nil || record==nil else{throw error}
+    failure=failure ?? error;if let saved=record{sections.append((saved,order))};continue
+   }
    guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
    try fm.createDirectory(at:assets,withIntermediateDirectories:true)
    let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date()),base:base)
@@ -945,8 +1055,7 @@ final class CloudFolders {
   if existing==generated || covered{}
   else if existing==nil || existing.map(sessionFingerprint)==baseline{try generated.write(to:target,options:.atomic)}
   else {
-   target=base.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.md")
-   if (try? boundedData(target,max:20000000)) != generated{try generated.write(to:target,options:.atomic)}
+   target=try writeGeneratedCopy(generated,to:base.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.md"))
   }
   index.batch {
    if !covered{index.setGenerated(target,sessionFingerprint(generated))}
@@ -959,6 +1068,7 @@ final class CloudFolders {
    }
   }
   tagCombinedFile(target)
+  if let failure{throw failure}
  }
  /// Otisky obrázků, které server u stažené relace má.
  func serverImages(for target:PreviousSessionTarget,topic:Topic)->(UUID,[String])? {
@@ -982,7 +1092,7 @@ final class CloudFolders {
  }
  private func fetchNote(_ id:UUID,endpoint:CloudEndpoint,token:String)async throws->(RemoteNote,RemoteNoteStamp?,String) {
   let path="/api/v1/sessions/"+id.uuidString.lowercased()
-  let data=try await request(endpoint,path,token,524288)
+  let data=try await request(endpoint,path,token,CloudTransport.jsonLimit)
   var note=try JSONDecoder().decode(FolderEnvelope<RemoteNote>.self,from:data).data
   if note.comments?.isEmpty==true{note.comments=nil}
   let stamp=(try? JSONDecoder().decode(FolderEnvelope<RemoteNoteStamp>.self,from:data))?.data
@@ -998,7 +1108,7 @@ final class CloudFolders {
   var total=0;var result:[Data]=[]
   for image in note.images {
    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
-   let data=try await request(endpoint,image.path,token,52428800);total+=data.count
+   let data=try await request(endpoint,image.path,token,CloudTransport.imageLimit);total+=data.count
    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
    guard total<=100000000,data.starts(with:[137,80,78,71,13,10,26,10]) else{throw CloudFailure.invalid}
    result.append(data)

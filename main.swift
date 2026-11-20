@@ -140,7 +140,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }else{
    let submenu=NSMenu(title:L("Konfigurace"));submenu.autoenablesItems=false
    for configuration in configurations{
-    let child=NSMenuItem(title:configuration.name,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.folder
+    let child=NSMenuItem(title:configuration.displayName,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.folder
     child.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil);child.image?.isTemplate=true
     submenu.addItem(child)
    }
@@ -166,6 +166,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    alert.addButton(withTitle:L("Uložit jako novou relaci"));alert.addButton(withTitle:L("Zahodit"))
    draft=try applyStaleChoice(draft,keep:alert.runModal() == .alertFirstButtonReturn,root:draftRoot)
   }
+  // Složka týmu, ke kterému už přístup není, se vymění za výchozí.
+  if let fallback=fallbackFromHiddenFolder(draft){draft=fallback;try stage(draft,root:draftRoot)}
   if draft.topic == nil {draft.topic=Topics.initialTopic}
   let root=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-"+UUID().uuidString)
   try fm.createDirectory(at:root,withIntermediateDirectories:true)
@@ -190,7 +192,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   var rows=[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku."))]
   rows += saved.map{configuration,session in
    let assets=URL(fileURLWithPath:session.target.path).deletingLastPathComponent().appendingPathComponent("assets")
-   return SessionChoice(title:session.title,detail:configuration.name+" · "+session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})
+   return SessionChoice(title:session.title,detail:configuration.displayName+" · "+session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})
   }
   guard let index=SessionChoiceDialog().run(title:L("Vybrat relaci"),choices:rows) else{return nil}
   if index==0{return Draft(images:[],comment:"",topic:Topics.initialTopic)}
@@ -274,7 +276,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
       if cloudOnly {
        if cloudFolder,let previous=stored.previous,let topic=stored.topic {
         guard let (id,shas)=CloudFolders.shared.serverImages(for:previous,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
-        if stored.images.count==shas.count {
+        // Cizí relace v týmové složce: text zůstane jen v místním souboru, snímky přidat nejde.
+        if !CloudFolders.shared.mayChange(id,topic:topic) {
+         guard stored.images.count==shas.count else{throw CloudFailure(L("Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci."))}
+         CloudFolders.shared.keepLocalEdit(id,CloudLibrary.editFields(stored))
+         CloudFolders.shared.notify(L("Úprava cizí relace v týmové složce zůstala jen v místním souboru."))
+        } else if stored.images.count==shas.count {
          // Bez nových snímků jde jen o úpravu textu (PATCH s revizí).
          guard let (original,revision)=CloudFolders.shared.editBase(id,topic:topic) else{throw CloudFailure(L("Relaci zatím nejde doplnit, protože její cloudová kopie není stažená. Zkus to po synchronizaci."))}
          try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision,draftBase:stored.cloudBase)
@@ -325,7 +332,10 @@ if CommandLine.arguments.contains(where:{($0.hasSuffix("-test") && $0 != "--prev
 }
 if CommandLine.arguments.contains("--folder-sync-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
- Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed.\n",stderr);exit(1)}}
+ // Výstup do roury se hned propisuje a zaseknutý běh skončí čitelnou chybou dřív než timeout volajícího.
+ setvbuf(stdout,nil,_IOLBF,0)
+ DispatchQueue.global().asyncAfter(deadline:.now()+75){fputs("Cloud folder sync test timed out after 75 s.\n",stderr);exit(1)}
+ Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 

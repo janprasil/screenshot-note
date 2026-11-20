@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 import zlib
 
@@ -20,6 +21,17 @@ connections, jobs, requests = {}, {}, []
 shares, share_calls, share_statuses = {}, [], []
 dropped = set()
 errors = []
+# Tým: /me libraries, týmová složka, library_id, author a ztráta členství.
+team, team_folder, team_note, bob = (str(uuid.uuid4()) for _ in range(4))
+team_state = {'member': True}
+team_lists, team_rejects = [], []
+
+
+def tiny_png():
+    raw = b''.join(b'\x00' + b'\x10\x20\x30' * 2 for _ in range(2))
+    def chunk(kind, body):
+        return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
 
 
 def png(data):
@@ -84,6 +96,60 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def raw(self, body, kind='image/png'):
+        self.send_response(200)
+        self.send_header('Content-Type', kind)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def team(self):
+        path, _, query = self.path.partition('?')
+        params = urllib.parse.parse_qs(query)
+        if path == '/api/v1/fixture/team':
+            assert self.command == 'POST'
+            body = json.loads(self.body())
+            team_state['member'] = body['member']
+            team_state['leave_after_folders'] = body.get('leave_after_folders', False)
+            self.reply(dict(member=team_state['member']))
+        elif path == '/api/v1/folders':
+            assert self.command == 'GET'
+            self.reply([dict(id=team_folder, name='Bugy', revision='1', description='', combined=False, combined_file='Bugy.md',
+                             markdown_template=None, combined_template=None, owner_id=team, owner_kind='team',
+                             owner_name='Fixture tým', role='member')] if team_state['member'] else [])
+            # Souběh: přístup zmizí hned po katalogu.
+            if team_state.pop('leave_after_folders', False):
+                team_state['member'] = False
+                team_state['raced'] = True
+        elif path == '/api/v1/sessions':
+            assert self.command == 'GET' and params['folder_id'] == [team_folder] and params['library_id'] == [team]
+            team_lists.append(query)
+            # Nedostupná library vrací prázdný seznam (API-V1), ne 404.
+            items = [] if params.get('state') == ['trashed'] or not team_state['member'] else [
+                dict(id=team_note, updated_at='2026-11-20T00:00:00Z', created_at='2026-11-20T00:00:00Z', trashed_at=None,
+                     author=dict(id=bob, name='Fixture Bob'))]
+            self.send_list(items)
+        elif path == '/api/v1/sessions/' + team_note:
+            if not team_state['member']:
+                self.error(404, 'not_found')
+                return True
+            self.reply(dict(id=team_note, title='Týmový bug', comment='Popis', template='# {title}\n\nAutor: {author}\n\n{screenshots}\n\n{text}\n',
+                            captions=[''], updated_at='2026-11-20T00:00:00Z', created_at='2026-11-20T00:00:00Z', owner_id=team, owner_kind='team',
+                            author=dict(id=bob, name='Fixture Bob'), images=[dict(index=1, path='/api/v1/sessions/' + team_note + '/images/1')]))
+        elif path == '/api/v1/sessions/' + team_note + '/images/1':
+            self.raw(tiny_png())
+        else:
+            return False
+        return True
+
+    def send_list(self, items):
+        body = json.dumps({'data': items, 'pagination': {'has_more': False}}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def share(self, token):
         assert self.command == 'POST' and connections[token]['active']
         assert self.headers['Content-Type'] == 'application/json'
@@ -118,7 +184,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def serve(self):
         try:
-            assert self.path.startswith('/api/v1/') and '?' not in self.path
+            assert self.path.startswith('/api/v1/') and ('?' not in self.path or self.path.startswith('/api/v1/sessions?'))
             assert all(h not in self.headers for h in ('Cookie', 'Origin', 'apikey'))
             requests.append((self.command, self.path))
             if self.path == '/api/v1/device-pairings':
@@ -154,7 +220,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     connections[token]['active'] = True
                     self.reply(dict(state='active', expires_at='2099-01-01T00:00:00Z', interval=5))
             elif self.path == '/api/v1/me':
-                self.reply(dict(id=owner, email='fixture@example.test'))
+                libraries = [dict(id=owner, kind='personal', name=None, role='owner')]
+                if team_state['member']:
+                    libraries.append(dict(id=team, kind='team', name='Fixture tým', role='member'))
+                self.reply(dict(id=owner, email='fixture@example.test', libraries=libraries))
+            elif self.team():
+                pass
             elif self.path.startswith('/api/v1/sessions/') and self.path.endswith('/share'):
                 self.share(token)
             else:
@@ -167,6 +238,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     manifest = json.loads(self.body())
                     assert set(manifest) - {'folder_id'} == {'title', 'comment', 'configuration', 'template', 'captions', 'images'}
                     assert len(manifest['images']) == len(manifest['captions']) == 1
+                    # Po ztrátě členství je týmová složka nedostupná.
+                    if (manifest.get('folder_id') or '').lower() == team_folder and not team_state['member']:
+                        team_rejects.append(ident)
+                        self.error(404, 'not_found')
+                        return
                     if ident not in jobs:
                         digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
                         jobs[ident] = dict(manifest=manifest, digest=digest, images={}, state='uploading')
@@ -215,13 +291,18 @@ try:
     assert not errors, errors
     assert dropped == {'manifest', 'image', 'commit'}
     assert sum(1 for method, path in requests if method == 'DELETE') == 1
-    assert len(jobs) == 3 and all(job['state'] == 'committed' for job in jobs.values())
+    assert len(jobs) == 4 and all(job['state'] == 'committed' for job in jobs.values())
+    # Týmový upload po ztrátě členství: jeden 404, žádná smyčka, po návratu nahrán ručně.
+    assert len(team_rejects) == 2 and sum(1 for job in jobs.values() if (job['manifest'].get('folder_id') or '').lower() == team_folder) == 1
+    assert team_lists and all('library_id=' + team in query for query in team_lists)
+    assert team_state.get('raced') and any(path == '/api/v1/sessions/' + team_note for _, path in requests)
     assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
     assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
     # 12 volání: druhý pokus během Retry-After se na server nedostane.
     assert len(share_calls) == 12 and share_statuses == [201, 200, 200]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
+    print('PASS: team folder wire contract (/me libraries, owner fields, library_id, author, membership loss → hidden folder and parked upload without retry loop)')
     print('PASS: loopback-only wire contract, share endpoint (POST public, 201/200 same URL, Retry-After honored), no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')
 finally:
     server.shutdown()

@@ -17,6 +17,7 @@ Capture an area or your screen, annotate images, add a title and a comment, and 
 - Annotations: selection, moving and deleting objects, arrows, shapes, freehand drawing, text styling, colors and crop.
 - A single-line comment field with a larger editor that styles Markdown as you type.
 - Separate local and cloud folders; local folders have their own export mode and Markdown template.
+- Team cloud folders appear next to personal ones as `<Team> · <Folder>`; see [docs/LOCAL-CLOUD-FOLDERS.md](docs/LOCAL-CLOUD-FOLDERS.md#team-folders).
 - Configuration selection and a separate menu action for reopening saved sessions.
 - Separate notes per session or a shared Markdown file.
 - Add screenshots to previously exported sessions, including sections of a shared note.
@@ -32,7 +33,7 @@ Your folder/
     Note title_2.png
 ```
 
-Notes use Obsidian image links. Each configuration can customize the output layout using `{title}`, `{screenshots}` and `{text}`. `{screenshots}` includes each image followed by its individual note. Filenames remove diacritics and add a numeric suffix on collision. Existing files are not silently overwritten. New installations default to `~/Pictures/Screenshot Note`.
+Notes use Obsidian image links. Each configuration can customize the output layout using `{title}`, `{screenshots}` and `{text}` (optionally `{comments}` and, for cloud sessions, `{author}`). `{screenshots}` includes each image followed by its individual note. Filenames remove diacritics and add a numeric suffix on collision. Existing files are not silently overwritten. New installations default to `~/Pictures/Screenshot Note`.
 
 ### Markdown template
 

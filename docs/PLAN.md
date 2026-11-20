@@ -1,3 +1,58 @@
+# Integrace stacku kolaborace s main (#11, #12) — 20. 11. 2026
+
+- `origin/main` (#12 sync robustness/parked items/extension revision, #11 CI) mergnut do
+  `feat/collab-docs`, dál merge commity do `feat/collab-p2-copy-link` a `feat/collab-p6-team-folders`
+  (bez rebase/force).
+- Sjednocení: týmové `blocked.json` + „Zahodit zablokované…“ (fáze 6) nahrazeno odloženými položkami
+  z #12. Týmový 404 / 403 `role_forbidden` úlohu odloží s důvodem `<Tým> · <Složka>` (Zkusit znovu /
+  Uložit lokálně / Zahodit). `role_forbidden` se chytá před obecnou klasifikací, takže 403 nezastaví frontu.
+  402/413 týmové složky dostane předponu a projde klasifikací #12 (kvóta zastaví frontu, `resource_limit` odloží).
+  PATCH s `role_forbidden` se odloží s důvodem. Do `renderSessionTemplate` jde `{author}` přes `serverTitle`
+  (escaping z #12). Limity JSON z #12 platí i pro týmový seznam relací.
+- Ověřeno na každé úrovni: `./build.sh`, `python3 tests/cloud-rest.py <binárka>`, `tests/build-config.py`,
+  `tests/release.py` (totéž co CI + loopback). Na samotném main `tests/cloud-rest.py` padá
+  (`folder_required`), proto ho `ci.yml` nespouští; od fáze 2 projde.
+
+# Týmové složky — fáze 6 kolaborace, Mac (20. 11. 2026)
+
+- Stav: hotovo ve větvi `feat/collab-p6-team-folders` (stack nad fází 2, nepushnuto).
+  Implementováno proti kontraktu a lokální fixture; serverová část fáze 6 běží paralelně.
+- `/me` `libraries` (`CloudOwner`, chybějící pole = jen osobní); refresh složek čte `/me`
+  při každém průchodu. Account binding zůstává uživatel (Keychain, outbox, účtenky).
+- `CloudFolderRecord`: `owner` = library, nové `account` (staré záznamy account = owner),
+  `ownerKind`/`ownerName`/`role`/`unavailable`; párování (origin, account, owner, id).
+  Katalog `/folders` s volitelnými `owner_*`/`role`; `library_id` u seznamu týmové složky.
+- Zobrazení `<Tým> · <Složka>` s ikonou `person.2` (picker, nastavení, menu, hlášky,
+  kolize adresářů), klíč `%@ · %@` cs+en. První výskyt = stejný flow mapování.
+- Role: člen mění jen místní adresář; rename/šablona/smazání jen owner/admin.
+  Mazání: `POST /trash` jen vlastní poznámka (author.id) nebo admin, jinak `keptLocal`
+  + jedna hláška; 403 `role_forbidden` (trash/restore/upload) se neopakuje.
+- `unavailable`: tým zmizí z `/me` → skryté, bez stahování/propagace/detekce, soubory
+  a mapování zůstávají a rezervují adresáře (i po odpojení), draft → výchozí složka
+  s hláškou. Souběhy: chybějící týmová složka v katalogu i 404 detailu ověří `/me`
+  znovu, než by se cokoli označilo za smazané. Návrat obnoví mapování bez duplikátů.
+- Upload: 404 / 403 `role_forbidden` v týmové složce → úloha odložená (`.conflicts/`, Odložené…
+  z #12; původní `blocked.json` nahrazen při integraci), hláška se jménem složky. 402/413 týmové složky
+  s předponou složky. `{author}` v souhrnu/detailu a v `renderSessionTemplate`.
+- Ověřeno: `./build.sh` (59 PASS řádků včetně 6 nových týmových, lokalizace),
+  `python3 tests/cloud-rest.py <binárka>` (nový PASS týmového wire kontraktu),
+  `python3 tests/build-config.py`.
+- Neověřeno: proti skutečnému web serveru fáze 6, vizuální render ikon a disabled polí
+  v `--design-export`, VoiceOver, instalovaná aplikace.
+- Review opravy (3. commit po review): PATCH cizí týmové relace se neposílá (lokální úprava,
+  403 se odloží jednou), doplnění cizí relace odmítnuto; odhlášení nechá týmové složky jako
+  skrytý záznam (žádný reconnect/`invalid`), `former-cloud:<účet>:<složka>` pro týmové;
+  fixture vrací pro nedostupnou library prázdný seznam a pokrývá souběh prázdný seznam →
+  404 → nové `/me`; zahození přes Odložené… (Koš v macOS); odložení jen pro
+  týmové složky; `LibraryKind`/`LibraryRole`, `isRoleForbidden`, jedna nápověda šablon.
+- `--folder-sync-self-test` proti živému Next (web `test:folders` z c88bd1d): živá část čekala starou
+  strukturu podsložek a padala na assertu, výstup do roury byl blokově bufferovaný. Opraveno na
+  plochou strukturu, stdout po řádcích, 75 s watchdog; nativní část PASS. Web test pak padá až ve
+  webové části (`cloud-folders.flow.mjs:69`, počet `.bucket-list li`), mimo Mac.
+- Otevřené: Mac neumí zakládat týmové složky ani `team` audience sdílení (pozdější fáze);
+  člen nemůže složku „odebrat“ z Macu (jen přemapovat adresář); u týmové složky bez
+  `author` (starší server) člen nic nepropaguje.
+
 # Kopírovat odkaz — fáze 2 kolaborace (20. 11. 2026)
 
 - Stav: hotovo ve větvi `feat/collab-p2-copy-link` (nepushnuto). Tlačítko „Kopírovat odkaz“

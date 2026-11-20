@@ -233,7 +233,7 @@ func extractTemplateValues(_ template:String,from body:String)->[String:String]?
 }
 private func extractTemplateValues(_ template:String,from body:String,comments:Bool)->[String:String]?{
  let template=template.replacingOccurrences(of:"\u{0}",with:"{comments}")
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments)\\}")
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author)\\}")
  let source=template as NSString;let matches=expression.matches(in:template,range:NSRange(location:0,length:source.length));var pattern="\\A",offset=0;var keys:[String]=[]
  for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+"(.*?)";keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
  pattern+=NSRegularExpression.escapedPattern(for:source.substring(from:offset));if !template.hasSuffix("\n"){pattern+="\\n"};pattern+="\\z"
@@ -277,7 +277,7 @@ func resolveDraftTarget(_ draft:Draft,folders:CloudFolders = .shared)->DraftTarg
  var current=topic
  if let folder=topic.cloudFolderID {
   // Cloudová relace musí v indexu existovat, nebýt v koši ani smazaná z disku.
-  guard let live=folders.allTopics.first(where:{$0.cloudFolderID==folder}),!live.folder.isEmpty,let base=try? Topics.checkedDestination(live.folder) else{return .stale(title)}
+  guard let live=folders.topics.first(where:{$0.cloudFolderID==folder && $0.cloudOwnerID==topic.cloudOwnerID}) ?? folders.allTopics.first(where:{$0.cloudFolderID==folder}),!live.folder.isEmpty,let base=try? Topics.checkedDestination(live.folder) else{return .stale(title)}
   current=live
   if let session=previous.session {
    guard let id=UUID(uuidString:session),let record=SessionIndex.shared.cloud(id,base:base),record.trashed != true,record.askDelete != true,record.missingSince==nil,record.held != true,fm.fileExists(atPath:record.file) else{return .stale(title)}
@@ -291,6 +291,13 @@ func resolveDraftTarget(_ draft:Draft,folders:CloudFolders = .shared)->DraftTarg
  var target=found.target;target.imported=previous.imported.mapValues{mapping[$0] ?? $0}
  var next=draft;next.previous=target;next.topic=current
  return .current(next)
+}
+/// Rozpracovaná relace ve skryté týmové složce (ztráta přístupu) přejde do výchozí složky s upozorněním.
+func fallbackFromHiddenFolder(_ draft:Draft,folders:CloudFolders = .shared,defaultTopic:@autoclosure ()->Topic = Topics.defaultTopic)->Draft? {
+ guard let topic=draft.topic,topic.cloudFolderID != nil,folders.isUnavailable(topic) else{return nil}
+ var next=draft;next.topic=defaultTopic();next.previous=nil
+ folders.notify(LF("Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@.",topic.displayName,next.topic!.displayName))
+ return next
 }
 /// Volba u zaniklé relace: uložit jako novou (bez vazby), nebo zahodit rozpracované změny.
 func applyStaleChoice(_ draft:Draft,keep:Bool,root:URL)throws->Draft {

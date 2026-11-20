@@ -135,9 +135,10 @@ func finishSession(_ draft:Draft,root:URL)throws {
 let defaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# Description\n\n{text}\n\n{comments}\n"
 // Dřívější vestavěná šablona; uložené šablony se nemění.
 let legacyDefaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# Description\n\n{text}\n"
-func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="")->String{
- let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments]
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments)\\}")
+/// `{author}` je jméno autora cloudové relace, jinak prázdné; vestavěné šablony ho nemají.
+func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="",author:String="")->String{
+ let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments,"{author}":author]
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author)\\}")
  let source=template as NSString;var output=template
  for match in expression.matches(in:template,range:NSRange(location:0,length:source.length)).reversed(){output=(output as NSString).replacingCharacters(in:match.range,with:values[source.substring(with:match.range)]!)}
  // Bez komentářů nezůstanou na konci prázdné řádky.

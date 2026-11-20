@@ -8,6 +8,8 @@ A calm, native Mac workspace for collecting visual context. Screenshots provide 
 
 - Capture: prominent editable note title in the header, configuration link, optional quiet “Copy link” button (committed cloud sessions only, briefly turns into a green “Link copied” confirmation) and capture action on one row without overlaps, horizontally scrolling screenshot strip, single-line comment and a fixed action row.
 - Configurations: a persistent sidebar and a single details form. No repeated card containers.
+- Team folders: shown as `<Team> · <Folder>` with the `person.2` SF Symbol (15 pt, same tint as cloud folders) in the sidebar and as a template image in the folder picker. For a member, the folder name, description, mode, file and template controls are disabled and the pencil and delete actions are hidden; only the local directory stays editable, explained by the sync caption.
+- Cloud Library: team uploads that lost access or role land in the shared „Set Aside…“ list (Try Again, Save Locally, Discard) like other parked items; there is no separate blocked button.
 - Settings: three plain rows for configurations, shortcuts and login behavior.
 - Annotation editor: one icon toolbar, neutral image canvas and a common action row.
 - Markdown editor: a restrained formatting toolbar and an uncluttered writing surface.

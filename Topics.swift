@@ -9,6 +9,12 @@ struct Topic:Codable,Equatable {
  var formerCloudFolderID:UUID? = nil;var formerCloudOwnerID:UUID? = nil;var formerCloudOrigin:String? = nil
  // Jen pro cloudovou složku na tomto Macu: false = smazání z disku jde do Koše bez dotazu.
  var confirmLocalDeletes:Bool? = nil
+ // Týmová složka: název týmu a role přihlášeného uživatele z katalogu.
+ var cloudOwnerName:String? = nil;var cloudTeam:Bool? = nil;var cloudRole:String? = nil
+ /// Zobrazovaný název; týmová složka má vždy předponu týmu.
+ var displayName:String{cloudTeam==true ? LF("%@ · %@",cloudOwnerName ?? L("Tým"),name):name}
+ /// Přejmenovat, nastavit a smazat týmovou složku smí jen vlastník nebo správce týmu.
+ var canManageCloudFolder:Bool{cloudTeam != true || LibraryRole.manages(cloudRole)}
  var savesLocally:Bool{cloudFolderID == nil ? cloudOnly != true:!folder.isEmpty}
  var savesToCloud:Bool{cloudFolderID != nil || cloudOnly == true || uploadToCloud == true}
  var destination:URL{URL(fileURLWithPath:folder,isDirectory:true)}
@@ -51,7 +57,7 @@ enum Topics {
   for topic in list where topic.savesLocally {
    let target=try checkedDestination(topic.folder)
    if let other=checked.first(where:{sameDestination($0.1,target)}) {
-    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.0.name,topic.name))
+    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.0.displayName,topic.displayName))
    }
    checked.append((topic,target))
   }
@@ -62,7 +68,7 @@ enum Topics {
   let target=try checkedDestination(folder.path)
   for other in list where other.id != topic.id && other.savesLocally {
    if sameDestination(target,try checkedDestination(other.folder)) {
-    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.name,topic.name))
+    throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.displayName,topic.displayName))
    }
   }
  }
@@ -175,12 +181,12 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func tableView(_ tableView:NSTableView,heightOfRow row:Int)->CGFloat{58}
  func tableView(_ tableView:NSTableView,rowViewForRow row:Int)->NSTableRowView?{DesignTopicRow()}
  func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{
-  let topic=rows[row];let cell=NSView(frame:NSRect(x:0,y:0,width:208,height:58));let cloud=topic.cloudFolderID != nil
-  let icon=NSImageView(frame:NSRect(x:10,y:18,width:24,height:22));icon.image=NSImage(systemSymbolName:cloud ? "icloud":"icloud.slash",accessibilityDescription:cloud ? L("Cloudová složka"):L("Lokální složka"))?.withSymbolConfiguration(.init(pointSize:15,weight:.regular));icon.contentTintColor=cloud ? .systemBlue:.systemRed;cell.addSubview(icon)
+  let topic=rows[row];let cell=NSView(frame:NSRect(x:0,y:0,width:208,height:58));let cloud=topic.cloudFolderID != nil,team=topic.cloudTeam==true
+  let icon=NSImageView(frame:NSRect(x:10,y:18,width:24,height:22));icon.image=NSImage(systemSymbolName:team ? "person.2":cloud ? "icloud":"icloud.slash",accessibilityDescription:team ? L("Týmová složka"):cloud ? L("Cloudová složka"):L("Lokální složka"))?.withSymbolConfiguration(.init(pointSize:15,weight:.regular));icon.contentTintColor=cloud ? .systemBlue:.systemRed;cell.addSubview(icon)
   if topic.id==defaultID{let badge=NSImageView(frame:NSRect(x:26,y:11,width:13,height:13));badge.image=NSImage(systemSymbolName:"star.fill",accessibilityDescription:L("Výchozí složka"))?.withSymbolConfiguration(.init(pointSize:9,weight:.bold));badge.contentTintColor = .systemYellow;cell.addSubview(badge)}
-  cell.addSubview(designLabel(topic.name,NSRect(x:46,y:28,width:152,height:21),size:13,weight:.medium))
+  cell.addSubview(designLabel(topic.displayName,NSRect(x:46,y:28,width:152,height:21),size:13,weight:.medium))
   let secondary=(cloud ? (topic.folder.isEmpty ? L("Bez místního adresáře"):L("Cloud")):L("Jen na tomto Macu"))+" · "+(topic.combined ? L("Společný soubor"):L("Samostatné relace"))
-  cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:AppPalette.secondary));cell.toolTip=topic.name+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
+  cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:AppPalette.secondary));cell.toolTip=topic.displayName+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
  }
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
  func load(_ topic:Topic){
@@ -189,17 +195,19 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
  }
+ /// Týmovou složku smí nastavovat jen vlastník nebo správce; člen mění jen místní adresář.
+ private var editingManaged:Bool{list.first{$0.id==editingID}?.canManageCloudFolder ?? true}
  func layoutHeading(){
   let editing=name.isEditable,text=name.stringValue.isEmpty ? (name.placeholderString ?? ""):name.stringValue
   let width=editing ? 440:min(440,ceil((text as NSString).size(withAttributes:[.font:name.font!]).width)+6)
   name.frame=NSRect(x:editing ? 282:272,y:558,width:width,height:34);nameShell.frame=NSRect(x:272,y:556,width:width+20,height:38);nameShell.isHidden = !editing;nameClick.isEnabled = !editing
-  pencil?.frame=NSRect(x:name.frame.maxX+(editing ? 16:6),y:561,width:28,height:28);pencil?.isHidden=editing
+  pencil?.frame=NSRect(x:name.frame.maxX+(editing ? 16:6),y:561,width:28,height:28);pencil?.isHidden=editing || !editingManaged
   star.frame=NSRect(x:(editing ? nameShell.frame.maxX:pencil.frame.maxX)+4,y:561,width:30,height:28)
   let isDefault=pendingDefault || (editingID != nil && editingID==defaultID);star.isOn=isDefault
   star.toolTip=isDefault ? L("Výchozí složka pro nové relace"):L("Nastavit jako výchozí složku");star.setAccessibilityLabel(star.toolTip)
  }
  @objc func beginNameEdit(){
-  guard !name.isEditable else{return}
+  guard !name.isEditable,editingManaged else{return}
   name.isEditable=true;name.isSelectable=true;layoutHeading();window.makeFirstResponder(name);name.currentEditor()?.selectAll(nil)
  }
  func endNameEdit(){guard name.isEditable else{return};name.isEditable=false;name.isSelectable=false;if window?.firstResponder===name.currentEditor(){window.makeFirstResponder(nil)};layoutHeading()}
@@ -225,8 +233,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    syncButton.isHidden = !signedIn || !saved;syncButton.toolTip=L("Nahraje relace do cloudu a změní složku na cloudovou.")
    syncCaption.stringValue=signedIn ? (saved ? L("Relace jsou zatím jen na tomto Macu."):L("Synchronizaci zapneš po uložení složky.")):L("Pro synchronizaci připoj Mac v Cloudové knihovně.")
   }
-  deleteButton?.isHidden = !saved
+  deleteButton?.isHidden = !saved || !editingManaged
   let current=list.first{$0.id==editingID}
+  // Člen týmu nemění nastavení týmové složky, jen místní adresář.
+  let managed=editingManaged;if editingID != nil{detail.isEnabled=managed};mode.isEnabled=managed;file.isEnabled=combined && managed;templateButton?.isEnabled=managed;pencil?.isHidden=name.isEditable || !managed
+  if let current,current.cloudTeam==true{syncCaption.stringValue=managed ? LF("Složka týmu %@. Relace se nahrávají do cloudu a stahují sem.",current.cloudOwnerName ?? L("Tým")):L("Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář.")}
   askBeforeDelete.isHidden = !(cloud && current?.confirmLocalDeletes==false) || combined;askBeforeDelete.state = .off
   syncCaption.frame.origin.x=syncButton.isHidden ? 272:536;syncCaption.frame.size.width=syncButton.isHidden ? 600:336
   syncButton.needsDisplay=true
@@ -248,7 +259,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  /// Smaže složku: cloudovou i na webu (30 dní v Koši), adresář jde do Koše v macOS.
  @objc func deleteTopic(){
   guard let topic=list.first(where:{$0.id==editingID}) else{return}
-  let alert=NSAlert();alert.messageText=LF("Smazat složku „%@“?",topic.name)
+  let alert=NSAlert();alert.messageText=LF("Smazat složku „%@“?",topic.displayName)
   alert.informativeText=topic.cloudFolderID != nil ? L("Složka se smaže i v cloudu (bude 30 dní v Koši na webu). Lokální soubory se přesunou do Koše v macOS."):L("Složka zmizí z aplikace a její lokální soubory se přesunou do Koše v macOS.")
   // Cizí soubory v adresáři zůstávají; uživatel to ví předem.
   if !topic.folder.isEmpty,CloudFolders.shared.hasUnknownFiles(topic.folder){alert.informativeText+="\n\n"+L("Adresář obsahuje i jiné soubory. Ty zůstanou na místě; do Koše v macOS se přesunou jen poznámky Screenshot Note.")}
@@ -264,7 +275,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  /// Výchozí šablony pro nové složky; s účtem se ukládají na server.
  @objc func editDefaults(){
   var values=[defaults.effectiveSession,defaults.effectiveFile];var selected=0
-  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:[(L("Šablona relace"),values[0],L("Proměnné: {title}, {screenshots}, {text}, {comments}")),(L("Šablona souboru"),values[1],L("Proměnné: {folderName}, {folderDescription}, {sessions}"))],selected:selected,apply:L("Uložit")){
+  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:[(L("Šablona relace"),values[0],sessionTemplateHint),(L("Šablona souboru"),values[1],fileTemplateHint)],selected:selected,apply:L("Uložit")){
    values=edited
    guard TemplateDefaults.valid(session:values[0],file:values[1]) else{selected=["{title}","{screenshots}","{text}"].allSatisfy{values[0].contains($0)} ? 1:0;showError(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."));continue}
    let chosen=values
@@ -287,7 +298,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  }
  @objc func chooseFolder(){let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;if !folder.stringValue.isEmpty{panel.directoryURL=URL(fileURLWithPath:folder.stringValue)};if panel.runModal() == .OK,let url=panel.url{folder.stringValue=url.path}}
  @objc func editTemplate(){
-  let sessionHint=L("Proměnné: {title}, {screenshots}, {text}, {comments}"),sessionError=L("Šablona musí obsahovat {title}, {screenshots} a {text}.")
+  let sessionHint=sessionTemplateHint,sessionError=L("Šablona musí obsahovat {title}, {screenshots} a {text}.")
   func validSession(_ value:String)->Bool{["{title}","{screenshots}","{text}"].allSatisfy{value.contains($0)}}
   if mode.indexOfSelectedItem==0 {
    var value=template
@@ -296,7 +307,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    }
   } else {
    var values=[template,fileTemplate ?? defaultCombinedTemplate];var selected=0
-   while let edited=MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),values[0],sessionHint),(L("Šablona souboru"),values[1],L("Proměnné: {folderName}, {folderDescription}, {sessions}"))],selected:selected,apply:L("Použít šablonu")){
+   while let edited=MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),values[0],sessionHint),(L("Šablona souboru"),values[1],fileTemplateHint)],selected:selected,apply:L("Použít šablonu")){
     values=edited
     if !validSession(values[0]){selected=0;showError(sessionError);continue}
     if !validCombinedTemplate(values[1]){selected=1;showError(L("Šablona souboru musí obsahovat {sessions} právě jednou."));continue}
@@ -314,6 +325,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let filename=(filenameFromTitle(rawFile) ?? filenameFromTitle(title) ?? "Screenshoty")+".md"
   if editingCloud {
    guard let original=list.first(where:{$0.id==editingID}) else{return}
+   // Člen týmu ukládá jen místní adresář; nastavení složky na server neposílá.
+   if !original.canManageCloudFolder {
+    do{if original.folder != path{try CloudFolders.shared.setFolder(original,path:path)}}catch{showError(error.localizedDescription);return}
+    list=Topics.all;reloadTable();showStatus(L("Konfigurace byla uložena."));refreshCloud();return
+   }
    var changed=original;changed.name=title;changed.detail=detail.stringValue;changed.combined=mode.indexOfSelectedItem==1;changed.combinedFile=filename
    changed.markdownTemplate=original.markdownTemplate==nil && template==defaultMarkdownTemplate ? nil:template;changed.combinedTemplate=fileTemplate
    guard confirmTemplateChange(original,template:changed.markdownTemplate,file:changed.combinedTemplate) else{return}

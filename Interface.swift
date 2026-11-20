@@ -298,8 +298,11 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  func refreshTopics(){
   availableTopics=Topics.all
+  if let fallback=fallbackFromHiddenFolder(draft){draft=fallback}
   if let saved=draft.topic {if let i=availableTopics.firstIndex(where:{$0.id==saved.id}){availableTopics[i]=saved}else{availableTopics.append(saved)}}
-  topicPicker.removeAllItems();topicPicker.addItems(withTitles:availableTopics.map{$0.name})
+  topicPicker.removeAllItems();topicPicker.addItems(withTitles:availableTopics.map{$0.displayName})
+  // Týmová složka má ikonu týmu.
+  for (item,topic) in zip(topicPicker.itemArray,availableTopics) where topic.cloudTeam==true{item.image=NSImage(systemSymbolName:"person.2",accessibilityDescription:L("Týmová složka"));item.image?.isTemplate=true}
   if let i=availableTopics.firstIndex(where:{$0.id==draft.topic?.id}){topicPicker.selectItem(at:i)}
   changeTopic()
  }
@@ -307,7 +310,7 @@ final class Composer:NSObject,NSWindowDelegate {
   let i=topicPicker.indexOfSelectedItem;guard availableTopics.indices.contains(i) else{return}
   guard draft.previous == nil || draft.topic?.id == availableTopics[i].id else{return}
   draft.topic=availableTopics[i];let topic=availableTopics[i];topicDescription.stringValue=topic.detail+(topic.detail.isEmpty ? "":" · ")+(topic.combined ? L("Jeden společný MD"):L("MD pro každou relaci"))
-  topicLink.title=topic.name;topicLink.toolTip=topic.name+(topic.detail.isEmpty ? "":"\n"+topic.detail)
+  topicLink.title=topic.displayName;topicLink.toolTip=topic.displayName+(topic.detail.isEmpty ? "":"\n"+topic.detail)
   refreshPreviousSessions()
  }
  @objc func refreshSavedSessions(){refreshPreviousSessions()}
@@ -321,7 +324,7 @@ final class Composer:NSObject,NSWindowDelegate {
  func updatePreviousAvailability(){sessionLink.title=draft.previous.flatMap{target in previousChoices.first{$0.target.id==target.id}?.title} ?? L("Nová relace");sessionLink.toolTip=sessionLink.title
   sessionLink.isEnabled=draft.topic?.savesLocally != false
   topicLink.isEnabled=draft.previous == nil;topicLink.needsDisplay=true
-  topicLink.toolTip=draft.previous == nil ? draft.topic.map{$0.name+($0.detail.isEmpty ? "":"\n"+$0.detail)}:L("Konfiguraci uložené relace nelze změnit.")
+  topicLink.toolTip=draft.previous == nil ? draft.topic.map{$0.displayName+($0.detail.isEmpty ? "":"\n"+$0.detail)}:L("Konfiguraci uložené relace nelze změnit.")
   copyLinkButton.isHidden=shareableSessionID()==nil
   layoutContextRow()
  }
@@ -370,7 +373,7 @@ final class Composer:NSObject,NSWindowDelegate {
   childEditorOpen=true;defer{childEditorOpen=false};snapshotFields()
   let choices=Topics.all
   let picker=SessionChoiceDialog()
-  if let index=picker.run(title:L("Vybrat konfiguraci"),choices:choices.map{SessionChoice(title:$0.name,detail:$0.detail+" · "+$0.folder)},current:choices.firstIndex{$0.id==draft.topic?.id} ?? 0){
+  if let index=picker.run(title:L("Vybrat konfiguraci"),choices:choices.map{SessionChoice(title:$0.displayName,detail:$0.detail+" · "+$0.folder)},current:choices.firstIndex{$0.id==draft.topic?.id} ?? 0){
    if draft.previous != nil && draft.topic?.id != choices[index].id{switchToNewSession()}
    draft.topic=choices[index];refreshTopics()
   };window.makeKeyAndOrderFront(nil)

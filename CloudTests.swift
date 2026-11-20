@@ -12,6 +12,12 @@ private func cloudFixtureConnection(owner: UUID? = UUID()) -> CloudConnection {
  return CloudConnection(endpoint:"https://fixture.invalid",token:"sn_device_v1_" + String(repeating:"a",count:43),id:id,
   comparisonCode:"1234ABCD",verificationURI:"https://fixture.invalid/pair-device/" + id.uuidString.lowercased(),expiresAt:"2099-01-01T00:00:00Z",ownerID:owner,email:nil)
 }
+/// /me pro testovací transport; s `teams` vrací i pole libraries.
+func cloudFixtureMe(_ owner:UUID,teams:[[String:Any]]?=nil)throws->Data {
+ var me:[String:Any]=["id":owner.uuidString,"email":"fixture@example.test"]
+ if let teams{me["libraries"]=[["id":owner.uuidString,"kind":"personal","name":NSNull(),"role":"owner"]]+teams}
+ return try JSONSerialization.data(withJSONObject:["data":me])
+}
 private func cloudFixturePNG(_ red:CGFloat=0.2) -> Data {
  let bitmap=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:2,pixelsHigh:2,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:8,bitsPerPixel:32)!
  for y in 0...1 { for x in 0...1 { bitmap.setColor(NSColor(calibratedRed:red,green:0.4,blue:0.8,alpha:1),atX:x,y:y) } }
@@ -126,6 +132,7 @@ func cloudFolderUnitTests()throws {
   var connection:CloudConnection?=c;var store:CloudFolders!
   var invalidate=false
   store=CloudFolders(file:root.appendingPathComponent(mode+".json"),connection:{connection},localTopics:{[]},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
    if path.hasSuffix("/images/1") {
     await Task.yield()
     if invalidate {if mode=="disconnect"{connection=nil}else{try store.setFolder(store.topics[0],path:root.appendingPathComponent("changed").path)}}
@@ -157,17 +164,19 @@ func cloudFolderUnitTests()throws {
  let target=root.appendingPathComponent("downloaded")
  try store.setFolder(store.topics[0],path:target.path)
  await store.refresh(live);assert(store.lastError==nil)
- let directories=try! fm.contentsOfDirectory(at:target,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles]);assert(directories.count==1)
- let markdown=directories[0].appendingPathComponent(directories[0].lastPathComponent+".md"),image=directories[0].appendingPathComponent("assets/1.png")
+ // Plochá struktura: „YYYY-MM-DD Název.md“ v kořeni, obrázky ve společném assets/.
+ func entries()->[String]{((try? fm.contentsOfDirectory(atPath:target.path)) ?? []).filter{!$0.hasPrefix(".")}.sorted()}
+ let notes=entries().filter{$0.hasSuffix(".md")};assert(notes.count==1 && entries().contains("assets"))
+ let markdown=target.appendingPathComponent(notes[0]),stem=(notes[0] as NSString).deletingPathExtension,image=target.appendingPathComponent("assets/"+stem+"-1.png")
  assert(!String(decoding:(try? Data(contentsOf:markdown)) ?? Data(),as:UTF8.self).contains("<!--"))
  assert(fm.fileExists(atPath:image.path));let original=try! Data(contentsOf:markdown);assert(String(decoding:original,as:UTF8.self).contains("Remote cloud fixture"))
- await store.refresh(live);assert(store.lastError==nil && (try? fm.contentsOfDirectory(atPath:target.path))?.count==1)
+ await store.refresh(live);assert(store.lastError==nil && entries().count==2)
  let edited=original+Data("\nLocal edit".utf8);try edited.write(to:markdown)
  await store.refresh(live);assert((try? Data(contentsOf:markdown))==edited)
+ // Chybějící obrázek upravené relace se doplní a cloudová verze jde vedle jako _cloud.md.
  try! fm.removeItem(at:image);await store.refresh(live);assert(store.lastError==nil)
- assert((try? Data(contentsOf:markdown))==edited)
- assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
- await store.refresh(live);assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
+ assert((try? Data(contentsOf:markdown))==edited && fm.fileExists(atPath:image.path) && entries()==[notes[0],stem+"_cloud.md","assets"].sorted())
+ await store.refresh(live);assert(entries()==[notes[0],stem+"_cloud.md","assets"].sorted())
  print("PASS: native client downloads real Next cloud folder metadata/PNG/Markdown, deduplicates refreshes and preserves edited files")
 }
 
@@ -227,6 +236,40 @@ func cloudFolderUnitTests()throws {
  // 429 bez Retry-After čeká 30 s; po odpojení účtu se zámek nepoužije.
  let bare=await shareFailure("00000000-0000-4000-8000-000000000430");assert(bare?.status==429 && abs(sharer.shareRetryAt.timeIntervalSince(clock)-30)<1)
  try sharer.forgetConnection();assert(sharer.shareRetryAt == .distantPast);try vault.save(original)
+ // Týmová složka proti fixture: /me libraries, owner pole, library_id, author, ztráta a návrat týmu.
+ // Vlastní hodiny: sdílené hodiny testu hlídají platnost párování fixture.
+ var teamClock=clock,recycled:[URL]=[]
+ let teamLib=CloudLibrary(queue:root.appendingPathComponent("team-queue"),vault:vault,endpoint:endpoint,now:{teamClock},recycle:{recycled.append($0);try fm.removeItem(at:$0)})
+ let teamFolders=CloudFolders(file:root.appendingPathComponent("team-folders.json"),connection:{teamLib.connection},localTopics:{[]},pending:{teamLib.hasPending($0)},storedLocal:{[]},saveLocal:{_ in})
+ teamLib.folderInfo={teamFolders.folderInfo($0)}
+ func membership(_ value:Bool,leaveAfterFolders:Bool=false)async throws{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/fixture/team",method:"POST",token:original.token,body:JSONSerialization.data(withJSONObject:["member":value,"leave_after_folders":leaveAfterFolders]))}
+ await teamFolders.refresh(teamLib.connection);assert(teamFolders.lastError==nil)
+ guard let team=teamFolders.topics.first(where:{$0.cloudTeam==true}) else{throw CloudFailure.invalid}
+ assert(team.displayName==LF("%@ · %@","Fixture tým","Bugy") && team.cloudRole=="member" && !team.canManageCloudFolder && team.cloudOwnerID != original.ownerID)
+ let teamDir=root.appendingPathComponent("team-dir");try teamFolders.setFolder(team,path:teamDir.path);await teamFolders.refresh(teamLib.connection)
+ let teamFiles=try fm.contentsOfDirectory(atPath:teamDir.path).filter{$0.hasSuffix(".md")}
+ assert(teamFolders.lastError==nil && teamFiles.count==1 && ((try? String(contentsOf:teamDir.appendingPathComponent(teamFiles[0]),encoding:.utf8)) ?? "").contains("Autor: Fixture Bob"))
+ // Ztráta členství: složka skrytá, soubory zůstávají; upload skončí jednou 404 a odloží se (Odložené…), bez opakování.
+ try await membership(false);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.lastError==nil && teamFolders.topics.isEmpty && teamFolders.isUnavailable(team) && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ try teamLib.enqueue(Draft(images:["shot.png"],comment:"Týmová poznámka",title:"Team upload",topic:team),root:root,folders:[team])
+ await teamLib.sync();assert(teamLib.pendingCount==0 && teamLib.lastError?.contains("Fixture tým · Bugy")==true)
+ assert(teamLib.parkedItems.count==1 && teamLib.parkedItems[0].retryable && teamLib.parkedItems[0].reason?.contains("Fixture tým · Bugy")==true)
+ teamClock=teamClock.addingTimeInterval(120);await teamLib.sync();assert(teamLib.pendingCount==0 && teamLib.parkedItems.count==1 && teamLib.lastError==nil)
+ // Návrat do týmu: mapování se obnoví a Odložené… → Zkusit znovu úlohu odešle.
+ try await membership(true);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.topics.first{$0.cloudTeam==true}?.folder==teamDir.path && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ try teamLib.retryParked(teamLib.parkedItems[0]);teamClock=teamClock.addingTimeInterval(120);await teamLib.sync()
+ assert(teamLib.pendingCount==0 && teamLib.parkedItems.isEmpty && teamLib.lastError==nil)
+ // Souběh: přístup zmizí po katalogu; prázdný seznam a 404 detailu nic nesmažou, /me se ověří znovu a složka se skryje.
+ try await membership(true,leaveAfterFolders:true);await teamFolders.refresh(teamLib.connection)
+ assert(teamFolders.isUnavailable(team) && ((try? fm.contentsOfDirectory(atPath:teamDir.path)) ?? []).filter{$0.hasSuffix(".md")}==teamFiles)
+ // Odloženou úlohu lze výslovně zahodit (Koš v macOS).
+ try await membership(false);try teamLib.enqueue(Draft(images:["shot.png"],comment:"Zahodit",title:"Discard",topic:team),root:root,folders:[team])
+ teamClock=teamClock.addingTimeInterval(120);await teamLib.sync();assert(teamLib.parkedItems.count==1)
+ try teamLib.discardParked(teamLib.parkedItems[0]);assert(recycled.count==1 && teamLib.pendingCount==0 && teamLib.parkedItems.isEmpty)
+ try await membership(true)
+ print("PASS: team folder over REST: /me libraries, owner fields, library_id listing, {author}, membership loss hides the folder and parks the upload without a retry loop, rejoin restores the mapping")
  let token="sn_share_v1_"+String(repeating:"a",count:43)
  assert(CloudLibrary.shareURL("https://evil.test/s/"+token,endpoint:endpoint)==nil)
  assert(CloudLibrary.shareURL(raw+"/s/short",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"?x=1",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"a",endpoint:endpoint)==nil)
@@ -368,6 +411,7 @@ func sessionIndexTests()throws {
  let createdA="2026-03-04T10:00:00.123456+00:00",createdB="2026-03-05T10:00:00Z"
  func note(_ id:UUID,_ count:Int,_ title:String)->[String:Any]{["id":id.uuidString,"title":title,"comment":"Text","template":defaultMarkdownTemplate,"captions":Array(repeating:"Popisek",count:count),"updated_at":updated,"created_at":id==noteA ? createdA:createdB,"trashed_at":states[id]=="trashed" ? "2026-03-06T00:00:00Z":NSNull(),"images":(1...count).map{["index":$0,"path":"/api/v1/sessions/"+id.uuidString.lowercased()+"/images/\($0)"]}]}
  let store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[]},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
   if let range=path.range(of:"/images/"){return pngs[Int(path[range.upperBound...])!-1]}
   let data:Any
   if path=="/api/v1/folders"{data=["data":[["id":folderID.uuidString,"name":folderName,"revision":revision,"description":"Popis","combined":combined,"combined_file":"All.md","markdown_template":NSNull(),"combined_template":"# {folderName}\n\n{sessions}\n"]]]}
@@ -481,6 +525,7 @@ func sessionIndexTests()throws {
  try await editAndCommentTests()
  try await staleDraftTests()
  try await markdownLinkTests()
+ try await teamFolderTests()
  // Nenamapované složky dostanou podsložky podle názvu bez kolizí.
  let other=CloudFolders(file:root.appendingPathComponent("other.json"),connection:{c},localTopics:{[]});other.activate(c)
  try other.accept([CloudFolderRecord(id:UUID(),name:"Práce/Klient",owner:owner,origin:c.endpoint),CloudFolderRecord(id:UUID(),name:"Práce:Klient",owner:owner,origin:c.endpoint)])
@@ -506,6 +551,7 @@ func sessionIndexTests()throws {
  let titles=[clean:"Čistá",dirty:"Upravená",joined:"Společná"],created="2026-02-01T08:00:00Z"
  func note(_ id:UUID)->[String:Any]{["id":id.uuidString,"title":titles[id]!,"comment":"Text","template":defaultMarkdownTemplate,"captions":["Popisek"],"updated_at":"t1","created_at":created,"trashed_at":NSNull(),"images":[["index":1,"path":"/api/v1/sessions/"+id.uuidString.lowercased()+"/images/1"]]]}
  let store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[]},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
   if path.contains("/images/"){return png}
   let data:Any
   if path=="/api/v1/folders"{data=["data":[["id":folderID.uuidString,"name":"Legacy","revision":"1","combined":combined,"combined_file":"All.md"]]]}
@@ -557,6 +603,7 @@ func sessionIndexTests()throws {
  init(_ root:URL,count:Int,combined:Bool)throws {
   self.root=root;ids=(0..<count).map{_ in UUID()};for id in ids{states[id]="active"}
   store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{[unowned self] in self.c},localTopics:{[]},request:{[unowned self] _,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(self.c.ownerID!)}
    if path.contains("/images/"){return self.png}
    let data:Any
    if path=="/api/v1/folders"{data=["data":[["id":self.folderID.uuidString,"name":"Mazání","revision":"1","combined":combined,"combined_file":"All.md"]]]}
@@ -695,6 +742,7 @@ final class TrashedFolderStub: URLProtocol {
   let c=cloudFixtureConnection(),owner=c.ownerID!,folderID=UUID(),a=UUID(),b=UUID(),extra=UUID(),png=cloudFixturePNG(0.7),base=root.appendingPathComponent(combined ? "combined":"separate")
   var listed=[a,b],titles=[a:"Stejná",b:"Rozdílná",extra:"Jen v cloudu"],local:[Topic]=[],recycled:[URL]=[],connection:CloudConnection?=c
   let store=CloudFolders(file:base.appendingPathComponent("folders.json"),connection:{connection},localTopics:{local},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
    if path.contains("/images/"){return png}
    let data:Any
    if path=="/api/v1/folders"{data=["data":[["id":folderID.uuidString,"name":"Projekt","revision":"1","description":"Popis","combined":combined,"combined_file":"All.md","markdown_template":NSNull(),"combined_template":NSNull()]]]}
@@ -748,6 +796,7 @@ final class TrashedFolderStub: URLProtocol {
  let c=cloudFixtureConnection(),owner=c.ownerID!,folderID=UUID();var present=true,local:[Topic]=[],recycled:[URL]=[],sent:[String]=[],trashStatus:CloudFailure?=nil
  let base=root.appendingPathComponent("deleted"),dir=base.appendingPathComponent("dir");try fm.createDirectory(at:dir,withIntermediateDirectories:true);try Data("cizí".utf8).write(to:dir.appendingPathComponent("Moje.md"))
  let store=CloudFolders(file:base.appendingPathComponent("folders.json"),connection:{c},localTopics:{local},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
   if path.hasPrefix("/api/v1/folders"){return try JSONSerialization.data(withJSONObject:["data":present ? [["id":folderID.uuidString,"name":"Web","revision":"1"]]:[]])}
   return try JSONSerialization.data(withJSONObject:["data":[],"pagination":["has_more":false]])
  },send:{_,path,_,_,_ in sent.append(path);if let failure=trashStatus{throw failure};return try JSONSerialization.data(withJSONObject:["data":["id":folderID.uuidString]])},storedLocal:{local},saveLocal:{local=$0},recycle:{recycled.append($0)})
@@ -840,6 +889,7 @@ final class AcceptingUploadStub: URLProtocol {
   var gone=Set<UUID>(),purged=Set<UUID>(),restoredIDs:[UUID]=[]
   weak var weakStore:CloudFolders?
   let store=CloudFolders(file:base.appendingPathComponent("folders.json"),connection:{connection},localTopics:{local.filter{!(weakStore?.migratedLocalIDs.contains($0.id) ?? false)}},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
    if path=="/api/v1/folders"{return try JSONSerialization.data(withJSONObject:["data":[["id":folderID.uuidString,"name":"Poznámky","revision":"1","combined":combined,"combined_file":"All.md"]]])}
    if path.contains("?") {
     let wanted=path.contains("state=trashed"),items=AcceptingUploadStub.manifests.filter{!purged.contains($0.0) && gone.contains($0.0)==wanted}
@@ -998,6 +1048,7 @@ final class AcceptingUploadStub: URLProtocol {
  let c=cloudFixtureConnection(),folderID=UUID(),ids=(0..<4).map{_ in UUID()},png=cloudFixturePNG(0.6),created="2026-04-01T09:00:00Z"
  func note(_ id:UUID)->[String:Any]{["id":id.uuidString,"title":"Stejná","comment":"Text","template":defaultMarkdownTemplate,"captions":[""],"updated_at":"t1","created_at":created,"images":[["index":1,"path":"/api/v1/sessions/"+id.uuidString.lowercased()+"/images/1"]]]}
  let store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[]},request:{_,path,_,_ in
+   if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
   if path.contains("/images/"){return png}
   if path=="/api/v1/folders"{return try JSONSerialization.data(withJSONObject:["data":[["id":folderID.uuidString,"name":"Plochá","revision":"1"]]])}
   if path.contains("?"){return try JSONSerialization.data(withJSONObject:["data":path.contains("state=trashed") ? []:ids.map{["id":$0.uuidString,"updated_at":"t1","trashed_at":NSNull()]},"pagination":["has_more":false]])}
@@ -1030,12 +1081,13 @@ final class AcceptingUploadStub: URLProtocol {
 
 /// Server pro PATCH úprav: drží jednu relaci s revizí, při nesouhlasu revize vrací 409.
 final class EditStub: URLProtocol {
- static var owner=UUID(),remote:[String:Any]=[:],patches:[[String:Any]]=[]
+ static var owner=UUID(),remote:[String:Any]=[:],patches:[[String:Any]]=[],forbidden=false
  override class func canInit(with request:URLRequest)->Bool{true}
  override class func canonicalRequest(for request:URLRequest)->URLRequest{request}
  override func startLoading() {
   let path=request.url?.path ?? "";var status=200,body:[String:Any]
   if path=="/api/v1/me"{body=["data":["id":Self.owner.uuidString]]}
+  else if request.httpMethod=="PATCH" && Self.forbidden{Self.patches.append([:]);status=403;body=["error":["code":"role_forbidden"]]}
   else if request.httpMethod=="PATCH" {
    var data=request.httpBody ?? Data()
    if data.isEmpty,let stream=request.httpBodyStream{stream.open();var buffer=[UInt8](repeating:0,count:65536);while stream.hasBytesAvailable{let n=stream.read(&buffer,maxLength:buffer.count);if n<=0{break};data.append(buffer,count:n)};stream.close()}
@@ -1090,6 +1142,12 @@ final class EditStub: URLProtocol {
  await library.sync()
  let parked=((try? fm.contentsOfDirectory(atPath:root.appendingPathComponent("outbox/.conflicts").path)) ?? []).filter{$0.hasPrefix("edit-")}
  assert(conflicts==[id] && parked.count==1 && library.pendingCount==0 && EditStub.remote["title"] as? String=="Jinde" && library.lastError?.contains("Můj")==true)
+ // Cizí týmová relace: 403 role_forbidden se odloží jednou, text zůstane místní a znovu se neposílá.
+ EditStub.forbidden=true;defer{EditStub.forbidden=false};let foreign=UUID(),sentBefore=EditStub.patches.count
+ let member=CloudLibrary(queue:root.appendingPathComponent("outbox"),vault:vault,endpoint:CloudEndpoint(vault.value!.endpoint)!);member.onEditConflict={id,_ in conflicts.append(id)}
+ try member.enqueueEdit(Draft(images:["s.png"],comment:"Cizí text",title:"Cizí"),root:shots,sessionID:foreign,base:shas,original:Fields(title:"Původní",comment:"Text",captions:[""]),revision:"1")
+ await member.sync()
+ assert(EditStub.patches.count==sentBefore+1 && member.pendingCount==0 && !member.hasPending(foreign) && conflicts.last==foreign && member.lastError?.contains("Cizí")==true)
  // Změněný obrázek se úpravou textu poslat nedá.
  try cloudFixturePNG(0.9).write(to:shots.appendingPathComponent("s.png"))
  do{try library.enqueueEdit(Draft(images:["s.png"],comment:"x",title:"y"),root:shots,sessionID:id,base:shas,original:Fields(title:"a",comment:"b",captions:[""]),revision:nil);assertionFailure("Changed image accepted")}catch{}
@@ -1186,6 +1244,148 @@ final class EditStub: URLProtocol {
  let appended=try String(contentsOf:clean,encoding:.utf8)
  assert(appended.contains("![Screenshot 1](<assets/") && appended.contains("![Screenshot 2](<assets/") && (try! previousSessions(for:topic)).contains{$0.title=="Čistá" && $0.images.count==2})
  print("PASS: standard Markdown image links: rendering, both formats parsed, migration of unmodified files only, reopen and append on a migrated file")
+}
+
+/// Týmové složky: předpona, dva účty s různými cestami, ztráta a návrat týmu, role a {author}.
+@MainActor func teamFolderTests() async throws {
+ let root=fm.temporaryDirectory.appendingPathComponent("sn-team-"+UUID().uuidString)
+ try fm.createDirectory(at:root,withIntermediateDirectories:true);defer{try? fm.removeItem(at:root)}
+ let previousIndex=SessionIndex.shared;SessionIndex.shared=SessionIndex(file:root.appendingPathComponent("index.json"));defer{SessionIndex.shared=previousIndex}
+ let language=AppLanguage.override;AppLanguage.override="cs";defer{AppLanguage.override=language}
+ let cA=cloudFixtureConnection(),cB=cloudFixtureConnection(),userA=cA.ownerID!,userB=cB.ownerID!,team=UUID(),folderID=UUID(),png=cloudFixturePNG(0.3)
+ let personal=[userA:UUID(),userB:UUID()],notes=[UUID(),UUID(),UUID()],authors=[userA,userB,userB],names=[userA:"Alice",userB:"Bob"]
+ var conn:CloudConnection?=cA,member=[userA:true,userB:true],roles=[userA:"member",userB:"admin"],trashed=Set<UUID>(),leaveAfterMe=Set<UUID>(),leaveAfterFolders=Set<UUID>()
+ var posts:[String]=[],lists:[String]=[],details=0,meCalls=0,clock=Date(timeIntervalSince1970:1_900_000_000)
+ let store=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{conn},localTopics:{[]},request:{_,path,_,_ in
+  let user=conn!.ownerID!
+  if path=="/api/v1/me" {
+   meCalls+=1;let teams:[[String:Any]]=member[user]! ? [["id":team.uuidString,"kind":"team","name":"Tým","role":roles[user]!]]:[]
+   // Souběh: /me tým ještě vrátí, ale další požadavky už přístup nemají.
+   if leaveAfterMe.contains(user){leaveAfterMe.remove(user);member[user]=false}
+   return try cloudFixtureMe(user,teams:teams)
+  }
+  if path=="/api/v1/folders" {
+   var list:[[String:Any]]=[["id":personal[user]!.uuidString,"name":"Bugy","revision":"1","owner_id":user.uuidString,"owner_kind":"personal","owner_name":NSNull(),"role":"owner"]]
+   if member[user]!{list.append(["id":folderID.uuidString,"name":"Bugy","revision":"1","owner_id":team.uuidString,"owner_kind":"team","owner_name":"Tým","role":roles[user]!])}
+   if leaveAfterFolders.contains(user){leaveAfterFolders.remove(user);member[user]=false}
+   return try JSONSerialization.data(withJSONObject:["data":list])
+  }
+  if path.contains("/images/"){return png}
+  if path.contains("?") {
+   lists.append(path)
+   let items=path.contains("state=trashed") || !member[user]! || !path.contains(folderID.uuidString.lowercased()) ? []:notes.enumerated().filter{!trashed.contains($0.element)}.map{["id":$0.element.uuidString,"updated_at":"t1","trashed_at":NSNull(),"author":["id":authors[$0.offset].uuidString,"name":names[authors[$0.offset]]!]] as [String:Any]}
+   return try JSONSerialization.data(withJSONObject:["data":items,"pagination":["has_more":false]])
+  }
+  guard member[user]!,let i=notes.firstIndex(where:{path.contains($0.uuidString.lowercased())}) else{throw CloudFailure("404",status:404,code:"not_found")}
+  details+=1
+  return try JSONSerialization.data(withJSONObject:["data":["id":notes[i].uuidString,"title":"Bug \(i)","comment":"Text","template":"# {title}\n\nAutor: {author}\n\n{screenshots}\n\n{text}\n","captions":[""],"updated_at":"t1","created_at":"2026-04-0\(i+1)T10:00:00Z","author":["id":authors[i].uuidString,"name":names[authors[i]]!],"images":[["index":1,"path":"/api/v1/sessions/"+notes[i].uuidString.lowercased()+"/images/1"]]]])
+ },send:{_,path,_,_,_ in
+  posts.append(path);if let id=notes.first(where:{path.contains($0.uuidString.lowercased())}),path.hasSuffix("/trash"){trashed.insert(id)}
+  return try JSONSerialization.data(withJSONObject:["data":["id":UUID().uuidString]])
+ },now:{clock})
+ func scan(_ seconds:Double)async{clock=clock.addingTimeInterval(seconds);await store.refresh(conn)}
+ func markdowns(_ dir:URL)->[String]{((try? fm.contentsOfDirectory(atPath:dir.path)) ?? []).filter{$0.hasSuffix(".md")}.sorted()}
+ func snapshot(_ dir:URL)->[String]{((fm.enumerator(atPath:dir.path)?.allObjects as? [String]) ?? []).sorted()}
+ // Předpona týmu, ikona/role a pořadí osobní → týmová.
+ await store.refresh(cA);assert(store.lastError==nil && store.topics.count==2)
+ var teamTopic=store.topics[1]
+ assert(store.topics[0].cloudTeam != true && store.topics[0].displayName=="Bugy" && teamTopic.displayName=="Tým · Bugy" && teamTopic.cloudOwnerID==team && teamTopic.cloudRole=="member" && !teamTopic.canManageCloudFolder)
+ assert(teamTopic.id=="cloud:"+cA.endpoint+":"+team.uuidString+":"+folderID.uuidString)
+ AppLanguage.override="en";assert(teamTopic.displayName=="Tým · Bugy");AppLanguage.override="cs"
+ // Účet A: stáhne poznámky všech autorů s {author}; seznam je zúžený na library týmu.
+ let dirA=root.appendingPathComponent("A Bugy"),dirB=root.appendingPathComponent("B Bugy")
+ try store.setFolder(teamTopic,path:dirA.path);await store.refresh(cA);teamTopic=store.topics[1]
+ assert(store.lastError==nil && markdowns(dirA).count==3 && lists.contains{$0.contains("folder_id="+folderID.uuidString.lowercased()) && $0.contains("library_id="+team.uuidString.lowercased())})
+ assert(!lists.contains{$0.contains(personal[userA]!.uuidString.lowercased()) && $0.contains("library_id")})
+ let first=try String(contentsOf:dirA.appendingPathComponent(markdowns(dirA)[0]),encoding:.utf8);assert(first.contains("Autor: Alice") || first.contains("Autor: Bob"))
+ // Účet B na stejném Macu: vlastní adresář, kolize s adresářem A odmítnutá, stejné poznámky.
+ conn=cB;await store.refresh(cB);assert(store.lastError==nil && store.topics.count==2 && store.topics[1].cloudRole=="admin" && store.topics[1].canManageCloudFolder)
+ do{try store.setFolder(store.topics[1],path:dirA.path);assertionFailure("Second account reused the first account's directory")}catch{}
+ try store.setFolder(store.topics[1],path:dirB.path);await store.refresh(cB)
+ assert(store.lastError==nil && markdowns(dirB)==markdowns(dirA) && store.records.filter{$0.id==folderID}.count==2 && Set(store.records.filter{$0.id==folderID}.map(\.account))==[userA,userB])
+ print("PASS: team folder shown as „Tým · Bugy“ after personal ones, library_id listing, {author} rendered, two accounts with different paths download the same notes")
+ // Člen: cizí smazání zůstane místní s jedním upozorněním, vlastní jde do Koše.
+ conn=cA;await store.refresh(cA);try store.setConfirmLocalDeletes(store.topics[1],false)
+ let index=SessionIndex.shared,baseA=try Topics.checkedDestination(dirA.path)
+ func fileA(_ i:Int)->URL{URL(fileURLWithPath:index.cloud(notes[i],base:baseA)!.file)}
+ try fm.removeItem(at:fileA(1))
+ await scan(20);await scan(20);await scan(20)
+ let keptNotice="Smazání ve složce Tým · Bugy zůstává jen na tomto Macu"
+ assert(posts.isEmpty && index.cloud(notes[1],base:baseA)?.keptLocal==true && store.notices.filter{$0.hasPrefix(keptNotice)}.count==1 && markdowns(dirA).count==2)
+ // Přesun cizí relace do .trash také zůstane místní.
+ let trashA=dirA.appendingPathComponent(".trash");try fm.createDirectory(at:trashA,withIntermediateDirectories:true)
+ try fm.moveItem(at:fileA(2),to:trashA.appendingPathComponent(fileA(2).lastPathComponent));await scan(20)
+ assert(posts.isEmpty && index.cloud(notes[2],base:baseA)?.keptLocal==true && store.notices.filter{$0.hasPrefix(keptNotice)}.count==2)
+ try fm.removeItem(at:fileA(0));await scan(20);await scan(20)
+ assert(posts==["/api/v1/sessions/"+notes[0].uuidString.lowercased()+"/trash"])
+ print("PASS: member keeps deletion of another member's note local with one notice, own note goes to web Trash")
+ // Člen nemění nastavení týmové složky; server se nevolá.
+ do{_ = try await store.update(store.topics[1]);assertionFailure("Member updated team folder")}catch let failure as CloudFailure{assert(failure.code=="role_forbidden")}
+ do{try await store.trashFolder(store.topics[1]);assertionFailure("Member trashed team folder")}catch let failure as CloudFailure{assert(failure.code=="role_forbidden")}
+ assert(posts.count==1)
+ // Ztráta členství: skryto, soubory i mapování zůstávají, nic se nestahuje ani nemaže.
+ let before=snapshot(dirA),listed=lists.count,fetched=details;member[userA]=false
+ await scan(20);await scan(20)
+ assert(store.lastError==nil && store.topics.count==1 && store.topics[0].cloudTeam != true && store.deletedRemotely.isEmpty && store.isUnavailable(teamTopic))
+ assert(snapshot(dirA)==before && lists.count==listed && details==fetched && posts.count==1 && store.heldFolders.isEmpty && store.deletePrompts.isEmpty)
+ assert(store.records.first{$0.id==folderID && $0.account==userA}?.folder==dirA.path)
+ do{try store.setFolder(store.topics[0],path:dirA.path);assertionFailure("Hidden mapping did not reserve its directory")}catch{}
+ // Rozpracovaná relace v nedostupné složce přejde do výchozí s upozorněním.
+ let fallback=fallbackFromHiddenFolder(Draft(images:[],comment:"x",topic:teamTopic),folders:store,defaultTopic:store.topics[0])
+ assert(fallback?.topic==store.topics[0] && store.notices.contains{$0.hasPrefix("Složka Tým · Bugy už není dostupná")} && fallbackFromHiddenFolder(Draft(images:[],comment:"x",topic:store.topics[0]),folders:store)==nil)
+ print("PASS: losing the team hides its folder (not remoteDeleted), keeps files and mapping, stops download/trash propagation and moves the draft to the default folder")
+ // Návrat do týmu: stejné mapování a index, bez duplikátů.
+ member[userA]=true;await scan(20);await scan(20)
+ assert(store.lastError==nil && store.topics.count==2 && store.topics[1].folder==dirA.path && !store.isUnavailable(teamTopic))
+ let after=markdowns(dirA);assert(!after.contains{$0.contains(" 2.md")} && posts.count==1)
+ print("PASS: returning to the team restores mapping and session index without duplicate downloads")
+ // Souběh: tým zmizí mezi /me a seznamem; 404 detailu nic nesmaže, složka se skryje.
+ conn=cB;await store.refresh(cB);let beforeB=snapshot(dirB);leaveAfterFolders=[userB]
+ await store.refresh(cB)
+ assert(snapshot(dirB)==beforeB && store.topics.count==1 && store.records.first{$0.id==folderID && $0.account==userB}?.unavailable==true)
+ // Souběh dřív: katalog už týmovou složku nemá; není to smazání na webu.
+ member[userB]=true;await store.refresh(cB);assert(store.topics.count==2 && snapshot(dirB)==beforeB)
+ leaveAfterMe=[userB];await store.refresh(cB)
+ assert(snapshot(dirB)==beforeB && store.deletedRemotely.isEmpty && store.records.first{$0.id==folderID && $0.account==userB}?.unavailable==true)
+ print("PASS: team loss racing the session list never purges local files")
+ // Starší záznam bez account se načte s account = owner.
+ let legacy=root.appendingPathComponent("legacy.json"),old=UUID()
+ try JSONSerialization.data(withJSONObject:[["id":old.uuidString,"name":"Starý","owner":userA.uuidString,"origin":cA.endpoint,"folder":""]]).write(to:legacy)
+ let migrated=CloudFolders(file:legacy,connection:{cA},localTopics:{[]});migrated.activate(cA)
+ assert(migrated.records[0].account==userA && !migrated.records[0].isTeam && migrated.topics.map(\.cloudFolderID)==[old])
+ do{try migrated.accept([CloudFolderRecord(id:UUID(),name:"Cizí",owner:team,origin:cA.endpoint,accountID:userA)]);assertionFailure("Team folder without /me library accepted")}catch{}
+ try migrated.accept([CloudFolderRecord(id:UUID(),name:"Tým",owner:team,origin:cA.endpoint,accountID:userA)],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"owner")])
+ assert(migrated.topics.count==1 && migrated.topics[0].displayName=="Tým · Tým" && migrated.topics[0].canManageCloudFolder)
+ // {author}: prázdný, když autor není známý; vestavěná šablona ho nemá a parsování ho zvládne.
+ assert(!defaultMarkdownTemplate.contains("{author}") && renderSessionTemplate("# {title}\n{author}\n{screenshots}\n{text}\n",title:"T",screenshots:"S",text:"X")=="# T\n\nS\nX\n")
+ assert(parsedSession("# {title}\n{author}\n{screenshots}\n{text}\n","# T\nBob\n![[assets/a.png]]\nX\n")?.1=="X")
+ print("PASS: legacy folder records migrate to account = owner, team records need a /me library, {author} renders the author or nothing")
+ // Člen smí upravit jen vlastní relaci týmové složky (autor z indexu), admin všechny.
+ conn=cA;await store.refresh(cA);let teamA=store.topics.first{$0.cloudTeam==true}!
+ assert(store.mayChange(notes[0],topic:teamA)==true || index.cloud(notes[0],base:baseA)==nil)
+ let otherNote=notes.first{index.cloud($0,base:baseA)?.authorID==userB.uuidString.lowercased()}
+ assert(otherNote.map{!store.mayChange($0,topic:teamA)} ?? true && !store.mayChange(UUID(),topic:teamA))
+ conn=cB;await store.refresh(cB);let teamB=store.topics.first{$0.cloudTeam==true}
+ assert(teamB.map{store.mayChange(UUID(),topic:$0)} ?? true)
+ // Odhlášení: týmová složka nezmění na lokální (žádný reconnect), mapování zůstane a po přihlášení naváže.
+ var local:[Topic]=[]
+ let signout=CloudFolders(file:root.appendingPathComponent("signout.json"),connection:{conn},localTopics:{local},request:{_,_,_,_ in throw CloudFailure.invalid},storedLocal:{local},saveLocal:{local=$0})
+ conn=cA;signout.activate(cA)
+ let personalRecord=CloudFolderRecord(id:UUID(),name:"Moje",owner:userA,origin:cA.endpoint,folder:root.appendingPathComponent("moje").path,accountID:userA)
+ var teamRecord=CloudFolderRecord(id:folderID,name:"Bugy",owner:team,origin:cA.endpoint,folder:root.appendingPathComponent("tym-a").path,accountID:userA);teamRecord.ownerKind="team"
+ try signout.accept([personalRecord,teamRecord],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"member")])
+ try signout.setFolder(signout.topics[0],path:root.appendingPathComponent("moje").path);try signout.setFolder(signout.topics[1],path:root.appendingPathComponent("tym-a").path)
+ signout.activate(nil);try signout.convertToLocal(owner:userA,origin:cA.endpoint)
+ assert(local.count==1 && local[0].formerCloudOwnerID==userA && signout.records.count==1 && signout.records[0].owner==team)
+ signout.activate(cA);assert(signout.repairCandidates.isEmpty)
+ try signout.accept([teamRecord],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"member")])
+ assert(signout.topics.first{$0.cloudTeam==true}?.folder==root.appendingPathComponent("tym-a").path)
+ // Smazanou týmovou složku zachovanou jako lokální mají dva účty pod různými ID.
+ var teamB2=teamRecord;teamB2.accountID=userB;teamB2.folder=root.appendingPathComponent("tym-b").path
+ signout.activate(cB);try signout.accept([teamB2],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"admin")]);try signout.setFolder(signout.topics[0],path:root.appendingPathComponent("tym-b").path)
+ for (c,user) in [(cA,userA),(cB,userB)] {signout.activate(c);try signout.accept([],libraries:[CloudLibraryRef(id:team,kind:"team",name:"Tým",role:"admin")]);_ = try signout.keepDeleted(folderID);assert(local.contains{$0.id=="former-cloud:"+user.uuidString.lowercased()+":"+folderID.uuidString.lowercased()})}
+ assert(local.filter{$0.formerCloudFolderID==folderID}.count==2)
+ print("PASS: member edits only own team sessions, sign-out keeps team mappings for sign-in without reconnect, kept deleted team folders get account-scoped IDs")
 }
 
 /// Server pro regresní testy fronty: odpověď určuje handler podle metody, cesty a těla.
@@ -1443,6 +1643,7 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let comments=(0..<120).map{["author_name":"A","body":String(repeating:"k",count:5000),"created_at":"2026-01-01T00:00:00Z","id":"\($0)"]}
  var limits:[Int]=[]
  let folders=CloudFolders(file:root.appendingPathComponent("folders.json"),connection:{c},localTopics:{[]},request:{_,path,_,limit in
+  if path=="/api/v1/me"{return try cloudFixtureMe(c.ownerID!)}
   limits.append(limit)
   let data:Data
   if path=="/api/v1/folders"{data=try JSONSerialization.data(withJSONObject:["data":[["id":folderB.uuidString,"name":"B","revision":"1"],["id":folderA.uuidString,"name":"A","revision":"1"]]])}

@@ -55,6 +55,9 @@ final class TemplateDefaults {
  func forgetAccount(){store.removeObject(forKey:"defaultTemplatesRevision")}
 }
 
+/// Nápověda proměnných šablon pro editor; jediné místo textu.
+var sessionTemplateHint:String{L("Proměnné: {title}, {screenshots}, {text}, {comments}, {author}")}
+var fileTemplateHint:String{L("Proměnné: {folderName}, {folderDescription}, {sessions}")}
 /// Počet relací ve složce, kterých se změna šablony týká.
 func indexedSessionCount(_ topic:Topic)->Int {
  let folder=SessionIndex.key(topic.destination)

@@ -30,6 +30,10 @@
   fixture vrací pro nedostupnou library prázdný seznam a pokrývá souběh prázdný seznam →
   404 → nové `/me`; „Zahodit zablokované…“ s potvrzením (Koš v macOS); blokace jen pro
   týmové složky; `LibraryKind`/`LibraryRole`, `isRoleForbidden`, jedna nápověda šablon.
+- `--folder-sync-self-test` proti živému Next (web `test:folders` z c88bd1d): živá část čekala starou
+  strukturu podsložek a padala na assertu, výstup do roury byl blokově bufferovaný. Opraveno na
+  plochou strukturu, stdout po řádcích, 75 s watchdog; nativní část PASS. Web test pak padá až ve
+  webové části (`cloud-folders.flow.mjs:69`, počet `.bucket-list li`), mimo Mac.
 - Otevřené: Mac neumí zakládat týmové složky ani `team` audience sdílení (pozdější fáze);
   člen nemůže složku „odebrat“ z Macu (jen přemapovat adresář); u týmové složky bez
   `author` (starší server) člen nic nepropaguje.

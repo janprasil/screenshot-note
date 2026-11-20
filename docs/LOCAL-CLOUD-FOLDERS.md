@@ -80,13 +80,16 @@ next to personal ones, personal first.
   ids from `/me` libraries}; folders of other owners are skipped. Without `libraries`
   (older server) only personal folders are accepted. Team folder listing adds
   `library_id=<team>` next to `folder_id`.
+- **Moving a local folder.** Moving a local folder to the cloud asks for the target
+  library when the user is owner/admin of a team: personal cloud or that team. A new
+  team folder is created with `owner_id`; merging matches names only within the chosen
+  library. Members without the manager role move into their personal cloud only.
 - **First appearance.** A new team folder goes through the same flow as a new
   personal cloud folder (one parent directory, one by one, or later = cloud only).
 - **Per-device mapping.** Each member's Mac (and each account on one Mac) maps the
   folder to its own directory; paths are never sent upstream and collision rules
   apply across personal, team and other accounts' entries. All authors' notes are
-  downloaded. Moving a local folder into the cloud only offers personal folders
-  (no team folder transfer in v1).
+  downloaded. Moving a local folder into a team folder is described above.
 - **Permissions.** Rename, description, mode, template and delete of a team folder
   are available only for `owner`/`admin`; a member can change only the local directory
   (Settings disables the fields; `update`/`trashFolder` refuse before any request).

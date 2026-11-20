@@ -38,7 +38,7 @@ final class FolderTransfers {
   return sessions.filter{session in !(session.target.session.map{cloud.contains($0.lowercased())} ?? false)}
  }
  @MainActor @discardableResult func move(_ source:Topic,to target:Topic,library:CloudLibrary = .shared,folders:CloudFolders = .shared)async throws->Bool {
-  guard !busy,let c=library.connection,let owner=c.ownerID,source.cloudFolderID==nil,target.cloudOwnerID==owner,target.cloudOrigin==c.endpoint else{throw CloudFailure.invalid}
+  guard !busy,let c=library.connection,let owner=c.ownerID,source.cloudFolderID==nil,target.cloudOrigin==c.endpoint,folders.topics.contains(where:{$0.cloudFolderID==target.cloudFolderID && $0.cloudOwnerID==target.cloudOwnerID}) else{throw CloudFailure.invalid}
   busy=true;defer{busy=false;NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)}
   let file=location(source,c);var plan:FolderTransfer
   if fm.fileExists(atPath:file.path) {
@@ -98,20 +98,32 @@ enum FolderDialogs {
   guard alert.runModal() == .alertFirstButtonReturn else{return nil}
   return field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
  }
+ /// Kam přesunout: osobní cloud, nebo tým, kde je uživatel owner/admin; nil = zrušeno.
+ @MainActor static func library(for name:String,teams:[CloudLibraryRef])->CloudLibraryRef?? {
+  guard !teams.isEmpty else{return .some(nil)}
+  let alert=NSAlert();alert.messageText=LF("Kam přesunout složku „%@“?",name)
+  alert.informativeText=L("Týmovou složku uvidí a doplňují všichni členové týmu.")
+  let popup=NSPopUpButton(frame:NSRect(x:0,y:0,width:330,height:28),pullsDown:false)
+  popup.addItem(withTitle:L("Osobní cloud"));for team in teams{popup.addItem(withTitle:LF("Tým %@",team.name ?? L("Tým")))}
+  alert.accessoryView=popup;alert.addButton(withTitle:L("Pokračovat"));alert.addButton(withTitle:L("Zrušit"))
+  guard alert.runModal() == .alertFirstButtonReturn else{return nil}
+  return .some(popup.indexOfSelectedItem==0 ? nil:teams[popup.indexOfSelectedItem-1])
+ }
  @MainActor static func destination(_ initial:String)async throws->Topic? {
   await CloudFolders.shared.refresh(CloudLibrary.shared.connection)
   if let error=CloudFolders.shared.lastError{throw CloudFailure(error)}
+  guard let choice=library(for:initial,teams:try await CloudFolders.shared.manageableTeams()) else{return nil}
+  let owner=choice?.id ?? CloudLibrary.shared.connection?.ownerID
   var title=initial
   for _ in 0..<20 {
-   // Přesun lokální složky míří jen do osobních složek; týmový převod složky v1 není.
-   if let existing=CloudFolders.shared.topics.first(where:{$0.cloudTeam != true && $0.name.lowercased()==title.lowercased()}) {
+   if let existing=CloudFolders.shared.topics.first(where:{$0.cloudOwnerID==owner && $0.name.lowercased()==title.lowercased()}) {
     let alert=NSAlert();alert.messageText=LF("Cloudová složka „%@“ už existuje.",existing.name)
     alert.informativeText=L("Sloučení přidá poznámky do této složky. Existující poznámky ani místní soubory nepřepíše.")
     alert.addButton(withTitle:L("Sloučit"));alert.addButton(withTitle:L("Přejmenovat"));alert.addButton(withTitle:L("Přeskočit"))
     let response=alert.runModal();if response == .alertFirstButtonReturn{return existing}
     guard response == .alertSecondButtonReturn,let renamed=name(title) else{return nil};title=renamed;continue
    }
-   do{return try await CloudFolders.shared.create(title)}
+   do{return try await CloudFolders.shared.create(title,team:choice)}
    catch let error as CloudFailure where error.code=="folder_name_taken" {await CloudFolders.shared.refresh(CloudLibrary.shared.connection)}
   }
   throw CloudFailure.invalid

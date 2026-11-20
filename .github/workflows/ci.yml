@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # build.sh spouští i test lokalizací a self-testy aplikace.
+      - run: ./build.sh
+      - run: python3 tests/build-config.py
+      # tests/cloud-rest.py zatím chybí, fixture neumí cloudovou složku (folder_required).

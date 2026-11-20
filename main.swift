@@ -270,7 +270,10 @@ if CommandLine.arguments.contains(where:{($0.hasSuffix("-test") && $0 != "--prev
 }
 if CommandLine.arguments.contains("--folder-sync-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
- Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed.\n",stderr);exit(1)}}
+ // Výstup do roury se hned propisuje a zaseknutý běh skončí čitelnou chybou dřív než timeout volajícího.
+ setvbuf(stdout,nil,_IOLBF,0)
+ DispatchQueue.global().asyncAfter(deadline:.now()+75){fputs("Cloud folder sync test timed out after 75 s.\n",stderr);exit(1)}
+ Task{@MainActor in do{try await cloudFolderSyncTests();exit(0)}catch{fputs("Cloud folder sync test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 

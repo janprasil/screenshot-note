@@ -164,17 +164,19 @@ func cloudFolderUnitTests()throws {
  let target=root.appendingPathComponent("downloaded")
  try store.setFolder(store.topics[0],path:target.path)
  await store.refresh(live);assert(store.lastError==nil)
- let directories=try! fm.contentsOfDirectory(at:target,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles]);assert(directories.count==1)
- let markdown=directories[0].appendingPathComponent(directories[0].lastPathComponent+".md"),image=directories[0].appendingPathComponent("assets/1.png")
+ // Plochá struktura: „YYYY-MM-DD Název.md“ v kořeni, obrázky ve společném assets/.
+ func entries()->[String]{((try? fm.contentsOfDirectory(atPath:target.path)) ?? []).filter{!$0.hasPrefix(".")}.sorted()}
+ let notes=entries().filter{$0.hasSuffix(".md")};assert(notes.count==1 && entries().contains("assets"))
+ let markdown=target.appendingPathComponent(notes[0]),stem=(notes[0] as NSString).deletingPathExtension,image=target.appendingPathComponent("assets/"+stem+"-1.png")
  assert(!String(decoding:(try? Data(contentsOf:markdown)) ?? Data(),as:UTF8.self).contains("<!--"))
  assert(fm.fileExists(atPath:image.path));let original=try! Data(contentsOf:markdown);assert(String(decoding:original,as:UTF8.self).contains("Remote cloud fixture"))
- await store.refresh(live);assert(store.lastError==nil && (try? fm.contentsOfDirectory(atPath:target.path))?.count==1)
+ await store.refresh(live);assert(store.lastError==nil && entries().count==2)
  let edited=original+Data("\nLocal edit".utf8);try edited.write(to:markdown)
  await store.refresh(live);assert((try? Data(contentsOf:markdown))==edited)
+ // Chybějící obrázek upravené relace se doplní a cloudová verze jde vedle jako _cloud.md.
  try! fm.removeItem(at:image);await store.refresh(live);assert(store.lastError==nil)
- assert((try? Data(contentsOf:markdown))==edited)
- assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
- await store.refresh(live);assert((try? fm.contentsOfDirectory(atPath:target.path))?.count==2)
+ assert((try? Data(contentsOf:markdown))==edited && fm.fileExists(atPath:image.path) && entries()==[notes[0],stem+"_cloud.md","assets"].sorted())
+ await store.refresh(live);assert(entries()==[notes[0],stem+"_cloud.md","assets"].sorted())
  print("PASS: native client downloads real Next cloud folder metadata/PNG/Markdown, deduplicates refreshes and preserves edited files")
 }
 

@@ -25,6 +25,10 @@ struct SessionRecord:Codable,Equatable {
  var revision:String? = nil
  // Smazání z disku čeká na odpověď uživatele (Přesunout do Koše / Obnovit na disku).
  var askDelete:Bool? = nil
+ // Zobrazované jméno autora pro {author}.
+ var author:String? = nil
+ // Smazání cizí relace v týmové složce zůstalo jen na tomto Macu; znovu se neposílá.
+ var keptLocal:Bool? = nil
  var isCloud:Bool{base != nil}
  var directory:URL{URL(fileURLWithPath:file).deletingLastPathComponent()}
 }

@@ -187,6 +187,6 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   }
  }
  @objc private func resolveHeld() {Task { @MainActor in await FolderDialogs.resolveHeld(manual:true);refresh() }}
- @objc private func sync() { Task { @MainActor in await library.sync() } }
+ @objc private func sync() { Task { @MainActor in await library.sync(manual:true) } }
  func windowWillClose(_ notification:Notification) { timer?.invalidate();timer=nil }
 }

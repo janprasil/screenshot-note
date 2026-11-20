@@ -109,6 +109,7 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
    let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap { $0["error"] as? [String: Any] }?["code"] as? String
    let message: String
    switch http.statusCode {
+    case 403 where code == "role_forbidden": message = L("Na tuto akci nemáš v týmu oprávnění.")
     case 401, 403: message = L("Zařízení nemá přístup. Zkontroluj připojení na webu nebo jej spáruj znovu.")
     case 402: message = L("Nahrávání do cloudu vyžaduje aktivní tarif nebo trial. Poznámka zůstává uložená lokálně.")
     case 413: message = L("V cloudu už pro tuto relaci nezbývá místo. Poznámka zůstává uložená lokálně; uvolni místo nebo zvyš tarif na webu.")
@@ -129,7 +130,10 @@ private struct Pairing: Decodable {
  let id: UUID; let expires_at: String; let device_token: String; let comparison_code: String; let verification_uri: String; let interval: Int
 }
 private struct PairingStatus: Decodable { let state: String; let expires_at: String; let interval: Int }
-private struct CloudOwner: Decodable { let id: UUID; let email: String? }
+/// Library z /me: osobní (id = uživatel) nebo tým; role přihlášeného uživatele.
+struct CloudLibraryRef: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let role: String? }
+/// Odpověď /me; `libraries` chybí u staršího serveru (jen osobní library).
+struct CloudOwner: Decodable { let id: UUID; let email: String?; var libraries: [CloudLibraryRef]? = nil }
 struct CloudManifest: Codable,Equatable {
  struct Image: Codable,Equatable { let index: Int; let bytes: Int; let sha256: String }
  let title: String; let comment: String; let configuration: String; let template: String; let captions: [String]; let images: [Image]
@@ -346,8 +350,9 @@ final class CloudLibrary {
    images.append(.init(index:index + 1,bytes:data.count,sha256:sessionFingerprint(data)))
   }
   if let folder=draft.topic?.cloudFolderID {
-   guard draft.topic?.cloudOwnerID == owner,draft.topic?.cloudOrigin == c.endpoint,
-         (folders ?? CloudFolders.shared.topics).contains(where:{$0.cloudFolderID == folder}) else {throw CloudFailure.invalid}
+   // Osobní nebo týmová složka aktivního účtu; owner relace odvodí server z folder_id.
+   guard draft.topic?.cloudOrigin == c.endpoint,
+         (folders ?? CloudFolders.shared.topics).contains(where:{$0.cloudFolderID == folder && $0.cloudOwnerID == draft.topic?.cloudOwnerID && $0.cloudOrigin == c.endpoint}) else {throw CloudFailure.invalid}
   }
   let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID,base_images:base?.count)
   let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest)
@@ -443,14 +448,36 @@ final class CloudLibrary {
  }
  var onEditConflict:((UUID,CloudEdit.Fields)->Void)?
  func pendingExtension(_ id:UUID)->Bool{jobs().contains{$0.1.sessionID==id && $0.1.manifest.base_images != nil}}
- @MainActor func sync() async {
+ /// Úloha zastavená chybou, kterou automatické opakování nevyřeší (ztráta týmu, role).
+ private struct BlockedUpload: Codable { let code: String; let folder: String }
+ private func blocked(_ directory: URL) -> BlockedUpload? {
+  guard let data = try? Data(contentsOf: directory.appendingPathComponent("blocked.json")), data.count <= 4096 else { return nil }
+  return try? JSONDecoder().decode(BlockedUpload.self, from: data)
+ }
+ /// Název a typ složky pro hlášky; výchozí z katalogu cloudových složek.
+ var folderInfo: (UUID) -> (name: String, team: Bool)? = { CloudFolders.shared.folderInfo($0) }
+ private func block(_ directory: URL, _ job: CloudJob, code: String) throws {
+  let name = job.manifest.folder_id.flatMap { folderInfo($0)?.name } ?? (job.manifest.configuration.isEmpty ? job.manifest.folder_id?.uuidString.lowercased() ?? "" : job.manifest.configuration)
+  try JSONEncoder().encode(BlockedUpload(code: code, folder: name)).write(to: directory.appendingPathComponent("blocked.json"), options: .atomic)
+ }
+ /// Viditelné chyby zablokovaných úloh; úloha zůstává ve frontě.
+ var blockedMessages: [String] {
+  jobs().compactMap { directory, _ in blocked(directory) }.map { item in
+   item.code == "role_forbidden"
+    ? LF("Do cloudové složky „%@“ nemáš oprávnění tuto změnu nahrát. Poznámka zůstává ve frontě a automaticky se neopakuje.", item.folder)
+    : LF("Cloudová složka „%@“ není dostupná (třeba po odchodu z týmu). Poznámka zůstává ve frontě; po obnovení přístupu ji nahraješ tlačítkem Nahrát teď.", item.folder)
+  }
+ }
+ /// `manual` (Nahrát teď) zkusí znovu i zablokované úlohy.
+ @MainActor func sync(manual: Bool = false) async {
   guard !syncing, !connecting, now() >= retryAt, let c = connection, let owner = c.ownerID, let endpoint = CloudEndpoint(c.endpoint) else { return }
   syncing = true; lastError = nil; didChange?(); defer { syncing = false; didChange?() }
   do {
    let me = try await CloudTransport.shared.request(endpoint,"/api/v1/me",token:c.token)
    guard try JSONDecoder().decode(Envelope<CloudOwner>.self,from:me).data.id == owner else { throw CloudFailure.invalid }
+   if manual { for (directory, _) in jobs() { try? fm.removeItem(at: directory.appendingPathComponent("blocked.json")) } }
    var rebased:[UUID:Int]=[:]
-   while let (directory, original) = jobs().first {
+   while let (directory, original) = jobs().first(where: { blocked($0.0) == nil }) {
     // Starší úloha bez složky by server odmítl, proto se odloží.
     if original.manifest.folder_id == nil && original.manifest.base_images == nil {
      try park(directory,original);lastError = L("Relace bez cloudové složky už nejde nahrát. Zůstala odložená ve frontě.");continue
@@ -473,6 +500,11 @@ final class CloudLibrary {
      try park(directory,original)
      lastError = L("Relace je na webu v koši. Obnov ji na webu a snímky přidej znovu; nové snímky zůstaly odložené ve frontě.")
     }
+    // Ztráta přístupu ke složce (odchod z týmu) nebo nedostatečná role: úloha zůstává, bez smyčky.
+    catch let failure as CloudFailure where failure.status == 403 && failure.code == "role_forbidden" { try block(directory, original, code: "role_forbidden") }
+    catch let failure as CloudFailure where failure.status == 404 && (original.manifest.base_images == nil || original.manifest.folder_id.flatMap({ folderInfo($0)?.team }) == true) {
+     try block(directory, original, code: "not_found")
+    }
     catch let failure as CloudFailure where (failure.status == 409 && failure.code == "job_conflict") || (failure.status == 404 && original.manifest.base_images != nil) {
      // Neodeslatelná úloha se odloží stranou, aby neblokovala frontu.
      try park(directory,original)
@@ -481,6 +513,7 @@ final class CloudLibrary {
    }
    try await sendEdits(endpoint:endpoint,token:c.token)
    if let parked = lastError { throw CloudFailure(parked) }
+   let stuck = blockedMessages; if !stuck.isEmpty { lastError = stuck.joined(separator: "\n") }
   } catch {
    lastError = (error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
    if let failure = error as? CloudFailure, [402, 413].contains(failure.status) { onQuotaFailure?(failure.message) }
@@ -561,9 +594,9 @@ extension CloudLibrary {
  private var shareAccount: String? { connection.flatMap { c in c.ownerID.map { c.endpoint + "|" + $0.uuidString } } }
  var shareRetryAt: Date { shareRetry.flatMap { $0.account == shareAccount ? $0.until : nil } ?? .distantPast }
  /// ID relace pro Kopírovat odkaz: cloudová složka tohoto účtu, server relaci má a index ji nevede v koši.
- func shareableSessionID(_ draft: Draft, index: SessionIndex, serverImages: (PreviousSessionTarget, Topic) -> (UUID, [String])?) -> UUID? {
+ func shareableSessionID(_ draft: Draft, index: SessionIndex, serverImages: (PreviousSessionTarget, Topic) -> (UUID, [String])?, folders: [Topic]? = nil) -> UUID? {
   guard let previous = draft.previous, let topic = draft.topic, let folder = topic.cloudFolderID, let c = connection, let owner = c.ownerID,
-        topic.cloudOwnerID == owner, topic.cloudOrigin == c.endpoint,
+        topic.cloudOrigin == c.endpoint, topic.cloudOwnerID == owner || (folders ?? CloudFolders.shared.topics).contains(where: { $0.cloudFolderID == folder && $0.cloudOwnerID == topic.cloudOwnerID && $0.cloudOrigin == c.endpoint }),
         let id = previous.session.flatMap({ UUID(uuidString: $0) }) ?? cloudSessionID(previous.original) else { return nil }
   let lower = id.uuidString.lowercased(), folderKey = folder.uuidString.lowercased()
   guard !index.all.contains(where: { $0.id == lower && $0.folder == folderKey && ($0.trashed == true || $0.askDelete == true || $0.missingSince != nil) }) else { return nil }
@@ -582,6 +615,7 @@ extension CloudLibrary {
    let message: String
    switch (failure.status, failure.code) {
     case (401, _): throw failure
+    case (403, "role_forbidden"): message = L("V týmové složce můžeš sdílet jen vlastní relace.")
     case (403, _): message = L("Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny.")
     case (404, _): message = L("Relace v cloudu není dostupná nebo je sdílení vypnuté.")
     case (409, "session_trashed"): message = L("Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu.")

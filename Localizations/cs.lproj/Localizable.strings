@@ -400,7 +400,6 @@
 "Šablona se použije na všechny %ld relace ve složce %@." = "Šablona se použije na všechny %ld relace ve složce %@.";
 "%ld relace byla ručně upravena, nová verze je uložená vedle (_template)." = "%ld relace byla ručně upravena, nová verze je uložená vedle (_template).";
 "%ld relace byly ručně upraveny, nová verze je uložená vedle (_template)." = "%ld relace byly ručně upraveny, nová verze je uložená vedle (_template).";
-"Proměnné: {title}, {screenshots}, {text}, {comments}" = "Proměnné: {title}, {screenshots}, {text}, {comments}";
 "Relace „%@“ byla mezitím změněna jinde. Tvoje úprava zůstala v místním souboru, cloudová verze je vedle jako _cloud.md." = "Relace „%@“ byla mezitím změněna jinde. Tvoje úprava zůstala v místním souboru, cloudová verze je vedle jako _cloud.md.";
 "Relace je na webu v koši. Úprava zůstala odložená ve frontě." = "Relace je na webu v koši. Úprava zůstala odložená ve frontě.";
 "Úpravu relace se nepodařilo nahrát: server ji nepodporuje nebo relace neexistuje. Úprava zůstala odložená ve frontě." = "Úpravu relace se nepodařilo nahrát: server ji nepodporuje nebo relace neexistuje. Úprava zůstala odložená ve frontě.";
@@ -427,3 +426,17 @@
 "Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu." = "Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu.";
 "Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli." = "Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli.";
 "Odkaz se nepodařilo vytvořit (HTTP %ld)." = "Odkaz se nepodařilo vytvořit (HTTP %ld).";
+"%@ · %@" = "%@ · %@";
+"Tým" = "Tým";
+"Týmová složka" = "Týmová složka";
+"Týmová složka %@. Relace se nahrávají do cloudu a stahují sem." = "Týmová složka %@. Relace se nahrávají do cloudu a stahují sem.";
+"Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář." = "Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář.";
+"Týmovou složku může přejmenovat, nastavit nebo smazat jen vlastník nebo správce týmu." = "Týmovou složku může přejmenovat, nastavit nebo smazat jen vlastník nebo správce týmu.";
+"Na tuto akci nemáš v týmu oprávnění." = "Na tuto akci nemáš v týmu oprávnění.";
+"V týmové složce můžeš sdílet jen vlastní relace." = "V týmové složce můžeš sdílet jen vlastní relace.";
+"Do cloudové složky „%@“ nemáš oprávnění tuto změnu nahrát. Poznámka zůstává ve frontě a automaticky se neopakuje." = "Do cloudové složky „%@“ nemáš oprávnění tuto změnu nahrát. Poznámka zůstává ve frontě a automaticky se neopakuje.";
+"Cloudová složka „%@“ není dostupná (třeba po odchodu z týmu). Poznámka zůstává ve frontě; po obnovení přístupu ji nahraješ tlačítkem Nahrát teď." = "Cloudová složka „%@“ není dostupná (třeba po odchodu z týmu). Poznámka zůstává ve frontě; po obnovení přístupu ji nahraješ tlačítkem Nahrát teď.";
+"Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají." = "Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají.";
+"Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce." = "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce.";
+"Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@." = "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@.";
+"Proměnné: {title}, {screenshots}, {text}, {comments}, {author}" = "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}";

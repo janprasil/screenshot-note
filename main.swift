@@ -86,7 +86,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }else{
    let submenu=NSMenu(title:L("Konfigurace"));submenu.autoenablesItems=false
    for configuration in configurations{
-    let child=NSMenuItem(title:configuration.name,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.folder
+    let child=NSMenuItem(title:configuration.displayName,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.folder
     child.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil);child.image?.isTemplate=true
     submenu.addItem(child)
    }
@@ -112,6 +112,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    alert.addButton(withTitle:L("Uložit jako novou relaci"));alert.addButton(withTitle:L("Zahodit"))
    draft=try applyStaleChoice(draft,keep:alert.runModal() == .alertFirstButtonReturn,root:draftRoot)
   }
+  // Složka týmu, ke kterému už přístup není, se vymění za výchozí.
+  if let fallback=fallbackFromHiddenFolder(draft){draft=fallback;try stage(draft,root:draftRoot)}
   if draft.topic == nil {draft.topic=Topics.initialTopic}
   let root=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-"+UUID().uuidString)
   try fm.createDirectory(at:root,withIntermediateDirectories:true)
@@ -136,7 +138,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   var rows=[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku."))]
   rows += saved.map{configuration,session in
    let assets=URL(fileURLWithPath:session.target.path).deletingLastPathComponent().appendingPathComponent("assets")
-   return SessionChoice(title:session.title,detail:configuration.name+" · "+session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})
+   return SessionChoice(title:session.title,detail:configuration.displayName+" · "+session.display+(session.comment.isEmpty ? "":" · "+session.comment),images:session.images.map{assets.appendingPathComponent($0)})
   }
   guard let index=SessionChoiceDialog().run(title:L("Vybrat relaci"),choices:rows) else{return nil}
   if index==0{return Draft(images:[],comment:"",topic:Topics.initialTopic)}

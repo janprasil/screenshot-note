@@ -103,7 +103,8 @@ enum FolderDialogs {
   if let error=CloudFolders.shared.lastError{throw CloudFailure(error)}
   var title=initial
   for _ in 0..<20 {
-   if let existing=CloudFolders.shared.topics.first(where:{$0.name.lowercased()==title.lowercased()}) {
+   // Přesun lokální složky míří jen do osobních složek; týmový převod složky v1 není.
+   if let existing=CloudFolders.shared.topics.first(where:{$0.cloudTeam != true && $0.name.lowercased()==title.lowercased()}) {
     let alert=NSAlert();alert.messageText=LF("Cloudová složka „%@“ už existuje.",existing.name)
     alert.informativeText=L("Sloučení přidá poznámky do této složky. Existující poznámky ani místní soubory nepřepíše.")
     alert.addButton(withTitle:L("Sloučit"));alert.addButton(withTitle:L("Přejmenovat"));alert.addButton(withTitle:L("Přeskočit"))
@@ -149,7 +150,7 @@ enum FolderDialogs {
    let alert=NSAlert()
    if records.count==1{alert.messageText=LF("Relace „%@“ byla smazána z disku. Přesunout ji do Koše na webu? Lze ji obnovit 30 dní.",records[0].title)}
    else {
-    alert.messageText=LP(records.count,"Ve složce %@ byly z disku smazány %ld relace:","Ve složce %@ byly z disku smazány %ld relace:","Ve složce %@ bylo z disku smazáno %ld relací:",topic.name,records.count)
+    alert.messageText=LP(records.count,"Ve složce %@ byly z disku smazány %ld relace:","Ve složce %@ byly z disku smazány %ld relace:","Ve složce %@ bylo z disku smazáno %ld relací:",topic.displayName,records.count)
     alert.informativeText=records.prefix(5).map{"• "+$0.title}.joined(separator:"\n")+(records.count>5 ? "\n…":"")+"\n\n"+L("Přesunout je do Koše na webu? Lze je obnovit 30 dní.")
    }
    alert.addButton(withTitle:L("Přesunout do Koše"));alert.addButton(withTitle:L("Obnovit na disku"))
@@ -172,7 +173,7 @@ enum FolderDialogs {
    let batch=folders.heldBatch(topic)
    if !manual && deferredHeld.contains(batch){continue}
    NSApp.activate(ignoringOtherApps:true)
-   let alert=NSAlert();alert.messageText=LP(count,"Ve složce %@ zmizela %ld relace. Přesunout ji do Koše na webu? Lze ji obnovit 30 dní.","Ve složce %@ zmizely %ld relace. Přesunout je do Koše na webu? Lze je obnovit 30 dní.","Ve složce %@ zmizelo %ld relací. Přesunout je do Koše na webu? Lze je obnovit 30 dní.",topic.name,count)
+   let alert=NSAlert();alert.messageText=LP(count,"Ve složce %@ zmizela %ld relace. Přesunout ji do Koše na webu? Lze ji obnovit 30 dní.","Ve složce %@ zmizely %ld relace. Přesunout je do Koše na webu? Lze je obnovit 30 dní.","Ve složce %@ zmizelo %ld relací. Přesunout je do Koše na webu? Lze je obnovit 30 dní.",topic.displayName,count)
    alert.addButton(withTitle:L("Přesunout do Koše"));alert.addButton(withTitle:L("Znovu stáhnout"));alert.addButton(withTitle:L("Později"))
    alert.window.level = .modalPanel
    switch alert.runModal() {
@@ -208,7 +209,7 @@ enum FolderDialogs {
  @MainActor static func resolveDeleted(folders:CloudFolders = .shared) {
   for record in folders.deletedRemotely {
    NSApp.activate(ignoringOtherApps:true)
-   let alert=NSAlert();alert.messageText=LF("Složka %@ byla smazána v cloudu. Zachovat ji jako lokální, nebo smazat?",record.name)
+   let alert=NSAlert();alert.messageText=LF("Složka %@ byla smazána v cloudu. Zachovat ji jako lokální, nebo smazat?",record.topic.displayName)
    alert.informativeText=record.folder+(folders.hasUnknownFiles(record.folder) ? "\n\n"+L("Adresář obsahuje i jiné soubory; při smazání se do Koše v macOS přesune celý."):"")
    alert.addButton(withTitle:L("Zachovat jako lokální"));alert.addButton(withTitle:L("Smazat"));alert.addButton(withTitle:L("Později"))
    // Obnovení na webu během dotazu dialog zavře.
@@ -234,7 +235,7 @@ enum FolderDialogs {
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
   NSApp.activate(ignoringOtherApps:true)
   let alert=NSAlert();alert.messageText=L("Cloudové složky potřebují místní adresář")
-  alert.informativeText=L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:")+"\n\n"+unmapped.prefix(12).map{"• "+$0.name}.joined(separator:"\n")+(unmapped.count>12 ? "\n…":"")
+  alert.informativeText=L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:")+"\n\n"+unmapped.prefix(12).map{"• "+$0.displayName}.joined(separator:"\n")+(unmapped.count>12 ? "\n…":"")
   alert.addButton(withTitle:L("Jedna nadřazená složka…"));alert.addButton(withTitle:L("Vybrat pro každou zvlášť…"));alert.addButton(withTitle:L("Později"))
   var mapped=false
   switch alert.runModal() {
@@ -246,7 +247,7 @@ enum FolderDialogs {
   case .alertSecondButtonReturn:
    for topic in unmapped {
     let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
-    panel.message=LF("Vyber místní adresář pro cloudovou složku „%@“.",topic.name)
+    panel.message=LF("Vyber místní adresář pro cloudovou složku „%@“.",topic.displayName)
     guard panel.runModal() == .OK,let url=panel.url else{continue}
     do{try folders.setFolder(topic,path:url.path);mapped=true}catch{showError(error.localizedDescription)}
    }
@@ -267,7 +268,7 @@ enum FolderDialogs {
     var directory:ObjCBool=false
     let blocked=fm.fileExists(atPath:candidate.path,isDirectory:&directory) && !directory.boolValue
     if !blocked,(try? folders.setFolder(topic,path:candidate.path)) != nil{break}
-    index+=1;guard index<=100 else{throw CloudFailure(LF("Pro „%@“ se nepodařilo najít volný adresář.",topic.name))}
+    index+=1;guard index<=100 else{throw CloudFailure(LF("Pro „%@“ se nepodařilo najít volný adresář.",topic.displayName))}
    }
   }
  }

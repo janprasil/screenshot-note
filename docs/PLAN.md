@@ -1,3 +1,34 @@
+# Týmové složky — fáze 6 kolaborace, Mac (20. 11. 2026)
+
+- Stav: hotovo ve větvi `feat/collab-p6-team-folders` (stack nad fází 2, nepushnuto).
+  Implementováno proti kontraktu a lokální fixture; serverová část fáze 6 běží paralelně.
+- `/me` `libraries` (`CloudOwner`, chybějící pole = jen osobní); refresh složek čte `/me`
+  při každém průchodu. Account binding zůstává uživatel (Keychain, outbox, účtenky).
+- `CloudFolderRecord`: `owner` = library, nové `account` (staré záznamy account = owner),
+  `ownerKind`/`ownerName`/`role`/`unavailable`; párování (origin, account, owner, id).
+  Katalog `/folders` s volitelnými `owner_*`/`role`; `library_id` u seznamu týmové složky.
+- Zobrazení `<Tým> · <Složka>` s ikonou `person.2` (picker, nastavení, menu, hlášky,
+  kolize adresářů), klíč `%@ · %@` cs+en. První výskyt = stejný flow mapování.
+- Role: člen mění jen místní adresář; rename/šablona/smazání jen owner/admin.
+  Mazání: `POST /trash` jen vlastní poznámka (author.id) nebo admin, jinak `keptLocal`
+  + jedna hláška; 403 `role_forbidden` (trash/restore/upload) se neopakuje.
+- `unavailable`: tým zmizí z `/me` → skryté, bez stahování/propagace/detekce, soubory
+  a mapování zůstávají a rezervují adresáře (i po odpojení), draft → výchozí složka
+  s hláškou. Souběhy: chybějící týmová složka v katalogu i 404 detailu ověří `/me`
+  znovu, než by se cokoli označilo za smazané. Návrat obnoví mapování bez duplikátů.
+- Upload: 404 / 403 `role_forbidden` → `blocked.json` u úlohy, hláška se jménem složky,
+  automatický drain ji přeskakuje, „Nahrát teď“ zkusí znovu. 402/413 týmové složky
+  s předponou složky. `{author}` v souhrnu/detailu a v `renderSessionTemplate`.
+- Ověřeno: `./build.sh` (59 PASS řádků včetně 6 nových týmových, lokalizace),
+  `python3 tests/cloud-rest.py <binárka>` (nový PASS týmového wire kontraktu),
+  `python3 tests/build-config.py`.
+- Neověřeno: proti skutečnému web serveru fáze 6, vizuální render ikon a disabled polí
+  v `--design-export`, VoiceOver, instalovaná aplikace.
+- Otevřené: explicitní „Zahodit“ zablokované úlohy v UI chybí (zatím jen ruční opakování);
+  Mac neumí zakládat týmové složky ani `team` audience sdílení (pozdější fáze);
+  člen nemůže složku „odebrat“ z Macu (jen přemapovat adresář); u týmové složky bez
+  `author` (starší server) člen nic nepropaguje.
+
 # Kopírovat odkaz — fáze 2 kolaborace (20. 11. 2026)
 
 - Stav: hotovo ve větvi `feat/collab-p2-copy-link` (nepushnuto). Tlačítko „Kopírovat odkaz“

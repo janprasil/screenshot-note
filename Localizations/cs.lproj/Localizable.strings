@@ -440,3 +440,4 @@
 "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce." = "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce.";
 "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@." = "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@.";
 "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}" = "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}";
+"Týmová složka %@: %@" = "Týmová složka %@: %@";

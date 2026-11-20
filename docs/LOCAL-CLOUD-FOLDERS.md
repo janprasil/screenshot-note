@@ -61,40 +61,51 @@ server version arrives for an edited copy, it goes into a new readable folder.
 
 ## Team folders
 
-Approved contract (20 Nov 2026), not implemented yet. Server model in the web repo
-`docs/TEAMS.md`. There is no workspace switch: team folders appear next to
-personal ones.
+Implemented in phase 6 (20 Nov 2026) against the approved contract; the server side
+is in the web repo `docs/TEAMS.md`. There is no workspace switch: team folders appear
+next to personal ones, personal first.
 
-- **Name.** A team folder is always shown with the team prefix first, `<Team> · <Folder>`
-  (e.g. „Tým · Bugy“), plus a team icon, in the picker, Settings and notices. The
-  order is fixed in both languages; the format is one localization key `%@ · %@`
-  (team, folder) in cs and en. The local directory name is chosen by the user and
-  is not prefixed.
-- **Records.** `CloudFolderRecord.owner` becomes the library UUID (user UUID for
-  personal, team UUID for team) and gains `account` = the signed-in user UUID.
-  Old records decode with `account = owner`. Records are matched by
-  `(origin, account, owner, folder id)`; `topics` returns personal and team
-  records of the active account. Topic IDs stay `cloud:<origin>:<owner>:<folder>`.
-  `accept()` allows owner ∈ {user id, team ids from `/me` libraries}. The topic ID
-  omits the account because only the active account's records are ever loaded;
-  the account field only separates mappings of two users on one Mac.
+- **Name.** A team folder is always shown as `<Team> · <Folder>` (e.g. „Tým · Bugy“)
+  with a team icon (`person.2`) in the picker, Settings and notices, and in folder
+  collision messages. One localization key `%@ · %@` (team, folder) in cs and en; the
+  team name comes from `owner_name`, else from the `/me` library, else „Tým“/“Team“.
+  The local directory name is chosen by the user and is not prefixed.
+- **Records.** `CloudFolderRecord.owner` is the library UUID (user for personal, team
+  for team) and `account` (JSON key `account`) is the signed-in user. Old records
+  decode with `account = owner`. Records are matched by `(origin, account, owner, id)`;
+  `topics` returns personal and team records of the active account. Topic IDs stay
+  `cloud:<origin>:<owner>:<folder>`. Each record also stores `ownerKind`, `ownerName`
+  and `role` from the catalog (fallback to `/me`).
+- **Catalog.** Every refresh reads `/me` first. `accept()` admits owner ∈ {user, team
+  ids from `/me` libraries}; folders of other owners are skipped. Without `libraries`
+  (older server) only personal folders are accepted. Team folder listing adds
+  `library_id=<team>` next to `folder_id`.
 - **First appearance.** A new team folder goes through the same flow as a new
-  personal cloud folder: choose a local directory or keep it cloud only.
-- **Per-device mapping.** Each member's Mac maps the folder to its own directory;
-  paths are never sent upstream and the existing collision rules apply across
-  personal and team entries. Two members download the same notes from all authors.
-- **Permissions.** Rename, template and trash of a team folder are offered only for
-  owner/admin roles from the catalog. Local deletion propagates `POST /trash` only
-  for notes the user authored (or any note for admins); otherwise the local
-  deletion stays local and one notice explains it (server handling of
-  `role_forbidden` is in [CLOUD-REST.md](CLOUD-REST.md#teams-and-share-links-approved-contract-20-nov-2026)).
+  personal cloud folder (one parent directory, one by one, or later = cloud only).
+- **Per-device mapping.** Each member's Mac (and each account on one Mac) maps the
+  folder to its own directory; paths are never sent upstream and collision rules
+  apply across personal, team and other accounts' entries. All authors' notes are
+  downloaded. Moving a local folder into the cloud only offers personal folders
+  (no team folder transfer in v1).
+- **Permissions.** Rename, description, mode, template and delete of a team folder
+  are available only for `owner`/`admin`; a member can change only the local directory
+  (Settings disables the fields; `update`/`trashFolder` refuse before any request).
+  Local deletion propagates `POST /trash` only for notes whose `author.id` is the user,
+  or for any note when the role is owner/admin. Otherwise the deletion (Finder or a
+  move into `.trash/`) stays local: the index marks the note `keptLocal`, it is not
+  downloaded again and one notice per scan names the folder. A server `403
+  role_forbidden` on trash/restore is handled the same way and never retried.
 - **Unavailable.** When a team disappears from `/me` (left, removed, team deleted)
   its records get `unavailable = true` and are hidden from topics, the picker,
-  `deletedRemotely` and sync. This is distinct from `remoteDeleted`. Download,
-  trash propagation and missing-session detection stop for those folders, so no
-  local change is inferred. Local directories and files are **never** deleted or
-  moved; mappings are kept and still reserve their directories. Draft topics
-  pointing to a hidden folder fall back to the default topic with a notice.
+  `deletedRemotely`, held/deletion prompts and sync. Distinct from `remoteDeleted`.
+  Download, trash propagation and missing-session detection stop; pending missing
+  states of that folder are cleared. Local directories and files are **never**
+  deleted or moved; mappings are kept and still reserve their directories, also
+  after disconnecting the Mac. A draft whose topic is a hidden folder falls back to
+  the default topic with a notice. Races are guarded: if a team folder disappears
+  from `/folders` while the team is still in `/me`, `/me` is read again before the
+  folder is treated as deleted on the web; a session detail 404 in a team folder
+  re-checks `/me` before anything is purged.
 - **Return.** When the same team reappears, `unavailable` is cleared and the old
   mapping and session index are reused; downloading resumes without duplicates.
 - **Author.** See `{author}` in CLOUD-REST.md; combined mode works unchanged.
@@ -103,6 +114,8 @@ personal ones.
 
 `./build.sh` checks filesystem aliases, missing descendants, local/cloud and
 cross-account collisions, catalog rename persistence and account switching,
+team folders (prefix, two accounts with separate paths, membership loss/return,
+member deletion rules, legacy record migration),
 alongside the existing capture/annotation/export regressions.
 `--folder-sync-self-test` checks asynchronous disconnect/mapping cancellation
 using an injected transport. With loopback test URL/token/owner variables it

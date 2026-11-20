@@ -483,6 +483,10 @@ final class CloudLibrary {
      try park(directory,original);lastError = L("Relace bez cloudové složky už nejde nahrát. Zůstala odložená ve frontě.");continue
     }
     do { try await upload(directory,original,endpoint:endpoint,connection:c,owner:owner) }
+    // Tarif a kapacita týmové složky patří týmu; hláška ho jmenuje.
+    catch let failure as CloudFailure where [402, 413].contains(failure.status) && original.manifest.folder_id.flatMap({ folderInfo($0)?.team }) == true {
+     throw CloudFailure(LF("Týmová složka %@: %@", original.manifest.folder_id.flatMap { folderInfo($0)?.name } ?? "", failure.message), status: failure.status, retryAfter: failure.retryAfter, code: failure.code)
+    }
     catch let failure as CloudFailure where failure.status == 409 && failure.code == "session_changed" && original.manifest.base_images != nil && rebased[original.sessionID, default:0] < 3 {
      // Jiný Mac relaci mezitím doplnil, nové snímky se přesunou za jeho.
      rebased[original.sessionID, default:0] += 1

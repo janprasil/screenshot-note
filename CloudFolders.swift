@@ -383,7 +383,7 @@ final class CloudFolders {
    // Zmizelá týmová složka může znamenat odchod z týmu těsně po /me; /me se ověří znovu.
    let teamIDs:Set<UUID>=Set((libraries ?? []).filter{$0.kind=="team"}.map(\.id))
    let listed:Set<[UUID]>=Set(remote.map{[$0.id,$0.owner_id ?? owner]})
-   if records.contains(where:{record in mine(record) && record.isTeam && record.unavailable != true && teamIDs.contains(record.owner) && !listed.contains([record.id,record.owner])}) {
+   if records.contains(where:{record in mine(record) && record.isTeam && record.unavailable != true && record.remoteDeleted != true && teamIDs.contains(record.owner) && !listed.contains([record.id,record.owner])}) {
     libraries=try await self.libraries(endpoint:endpoint,token:c.token,owner:owner)
    }
    let allowed=Set([owner]+(libraries ?? []).filter{$0.kind=="team"}.map(\.id))

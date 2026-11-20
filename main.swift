@@ -339,7 +339,7 @@ if CommandLine.arguments.contains("--cloud-self-test") {
  _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
  Task { @MainActor in
   do { try await cloudIntegrationTest();exit(0) }
-  catch { fputs("Native REST integration failed.\n",stderr);exit(1) }
+  catch { fputs("Native REST integration failed: \(error)\n",stderr);exit(1) }
  }
  dispatchMain()
 }

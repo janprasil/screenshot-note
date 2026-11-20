@@ -43,12 +43,14 @@ private struct RemoteFolder:Decodable {
 struct CloudAuthor:Codable,Equatable{let id:UUID?;let name:String?}
 private struct FolderSettingsBody:Encodable {
  let name:String;let description:String;let combined:Bool;let combined_file:String;let markdown_template:String?;let combined_template:String?;let revision:String?
- enum CodingKeys:String,CodingKey{case name,description,combined,combined_file,markdown_template,combined_template,revision}
+ var owner_id:UUID? = nil
+ enum CodingKeys:String,CodingKey{case name,description,combined,combined_file,markdown_template,combined_template,revision,owner_id}
  // Prázdné šablony a revize se posílají jako null.
  func encode(to encoder:Encoder)throws {
   var c=encoder.container(keyedBy:CodingKeys.self)
   try c.encode(name,forKey:.name);try c.encode(description,forKey:.description);try c.encode(combined,forKey:.combined);try c.encode(combined_file,forKey:.combined_file)
   try c.encode(markdown_template,forKey:.markdown_template);try c.encode(combined_template,forKey:.combined_template);try c.encode(revision,forKey:.revision)
+  if let owner_id{try c.encode(owner_id.uuidString.lowercased(),forKey:.owner_id)}
  }
 }
 private struct RemoteNoteList:Decodable {
@@ -366,17 +368,19 @@ final class CloudFolders {
   }
  }
  func finishTransfer(_ source:Topic,to target:Topic)throws {
-  guard let account,source.cloudFolderID==nil,target.cloudOwnerID==account.0,target.cloudOrigin==account.1,
-        let index=records.firstIndex(where:{matches($0,target)}) else{throw CloudFailure.invalid}
+  // Cíl je osobní nebo dostupná týmová složka aktivního účtu.
+  guard let account,source.cloudFolderID==nil,target.cloudOrigin==account.1,
+        let index=records.firstIndex(where:{matches($0,target) && $0.unavailable != true}) else{throw CloudFailure.invalid}
   var updated=records
   if updated[index].folder.isEmpty{updated[index].folder=source.folder}
   updated[index].migratedLocalIDs=Array(Set((updated[index].migratedLocalIDs ?? [])+[source.id])).sorted()
   try persist(updated)
   if UserDefaults.standard.string(forKey:"defaultTopic")==source.id{UserDefaults.standard.set(updated[index].topic.id,forKey:"defaultTopic")}
  }
- @MainActor func create(_ name:String)async throws->Topic {
-  guard let c=currentConnection(),let owner=c.ownerID,let endpoint=CloudEndpoint(c.endpoint),!name.isEmpty,name.unicodeScalars.count<=100,!name.unicodeScalars.contains(where:{CharacterSet.controlCharacters.contains($0)}) else{throw CloudFailure.invalid}
+ @MainActor func create(_ name:String,team:CloudLibraryRef?=nil)async throws->Topic {
+  guard let c=currentConnection(),let account=c.ownerID,team.map({$0.isTeam && LibraryRole.manages($0.role)}) != false,let endpoint=CloudEndpoint(c.endpoint),!name.isEmpty,name.unicodeScalars.count<=100,!name.unicodeScalars.contains(where:{CharacterSet.controlCharacters.contains($0)}) else{throw CloudFailure.invalid}
   activate(c)
+  let owner=team?.id ?? account
   let directory=file.deletingLastPathComponent().appendingPathComponent("Cloud Folder Operations")
   try fm.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   let key=SHA256.hash(data:Data((c.endpoint+owner.uuidString+"\0"+name).utf8)).map{String(format:"%02x",$0)}.joined()
@@ -385,15 +389,18 @@ final class CloudFolders {
   if fm.fileExists(atPath:intent.path){guard let saved=UUID(uuidString:try String(contentsOf:intent,encoding:.utf8)) else{throw CloudFailure.invalid};id=saved}
   else{id=UUID();try Data(id.uuidString.utf8).write(to:intent,options:.atomic)}
   // Vytvoření je PUT s revizí null.
-  let body=try JSONEncoder().encode(FolderSettingsBody(name:name,description:"",combined:false,combined_file:defaultCombinedFile,markdown_template:TemplateDefaults.shared.session,combined_template:TemplateDefaults.shared.file,revision:nil))
+  let body=try JSONEncoder().encode(FolderSettingsBody(name:name,description:"",combined:false,combined_file:defaultCombinedFile,markdown_template:TemplateDefaults.shared.session,combined_template:TemplateDefaults.shared.file,revision:nil,owner_id:team?.id))
   let data:Data
   do{data=try await send(endpoint,"/api/v1/folders/"+id.uuidString.lowercased(),"PUT",c.token,body)}catch let failure as CloudFailure{throw Self.friendly(failure)}
   let result=try JSONDecoder().decode(FolderEnvelope<RemoteFolder>.self,from:data).data
   guard currentConnection()?.token==c.token,result.id==id,result.name==name else{throw CloudFailure.invalid}
   var updated=records
-  if !updated.contains(where:{$0.id==id && $0.owner==owner && $0.account==owner && $0.origin==c.endpoint}){var created=result.record(owner:owner,origin:c.endpoint);created.ownerKind=LibraryKind.personal.rawValue;created.ownerName=nil;created.role=nil;guard created.owner==owner else{throw CloudFailure.invalid};updated.append(created)}
+  if !updated.contains(where:{$0.id==id && $0.owner==owner && $0.account==account && $0.origin==c.endpoint}){
+   var created=result.record(owner:account,origin:c.endpoint,library:team?.id);guard created.owner==owner else{throw CloudFailure.invalid}
+   created.ownerKind=(team == nil ? LibraryKind.personal:LibraryKind.team).rawValue;created.ownerName=team?.name;created.role=team?.role;updated.append(created)
+  }
   try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
-  return updated.first{$0.id==id && $0.owner==owner && $0.account==owner && $0.origin==c.endpoint}!.topic
+  return updated.first{$0.id==id && $0.owner==owner && $0.account==account && $0.origin==c.endpoint}!.topic
  }
  /// Uloží nastavení cloudové složky na server; při konfliktu načte novou verzi.
  @MainActor func update(_ topic:Topic)async throws->Topic {
@@ -478,6 +485,11 @@ final class CloudFolders {
    } else{failures=0;retryAt = .distantPast}
    if cloud?.status==401{onUnauthorized?(c.token)}
   }
+ }
+ /// Týmy z /me, ve kterých smí uživatel zakládat složky (owner/admin).
+ @MainActor func manageableTeams()async throws->[CloudLibraryRef] {
+  guard let c=currentConnection(),let account=c.ownerID,let endpoint=CloudEndpoint(c.endpoint) else{return []}
+  return (try await libraries(endpoint:endpoint,token:c.token,owner:account) ?? []).filter{$0.isTeam && LibraryRole.manages($0.role)}
  }
  /// Library z /me; chybějící pole (starší server) je nil = jen osobní.
  @MainActor private func libraries(endpoint:CloudEndpoint,token:String,owner:UUID)async throws->[CloudLibraryRef]? {

@@ -37,16 +37,12 @@ final class BridgeRelay:@unchecked Sendable {
 
  private func forward(_ data:Data){
   guard let type=BridgeWire.messageType(data) else{log("invalid message from browser, dropped");return}
-  lock.lock()
+  lock.lock();defer{lock.unlock()}
   if type=="hello"{hello=data}
-  var sent=false
-  if socket>=0{
-   sent=BridgeWire.writeAll(socket,BridgeWire.frame(data))
-   // Zavření nechá na čtecím vlákně, aby se číslo fd nerecyklovalo pod rukama.
-   if !sent{shutdown(socket,SHUT_RDWR);socket = -1}
-  }
-  lock.unlock()
-  if !sent && type=="hello"{toBrowser(offline)}
+  // Zavření a hlášení offline nechá na čtecím vlákně, aby se číslo fd nerecyklovalo pod rukama.
+  if socket>=0{if !BridgeWire.writeAll(socket,BridgeWire.frame(data)){shutdown(socket,SHUT_RDWR)};return}
+  // Offline odpověď pod zámkem, aby nepředběhla online hello z nového spojení.
+  if type=="hello"{toBrowser(offline)}
  }
 
  private func connectIfNeeded(){
@@ -68,8 +64,9 @@ final class BridgeRelay:@unchecked Sendable {
    case .end:break loop
    }
   }
-  lock.lock();let current=socket==fd;if current{socket = -1};let greeted=hello != nil;lock.unlock()
+  lock.lock();defer{lock.unlock()}
+  if socket==fd{socket = -1}
   close(fd)
-  if current && greeted{toBrowser(offline)}
+  if hello != nil{toBrowser(offline)}
  }
 }

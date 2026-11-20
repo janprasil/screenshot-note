@@ -61,9 +61,11 @@ enum BridgeWire {
   return withUnsafePointer(to:&address){$0.withMemoryRebound(to:sockaddr.self,capacity:1){body($0,socklen_t(MemoryLayout<sockaddr_un>.size))}}
  }
  static func noSigPipe(_ fd:Int32){var on:Int32=1;setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&on,socklen_t(MemoryLayout<Int32>.size))}
+ // Protistrana, která nečte, zápis neblokuje navždy.
+ static func sendTimeout(_ fd:Int32,seconds:Int=2){var limit=timeval(tv_sec:seconds,tv_usec:0);setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&limit,socklen_t(MemoryLayout<timeval>.size))}
  static func connect(_ path:String)->Int32?{
   let fd=socket(AF_UNIX,SOCK_STREAM,0);guard fd>=0 else{return nil}
-  noSigPipe(fd)
+  noSigPipe(fd);sendTimeout(fd)
   guard withAddress(path,{Darwin.connect(fd,$0,$1)})==0 else{close(fd);return nil}
   return fd
  }

@@ -16,18 +16,21 @@ final class BrowserBridge:@unchecked Sendable {
  private let lock=NSLock();private let queue=DispatchQueue(label:"cz.janprasil.screenshotnote.browser-bridge")
  private var listener:DispatchSourceRead?
  private var connections:[Int:Connection]=[:];private var nextID=1
- private var pending:[String:Pending]=[:]
+ private var pending:[String:Pending]=[:];private var socketInode:ino_t?
  init(socketPath:String){self.socketPath=socketPath}
 
  private final class Connection:@unchecked Sendable {
-  let fd:Int32;var info:BrowserClientInfo;private let writeLock=NSLock()
+  let fd:Int32;var info:BrowserClientInfo;private let writeLock=NSLock();private var closed=false
   init(fd:Int32,id:Int){self.fd=fd;let now=Date();info=BrowserClientInfo(id:id,connectedAt:now,lastSeen:now)}
+  // Po zavření se fd už nepoužije, i kdyby ho systém přidělil novému klientovi.
   func send(_ payload:Data){
    writeLock.lock();defer{writeLock.unlock()}
-   if !BridgeWire.writeAll(fd,BridgeWire.frame(payload)){shutdown(fd,SHUT_RDWR)}
+   if !closed && !BridgeWire.writeAll(fd,BridgeWire.frame(payload)){shutdown(fd,SHUT_RDWR)}
   }
+  func disconnect(){writeLock.lock();if !closed{shutdown(fd,SHUT_RDWR)};writeLock.unlock()}
+  func close(){writeLock.lock();if !closed{closed=true;Darwin.close(fd)};writeLock.unlock()}
  }
- private final class Pending {var remaining:Int;let finish:(Data?)->Void;init(_ remaining:Int,_ finish:@escaping (Data?)->Void){self.remaining=remaining;self.finish=finish}}
+ private final class Pending {var waiting:Set<Int>;let finish:(Data?)->Void;init(_ waiting:Set<Int>,_ finish:@escaping (Data?)->Void){self.waiting=waiting;self.finish=finish}}
 
  var isRunning:Bool{lock.lock();defer{lock.unlock()};return listener != nil}
  var clients:[BrowserClientInfo]{lock.lock();defer{lock.unlock()};return connections.values.map(\.info).sorted{$0.id<$1.id}}
@@ -42,6 +45,7 @@ final class BrowserBridge:@unchecked Sendable {
   var existing=stat()
   if lstat(socketPath,&existing)==0{
    guard existing.st_mode & S_IFMT==S_IFSOCK else{throw BrowserBridgeError(message:"\(socketPath) exists and is not a socket")}
+   if let live=BridgeWire.connect(socketPath){close(live);throw BrowserBridgeError(message:"\(socketPath) is used by another running instance")}
    unlink(socketPath)
   }
   let fd=socket(AF_UNIX,SOCK_STREAM,0)
@@ -54,6 +58,7 @@ final class BrowserBridge:@unchecked Sendable {
   source.setEventHandler{[weak self] in self?.acceptClients(fd)}
   source.setCancelHandler{close(fd)}
   source.resume();listener=source
+  var created=stat();if lstat(socketPath,&created)==0{socketInode=created.st_ino}
   NSLog("Browser bridge listening on %@",socketPath)
  }
 
@@ -64,16 +69,25 @@ final class BrowserBridge:@unchecked Sendable {
   let all=Array(connections.values);connections=[:]
   let waiting=Array(pending.values);pending=[:]
   lock.unlock()
-  for connection in all{shutdown(connection.fd,SHUT_RDWR)}
+  for connection in all{connection.disconnect()}
   for item in waiting{item.finish(nil)}
-  unlink(socketPath)
+  // Cizí socket (jiná instance) nemažeme.
+  var current=stat()
+  if let inode=socketInode,lstat(socketPath,&current)==0,current.st_ino==inode{unlink(socketPath)}
+  socketInode=nil
  }
 
  private func acceptClients(_ listenFD:Int32){
   while true{
-   let fd=accept(listenFD,nil,nil);if fd<0{return}
+   let fd=accept(listenFD,nil,nil)
+   if fd<0{
+    if errno==EINTR{continue}
+    // Při vyčerpání fd zůstane spojení ve frontě, zdroj na chvíli uspíme.
+    if errno != EAGAIN && errno != EWOULDBLOCK,let source=listener{NSLog("Browser bridge accept: %s",strerror(errno));source.suspend();queue.asyncAfter(deadline:.now()+1){source.resume()}}
+    return
+   }
    _=fcntl(fd,F_SETFL,fcntl(fd,F_GETFL) & ~O_NONBLOCK)
-   BridgeWire.noSigPipe(fd)
+   BridgeWire.noSigPipe(fd);BridgeWire.sendTimeout(fd)
    // Jen procesy stejného uživatele.
    var uid=uid_t(0),gid=gid_t(0)
    guard getpeereid(fd,&uid,&gid)==0,uid==getuid() else{close(fd);continue}
@@ -96,7 +110,7 @@ final class BrowserBridge:@unchecked Sendable {
    }
   }
   lock.lock();connections[connection.info.id]=nil;lock.unlock()
-  close(connection.fd)
+  connection.close()
  }
 
  private func handle(_ data:Data,from connection:Connection){
@@ -118,10 +132,10 @@ final class BrowserBridge:@unchecked Sendable {
   case "pong":if let id{resolve(id,Data())}
   case "capture.result":
    guard let id else{return}
-   if let bundle=message["bundle"] as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:bundle){resolve(id,data)}else{fail(id)}
+   if let bundle=message["bundle"] as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:bundle){resolve(id,data)}else{fail(id,client:connection.info.id)}
   case "capture.error":
    NSLog("Browser bridge: capture error %@",message["code"] as? String ?? "?")
-   if let id{fail(id)}
+   if let id{fail(id,client:connection.info.id)}
   default:NSLog("Browser bridge: unknown message %@",type)
   }
  }
@@ -131,11 +145,11 @@ final class BrowserBridge:@unchecked Sendable {
   item?.finish(data)
  }
  // Request končí bez výsledku, až odmítnou všichni oslovení klienti.
- private func fail(_ id:String){
+ private func fail(_ id:String,client:Int){
   lock.lock()
   guard let item=pending[id] else{lock.unlock();return}
-  item.remaining-=1
-  if item.remaining>0{lock.unlock();return}
+  item.waiting.remove(client)
+  if !item.waiting.isEmpty{lock.unlock();return}
   pending[id]=nil;lock.unlock()
   item.finish(nil)
  }
@@ -147,10 +161,11 @@ final class BrowserBridge:@unchecked Sendable {
    lock.lock()
    let targets=connections.values.filter{$0.info.helloAt != nil}
    guard !targets.isEmpty else{lock.unlock();continuation.resume(returning:nil);return}
-   pending[id]=Pending(targets.count){continuation.resume(returning:$0)}
+   pending[id]=Pending(Set(targets.map(\.info.id))){continuation.resume(returning:$0)}
    lock.unlock()
-   for target in targets{target.send(payload)}
+   // Deadline běží od začátku a zápisy jdou mimo volající vlákno.
    queue.asyncAfter(deadline:.now()+timeout){[weak self] in self?.resolve(id,nil)}
+   for target in targets{DispatchQueue.global(qos:.userInitiated).async{target.send(payload)}}
   }
  }
 
@@ -196,9 +211,10 @@ enum NativeHostRegistration {
   }
  }
  /// Zapíše manifest jen tam, kde se liší. Tím se po přesunutí appky opraví `path`.
- @discardableResult static func install(home:URL=FileManager.default.homeDirectoryForCurrentUser,helper:URL=bundledHelper)throws->[URL]{
+ /// Bez `replaceForeign` nechá cizí manifest (vývojový host) být.
+ @discardableResult static func install(home:URL=FileManager.default.homeDirectoryForCurrentUser,helper:URL=bundledHelper,replaceForeign:Bool=true)throws->[URL]{
   let data=manifest(helper:helper)
-  let files=manifestFiles(home:home)
+  let files=manifestFiles(home:home).filter{replaceForeign || isOurs($0) || !FileManager.default.fileExists(atPath:$0.path)}
   for file in files where (try? Data(contentsOf:file)) != data{
    try FileManager.default.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true)
    try data.write(to:file,options:.atomic)
@@ -207,23 +223,25 @@ enum NativeHostRegistration {
  }
  /// Smaže jen naše manifesty. Vývojový host z repa rozšíření nechá být.
  @discardableResult static func uninstall(home:URL=FileManager.default.homeDirectoryForCurrentUser)->[URL]{
-  manifestFiles(home:home).filter{file in
-   guard let data=try? Data(contentsOf:file),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
-         let path=object["path"] as? String,(path as NSString).lastPathComponent==helperName else{return false}
-   return (try? FileManager.default.removeItem(at:file)) != nil
-  }
+  manifestFiles(home:home).filter{isOurs($0) && (try? FileManager.default.removeItem(at:$0)) != nil}
+ }
+ static func isOurs(_ file:URL)->Bool{
+  guard let data=try? Data(contentsOf:file),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
+        let path=object["path"] as? String else{return false}
+  return (path as NSString).lastPathComponent==helperName
  }
 
  /// Při startu appky: přepíše manifesty a spustí server, pokud je funkce zapnutá.
  static func applyStoredSetting(){
   guard isEnabled else{return}
-  do{try install();try BrowserBridge.shared.start()}catch{NSLog("Browser bridge start failed: %@",error.localizedDescription)}
+  do{try install(replaceForeign:false);try BrowserBridge.shared.start()}catch{NSLog("Browser bridge start failed: %@",error.localizedDescription)}
  }
  /// Vrací počet prohlížečů, do kterých se manifest zapsal.
  static func setEnabled(_ enabled:Bool)throws->Int{
-  UserDefaults.standard.set(enabled,forKey:enabledKey)
-  if !enabled{uninstall();BrowserBridge.shared.stop();return 0}
-  let files=try install();try BrowserBridge.shared.start();return files.count
+  if !enabled{UserDefaults.standard.set(false,forKey:enabledKey);uninstall();BrowserBridge.shared.stop();return 0}
+  // Zapnuto se uloží, až když manifesty i server opravdu běží.
+  do{let files=try install();try BrowserBridge.shared.start();UserDefaults.standard.set(true,forKey:enabledKey);return files.count}
+  catch{uninstall();throw error}
  }
 }
 
@@ -339,7 +357,9 @@ func browserBridgeTests()async throws{
  let written=(try JSONSerialization.jsonObject(with:Data(contentsOf:installed[0]))) as? [String:Any]
  try check(written?["path"] as? String==moved.path && written?["type"] as? String=="stdio","manifest path not refreshed")
  try check(written?["allowed_origins"] as? [String]==NativeHostRegistration.allowedOrigins,"allowed_origins mismatch")
- let foreign=installed[1];try Data(#"{"path":"/dev/run-host.sh"}"#.utf8).write(to:foreign)
+ let foreign=installed[1];let devHost=Data(#"{"path":"/dev/run-host.sh"}"#.utf8);try devHost.write(to:foreign)
+ try NativeHostRegistration.install(home:home,helper:moved,replaceForeign:false)
+ try check((try? Data(contentsOf:foreign))==devHost,"startup refresh replaced the development host")
  try check(NativeHostRegistration.uninstall(home:home).count==1,"uninstall removed wrong files")
  try check(!FileManager.default.fileExists(atPath:installed[0].path) && FileManager.default.fileExists(atPath:foreign.path),"uninstall touched the development host")
  print("Browser bridge self-test passed")

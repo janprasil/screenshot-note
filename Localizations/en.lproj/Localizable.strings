@@ -424,3 +424,6 @@
 "Relace v cloudu není dostupná nebo je sdílení vypnuté." = "The session isn’t available in the cloud, or sharing is turned off.";
 "Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu." = "The session is in the trash. Restore it on the web, then copy the link again.";
 "Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu." = "Couldn’t get the link. Check your internet connection and try again.";
+"Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu." = "You’ve reached the shared link limit. Revoke a link you no longer need on the web and try again.";
+"Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli." = "Sharing is temporarily unavailable. Try again in a moment.";
+"Odkaz se nepodařilo vytvořit (HTTP %ld)." = "Couldn’t create the link (HTTP %ld).";

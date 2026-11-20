@@ -194,21 +194,46 @@ func cloudFolderUnitTests()throws {
  guard resumed.pendingCount == 0 else { throw CloudFailure.invalid }
  // Kopírovat odkaz: commitnutá relace, bearer token, stejná URL i při opakování.
  assert(resumed.isCommitted(shared,folder:folder))
- let link=try await resumed.shareLink(shared),again=try await resumed.shareLink(shared)
+ let sharer=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:endpoint,now:{clock})
+ func target(_ id:UUID)->PreviousSessionTarget{PreviousSessionTarget(path:"/fixture.md",start:0,length:0,original:"",fingerprint:"",session:id.uuidString)}
+ let index=SessionIndex(file:root.appendingPathComponent("index.json")),none:(PreviousSessionTarget,Topic)->(UUID,[String])? = {_,_ in nil}
+ let sharedDraft=Draft(images:[],comment:"",topic:cloudTopic,previous:target(shared))
+ assert(sharer.shareableSessionID(sharedDraft,index:index,serverImages:none)==shared)
+ assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:cloudTopic),index:index,serverImages:none)==nil)
+ let downloaded=UUID();assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:cloudTopic,previous:target(downloaded)),index:index,serverImages:{_,_ in (downloaded,[])})==downloaded)
+ assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:cloudTopic,previous:target(UUID())),index:index,serverImages:none)==nil)
+ var foreignOwner=cloudTopic;foreignOwner.cloudOwnerID=UUID();assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:foreignOwner,previous:target(shared)),index:index,serverImages:none)==nil)
+ var foreignOrigin=cloudTopic;foreignOrigin.cloudOrigin="https://other.test";assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:foreignOrigin,previous:target(shared)),index:index,serverImages:none)==nil)
+ var localTopic=cloudTopic;localTopic.cloudFolderID=nil;assert(sharer.shareableSessionID(Draft(images:[],comment:"",topic:localTopic,previous:target(shared)),index:index,serverImages:none)==nil)
+ // Relace v koši podle indexu se nesdílí, i když existuje účtenka o nahrání.
+ index.put(SessionRecord(id:shared.uuidString.lowercased(),file:"",start:0,length:0,hash:"",heading:"",title:"",comment:"",template:"",images:[],notes:[:],combined:false,footer:"",files:[:],seen:0,folder:folder.uuidString.lowercased(),trashed:true))
+ assert(sharer.isCommitted(shared,folder:folder) && sharer.shareableSessionID(sharedDraft,index:index,serverImages:none)==nil)
+ let link=try await sharer.shareLink(shared),again=try await sharer.shareLink(shared)
  assert(link==again && link.absoluteString.hasPrefix(raw+"/s/sn_share_v1_"))
  let board=NSPasteboard(name:NSPasteboard.Name("sn-share-test-"+UUID().uuidString));defer{board.releaseGlobally()}
  copyShareLink(link,to:board);assert(board.string(forType:.string)==link.absoluteString)
- func shareFailure(_ id:String)async->CloudFailure?{do{_ = try await resumed.shareLink(UUID(uuidString:id)!);return nil}catch{return error as? CloudFailure}}
+ func shareFailure(_ id:String)async->CloudFailure?{do{_ = try await sharer.shareLink(UUID(uuidString:id)!);return nil}catch{return error as? CloudFailure}}
  let missing=await shareFailure(UUID().uuidString);assert(missing?.status==404)
  let trashed=await shareFailure("00000000-0000-4000-8000-000000000409");assert(trashed?.status==409 && trashed?.code=="session_trashed")
  let forbidden=await shareFailure("00000000-0000-4000-8000-000000000403");assert(forbidden?.status==403)
+ let full=await shareFailure("00000000-0000-4000-8000-000000000413");assert(full?.status==413 && full?.message==L("Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu."))
+ let down=await shareFailure("00000000-0000-4000-8000-000000000503");assert(down?.status==503 && down?.message==L("Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli."))
+ let bad=await shareFailure("00000000-0000-4000-8000-000000000401");assert(bad?.status==400 && bad?.message==LF("Odkaz se nepodařilo vytvořit (HTTP %ld).",400))
  let foreign=await shareFailure("00000000-0000-4000-8000-000000000400");assert(foreign != nil && foreign?.status==0)
- let throttled=await shareFailure("00000000-0000-4000-8000-000000000429");assert(throttled?.status==429 && resumed.shareRetryAt >= clock.addingTimeInterval(60))
+ let throttled=await shareFailure("00000000-0000-4000-8000-000000000429");assert(throttled?.status==429 && sharer.shareRetryAt >= clock.addingTimeInterval(60))
  // Během Retry-After klient na server vůbec nejde.
  let early=await shareFailure(shared.uuidString);assert(early?.status==429)
- clock=clock.addingTimeInterval(61);let later=try await resumed.shareLink(shared);assert(later==link)
- assert(CloudLibrary.shareURL("https://evil.test/s/sn_share_v1_"+String(repeating:"a",count:43),endpoint:endpoint)==nil)
- assert(CloudLibrary.shareURL(raw+"/s/short",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+String(repeating:"a",count:43)+"?x=1",endpoint:endpoint)==nil)
+ clock=clock.addingTimeInterval(61);let later=try await sharer.shareLink(shared);assert(later==link)
+ // 429 bez Retry-After čeká 30 s; po odpojení účtu se zámek nepoužije.
+ let bare=await shareFailure("00000000-0000-4000-8000-000000000430");assert(bare?.status==429 && abs(sharer.shareRetryAt.timeIntervalSince(clock)-30)<1)
+ try sharer.forgetConnection();assert(sharer.shareRetryAt == .distantPast);try vault.save(original)
+ let token="sn_share_v1_"+String(repeating:"a",count:43)
+ assert(CloudLibrary.shareURL("https://evil.test/s/"+token,endpoint:endpoint)==nil)
+ assert(CloudLibrary.shareURL(raw+"/s/short",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"?x=1",endpoint:endpoint)==nil && CloudLibrary.shareURL(raw+"/s/"+token+"a",endpoint:endpoint)==nil)
+ assert(CloudLibrary.shareURL(raw.replacingOccurrences(of:"127.0.0.1",with:"localhost")+"/s/"+token,endpoint:endpoint)==nil)
+ let production=CloudEndpoint("https://screenshotnote.com")!
+ assert(CloudLibrary.shareURL("https://ScreenshotNote.com:443/s/"+token,endpoint:production) != nil && CloudLibrary.shareURL("http://screenshotnote.com/s/"+token,endpoint:production)==nil)
+ assert(CloudLibrary.shareURL("https://screenshotnote.com:8443/s/"+token,endpoint:production)==nil && CloudLibrary.shareURL("https://screenshotnote.com/s/sn_share_v2_"+String(repeating:"a",count:43),endpoint:production)==nil)
  let preserved = try Data(contentsOf:root.appendingPathComponent("shot.png")); assert(preserved == png)
  try resumed.enqueue(draft,root:root,folders:[cloudTopic])
  let drain = Task { @MainActor in await resumed.sync() }
@@ -233,7 +258,7 @@ func cloudFolderUnitTests()throws {
  assert(limited.retryAt >= clock.addingTimeInterval(60))
  do {try await limited.startPairing(endpoint:endpoint,name:"Rate fixture");assertionFailure("Rate limit retried early")} catch {}
  print("PASS: native REST pairing/vault/restart, owner identity, streamed PNG, lost manifest/image/commit responses, stable upload UUID/digest and account-switch isolation")
- print("PASS: copy link posts public share with bearer token, idempotent URL, pasteboard text, 403/404/409 session_trashed messages, Retry-After gate and foreign URL rejection")
+ print("PASS: copy link posts public share with bearer token, idempotent URL, pasteboard text, shareable-session gating (owner/origin/index trash), 403/404/409/413/503/400 messages, Retry-After and 30 s default gate reset on disconnect, normalized origin and exact token")
 }
 
 @MainActor func folderTransferTests() async throws {

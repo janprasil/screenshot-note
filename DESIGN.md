@@ -6,7 +6,7 @@ A calm, native Mac workspace for collecting visual context. Screenshots provide 
 
 ## Structure
 
-- Capture: prominent editable note title in the header, configuration/session links and capture action on one row, horizontally scrolling screenshot strip, single-line comment and a fixed action row.
+- Capture: prominent editable note title in the header, configuration link, optional quiet “Copy link” button (committed cloud sessions only, briefly turns into a green “Link copied” confirmation) and capture action on one row without overlaps, horizontally scrolling screenshot strip, single-line comment and a fixed action row.
 - Configurations: a persistent sidebar and a single details form. No repeated card containers.
 - Settings: three plain rows for configurations, shortcuts and login behavior.
 - Annotation editor: one icon toolbar, neutral image canvas and a common action row.

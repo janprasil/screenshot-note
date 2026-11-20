@@ -108,9 +108,13 @@ and `409 session_trashed` show an error, `429` honors `Retry-After`. Revocation 
 on the web and in a later Mac menu (`DELETE …/share/{link_id}`). Shared links and
 other people's shared content are never listed or downloaded by the Mac app.
 The button is shown only for a session in a cloud folder of the current account that the
-server already holds (downloaded index record or local commit receipt). The returned `url`
-must be `<API origin>/s/<token>`; anything else is rejected. Without `Retry-After`, a `429`
-waits 30 s; during the wait no request is sent. Network errors only show a message.
+server already holds (downloaded index record or local commit receipt) and that the session
+index does not mark as trashed or locally deleted. The returned `url` must be
+`/s/sn_share_v1_<43 base64url>` on the API origin (scheme, case-insensitive host, effective
+port); anything else is rejected. Share errors have their own messages (403, 404, 409
+`session_trashed`, 413 link limit, 429, 5xx/temporary, other HTTP). Without `Retry-After`,
+a `429` waits 30 s; during the wait no request is sent, and the wait is tied to the
+account/origin. Network errors only show a message.
 Strings are localized cs+en (`tests/localization-keys.py`). `tests/cloud-rest.py`
 covers the share endpoint (phase 2); `/me` libraries, a team folder, `library_id` and
 `author` follow in phase 6.

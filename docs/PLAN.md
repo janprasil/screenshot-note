@@ -4,8 +4,11 @@
   vedle konfigurace v okně poznámky, jen u relace v cloudové složce aktuálního účtu, kterou
   server má (stažená relace z indexu, nebo účtenka `isCommitted`). `POST /api/v1/sessions/{id}/share`
   s `{audience:"public"}` a device bearerem, URL `<origin>/s/<token>` do schránky, 2 s
-  potvrzení „Odkaz zkopírován“. 403/404/409 `session_trashed` mají vlastní hlášky, 429
-  blokuje další pokus do `Retry-After` (bez hlavičky 30 s), síťová chyba jen hláška.
+  potvrzení „Odkaz zkopírován“. Vlastní hlášky pro 403/404/409 `session_trashed`/413/5xx/ostatní;
+  429 blokuje další pokus do `Retry-After` (bez hlavičky 30 s), zámek je vázaný na účet a origin.
+  Relace vedená indexem v koši/smazaná se nesdílí ani s účtenkou. Schránka se zapíše i po zavření okna.
+  URL jen `/s/sn_share_v1_<43>` na stejném originu (normalizované schéma/host/port).
+  Review opravy (2. commit): rozložení řádku bez překryvu ověřené v self-testu.
 - Ověřeno: `./build.sh` (self-testy + lokalizace), `tests/cloud-rest.py` (share 201/200,
   stejná URL, bearer, pojmenovaná schránka, chyby, cizí origin URL odmítnut).
   Opraven i dříve padající `cloud-rest.py` (upload bez cloudové složky po zavedení `folder_required`).

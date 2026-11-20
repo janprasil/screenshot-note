@@ -94,7 +94,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         address = 'http://127.0.0.1:' + str(self.server.server_port)
         special = {'00000000-0000-4000-8000-000000000409': (409, 'session_trashed'),
                    '00000000-0000-4000-8000-000000000403': (403, 'role_forbidden'),
-                   '00000000-0000-4000-8000-000000000429': (429, 'rate_limited')}
+                   '00000000-0000-4000-8000-000000000413': (413, 'resource_limit'),
+                   '00000000-0000-4000-8000-000000000503': (503, 'service_unavailable'),
+                   '00000000-0000-4000-8000-000000000401': (400, 'invalid_parameters'),
+                   '00000000-0000-4000-8000-000000000429': (429, 'rate_limited'),
+                   '00000000-0000-4000-8000-000000000430': (429, 'rate_limited')}
         if ident in special:
             self.error(*special[ident], retry='60' if ident.endswith('429') else None)
             return
@@ -214,8 +218,8 @@ try:
     assert len(jobs) == 3 and all(job['state'] == 'committed' for job in jobs.values())
     assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
     assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
-    # 8 volání: druhý pokus během Retry-After se na server nedostane.
-    assert len(share_calls) == 8 and share_statuses == [201, 200, 200]
+    # 12 volání: druhý pokus během Retry-After se na server nedostane.
+    assert len(share_calls) == 12 and share_statuses == [201, 200, 200]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
     print('PASS: loopback-only wire contract, share endpoint (POST public, 201/200 same URL, Retry-After honored), no upstream key/cookies, CRC/RGB8 PNG, frozen manifest and lost-response recovery')

@@ -13,7 +13,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   CloudLibrary.shared.onEditConflict={id,fields in CloudFolders.shared.keepLocalEdit(id,fields)}
   // 401 při synchronizaci složek přepne Mac do stavu nového párování.
-  CloudFolders.shared.onUnauthorized={CloudLibrary.shared.markRevoked()}
+  CloudFolders.shared.onUnauthorized={token in CloudLibrary.shared.markRevoked(token:token)}
   SessionIndex.onWriteFailure={message in DispatchQueue.main.async{showError(message)}}
   // Záloha konceptu z minulého běhu (pád, vynucené ukončení) se vrátí jako rozpracovaná poznámka.
   do{if try restoreRecoveredDraft(){DispatchQueue.main.async{showError(L("Neuložená poznámka z minulého spuštění byla obnovena. Otevřeš ji v menu Otevřít rozpracovanou poznámku."))}}}catch{NSLog("Draft recovery failed: %@",error.localizedDescription)}
@@ -121,7 +121,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  /// Záloha z minulého běhu se přesune do rozpracované poznámky; vrací true, když něco obnovila.
  @discardableResult func restoreRecoveredDraft(from recovery:URL=recoveryRoot,to storage:URL=draftRoot)throws->Bool {
-  guard fm.fileExists(atPath:recovery.appendingPathComponent("draft.json").path) else{return false}
+  let backup=recovery.appendingPathComponent("draft.json")
+  guard fm.fileExists(atPath:backup.path) else{return false}
+  // Novější uložený koncept má přednost; starší záloha by ho přepsala.
+  func modified(_ url:URL)->Date{(try? url.resourceValues(forKeys:[.contentModificationDateKey]))?.contentModificationDate ?? .distantPast}
+  let saved=storage.appendingPathComponent("draft.json")
+  if fm.fileExists(atPath:saved.path),modified(saved)>=modified(backup){try? fm.removeItem(at:recovery);return false}
   let draft=try readDraft(recovery)
   guard !draft.images.isEmpty || !draft.comment.isEmpty || !(draft.title ?? "").isEmpty else{try? fm.removeItem(at:recovery);return false}
   try persist(draft,root:recovery,to:storage);try fm.removeItem(at:recovery);return true
@@ -262,6 +267,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     if upload { try CloudLibrary.shared.requireAccount() }
     if result != 0 {
      try self.persist(draft,root:root)
+     // Uložený koncept je novější než záloha; ta by ho po pádu přepsala.
+     try? fm.removeItem(at:recoveryRoot)
      if result == 2 {
       let stored=try readDraft(draftRoot)
       if cloudOnly {
@@ -637,6 +644,13 @@ if CommandLine.arguments.contains("--self-test") {
  let didRestore=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(didRestore && !fm.fileExists(atPath:recovered.path))
  let restoredDraft=try readDraft(storage);assert(restoredDraft.images.count==1 && restoredDraft.title=="Neuloženo" && restoredDraft.comment=="Text")
  let again=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(!again)
+ // Novější uložený koncept má přednost před starší zálohou, záloha se zahodí.
+ var newer=unsaved;newer.title="Novější";try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered);try recoveryProbe.persist(newer,root:cancelRoot,to:storage)
+ try fm.setAttributes([.modificationDate:Date(timeIntervalSinceNow:-60)],ofItemAtPath:recovered.appendingPathComponent("draft.json").path)
+ let staleBackup=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(!staleBackup && (try! readDraft(storage)).title=="Novější" && !fm.fileExists(atPath:recovered.path))
+ try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered)
+ try fm.setAttributes([.modificationDate:Date(timeIntervalSinceNow:-120)],ofItemAtPath:storage.appendingPathComponent("draft.json").path)
+ let fresher=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(fresher && (try! readDraft(storage)).title=="Neuloženo")
  print("PASS: cancel/close with unsaved work asks (keep/later/discard), unchanged drafts close directly, autosaved draft is recovered on next launch")
  assert(Shortcut(key:103,modifiers:UInt32(256),name:"\u{F70E}").display == "⌘F11")
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")

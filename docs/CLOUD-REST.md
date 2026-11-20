@@ -66,14 +66,15 @@ A lost commit reply is resolved by the repeated immutable manifest request.
 No timeout invents another session ID. HTTP429 honors Retry-After; temporary
 errors use bounded cooldown/jitter and manual retry. `upload_incomplete` waits
 at least 90 seconds. A failing job never blocks later jobs: each job keeps its
-own failure count and backoff (`.failures.json`). 401/402/403/429 and network
-loss stop the whole drain. After three permanent failures (400, 413, 415,
-invalid response) or five timeouts the job is parked in `.conflicts/` with a
+own failure count and backoff (`.failures.json`). 401/402/403/429, account
+quota (402/413, 15 min backoff, then automatic retry) and loss of connectivity
+stop the whole drain. After three permanent failures (400, 415, invalid
+response) or five timeouts the job is parked in `.conflicts/` with a
 `reason.txt`. Extensions send the downloaded session `revision`; on
 `session_changed` the client re-fetches the session, 3-way merges title,
 comment and captions (base = downloaded text) and retries with the new
 revision, parking only on a same-field conflict. Text edits without a stored
-revision fetch it before PATCH; 400/413 park the edit.
+revision fetch it before PATCH; 400 parks the edit, 413 waits like uploads.
 
 Parked items and queue entries of another account (or after Disconnect) are
 listed under Cloud Library → Set Aside… and in the menu bar. Each offers Try

@@ -198,30 +198,42 @@ final class CloudFolders {
   let old=superseded(record,storedLocal());if !old.isEmpty{try saveLocal(storedLocal().filter{!old.contains($0.id)})}
   try persist(without([record]));NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
- /// Položky adresáře, které zapsala aplikace: Markdown relací, jejich obrázky, podsložky relací a vygenerované kopie.
- func knownItems(_ directory:URL)->[URL] {
+ /// Soubory, které zapsala aplikace: Markdown relací, jejich obrázky (v kořeni i v podsložkách) a vygenerované kopie.
+ func knownFiles(_ directory:URL)->Set<String> {
   let key=SessionIndex.key(directory),assets=directory.appendingPathComponent("assets")
-  var items:[URL]=[],seen=Set<String>()
-  func add(_ url:URL){let k=SessionIndex.key(url);if !seen.contains(k),fm.fileExists(atPath:url.path){seen.insert(k);items.append(url)}}
-  func top(_ path:String)->String?{guard path.hasPrefix(key+"/") else{return nil};return path.dropFirst(key.count+1).split(separator:"/").first.map(String.init)}
-  let index=SessionIndex.shared
-  for record in index.all where record.base==key || record.file.hasPrefix(key+"/") {
-   guard let first=top(record.file),first != ".trash",first != "assets" else{continue}
-   if SessionIndex.key(URL(fileURLWithPath:record.file).deletingLastPathComponent())==key {
-    add(URL(fileURLWithPath:record.file));for image in record.images{add(assets.appendingPathComponent(image))}
-   } else{add(directory.appendingPathComponent(first,isDirectory:true))}
+  var known=Set<String>()
+  func add(_ url:URL){if fm.fileExists(atPath:url.path){known.insert(SessionIndex.key(url))}}
+  for record in SessionIndex.shared.all where record.file.hasPrefix(key+"/") && !record.file.hasPrefix(key+"/.trash/") {
+   let markdown=URL(fileURLWithPath:record.file),parent=markdown.deletingLastPathComponent()
+   add(markdown)
+   // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
+   let flat=record.flat==true || SessionIndex.key(parent)==key
+   for image in record.images{add((flat ? assets:parent.appendingPathComponent("assets")).appendingPathComponent(image))}
+   if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
   }
-  for path in index.generatedFiles where SessionIndex.key(URL(fileURLWithPath:path).deletingLastPathComponent())==key || SessionIndex.key(URL(fileURLWithPath:path).deletingLastPathComponent())==SessionIndex.key(assets){add(URL(fileURLWithPath:path))}
+  for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}
+  return known
+ }
+ /// Běžné soubory stromu bez skrytých položek (včetně .trash).
+ private func regularFiles(_ url:URL)->[URL] {
+  guard let walker=fm.enumerator(at:url,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles]) else{return []}
+  return walker.compactMap{$0 as? URL}.filter{(try? $0.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile==true}
+ }
+ /// Co jde do Koše: podsložka jen se soubory aplikace celá, jinak jednotlivé známé soubory.
+ func knownItems(_ directory:URL)->[URL] {
+  let known=knownFiles(directory);var items:[URL]=[]
+  for child in ((try? fm.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []).sorted(by:{$0.lastPathComponent<$1.lastPathComponent}) {
+   guard (try? child.resourceValues(forKeys:[.isDirectoryKey]))?.isDirectory==true else{if known.contains(SessionIndex.key(child)){items.append(child)};continue}
+   let inside=regularFiles(child)
+   if child.lastPathComponent != "assets",!inside.isEmpty,inside.allSatisfy({known.contains(SessionIndex.key($0))}){items.append(child)}
+   else{items+=inside.filter{known.contains(SessionIndex.key($0))}}
+  }
   return items
  }
- /// Adresář obsahuje i soubory, které aplikace nezná (i v assets/).
+ /// Adresář (rekurzivně, i assets/ a podsložky) obsahuje soubory, které aplikace nezná.
  func hasUnknownFiles(_ path:String)->Bool {
-  let directory=URL(fileURLWithPath:path,isDirectory:true),assets=directory.appendingPathComponent("assets"),known=Set(knownItems(directory).map{SessionIndex.key($0)})
-  for name in (try? fm.contentsOfDirectory(atPath:path)) ?? [] where !name.hasPrefix(".") {
-   if name=="assets"{if ((try? fm.contentsOfDirectory(atPath:assets.path)) ?? []).contains(where:{!$0.hasPrefix(".") && !known.contains(SessionIndex.key(assets.appendingPathComponent($0)))}){return true};continue}
-   if !known.contains(SessionIndex.key(directory.appendingPathComponent(name))){return true}
-  }
-  return false
+  let directory=URL(fileURLWithPath:path,isDirectory:true),known=knownFiles(directory)
+  return regularFiles(directory).contains{!known.contains(SessionIndex.key($0))}
  }
  /// Celý adresář jde do Koše jen bez cizích souborů; jinak se přesunou jen soubory aplikace.
  private func recycleFolder(_ path:String)throws {
@@ -394,13 +406,13 @@ final class CloudFolders {
     failures+=1
     retryAt=now().addingTimeInterval(max(cloud?.retryAfter ?? 0,min(3600,60*pow(2,Double(min(failures,7)-1)))))
    } else{failures=0;retryAt = .distantPast}
-   if cloud?.status==401{onUnauthorized?()}
+   if cloud?.status==401{onUnauthorized?(c.token)}
   }
  }
  /// Periodická synchronizace počká do tohoto času (Retry-After a backoff).
  private(set) var retryAt=Date.distantPast
  private var failures=0
- var onUnauthorized:(()->Void)?
+ var onUnauthorized:((String)->Void)?
  @MainActor private func notes(_ topic:Topic,state:String?,endpoint:CloudEndpoint,token:String)async throws->[RemoteNoteList.Note] {
   var page=1;var notes:[RemoteNoteList.Note]=[]
   while page<=10000 {

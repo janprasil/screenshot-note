@@ -244,8 +244,9 @@ final class CloudLibrary {
   return c.revoked == true || (Self.date(c.expiresAt).map { $0 <= now() } ?? true)
  }
  /// Po 401 nebo zjištěném odvolání se připojení přepne do stavu nového párování.
- func markRevoked() {
-  guard var c = connection, c.ownerID != nil else { return }
+ func markRevoked(token: String) {
+  // Pozdní 401 požadavku se starým pověřením nesmí označit nové připojení.
+  guard var c = connection, c.ownerID != nil, c.token == token else { return }
   c.revoked = true; try? vault.save(c); connection = c; nextPoll = .distantFuture
   lastError = L("Tento Mac už nemá přístup do cloudu (odvoláno nebo vypršelo). Připoj ho znovu; data ve frontě zůstávají.")
   didChange?()
@@ -292,7 +293,7 @@ final class CloudLibrary {
   let data: Data
   do { data = try await CloudTransport.shared.request(endpoint, "/api/v1/device-pairing", token: current.token) }
   catch {
-   if (error as? CloudFailure)?.status == 401 { markRevoked(); throw error }
+   if (error as? CloudFailure)?.status == 401 { markRevoked(token: current.token); throw error }
    nextPoll = now().addingTimeInterval(max(30,(error as? CloudFailure)?.retryAfter ?? 30));throw error
   }
   let status = try JSONDecoder().decode(Envelope<PairingStatus>.self, from: data).data
@@ -300,7 +301,7 @@ final class CloudLibrary {
   guard status.state == "active" else {
    if status.state == "pending", current.ownerID == nil, let expiry = Self.date(status.expires_at), expiry > now() { return }
    nextPoll = .distantFuture
-   if current.ownerID != nil { markRevoked() }
+   if current.ownerID != nil { markRevoked(token: current.token) }
    throw CloudFailure(L("Párování bylo odmítnuto, odvoláno nebo vypršelo. Připoj zařízení znovu."), status: 403)
   }
   let ownerData = try await CloudTransport.shared.request(endpoint, "/api/v1/me", token: current.token)
@@ -467,7 +468,7 @@ final class CloudLibrary {
    catch let failure as CloudFailure where failure.status==404 || failure.status==405 {
     let reason=L("Úpravu relace se nepodařilo nahrát: server ji nepodporuje nebo relace neexistuje. Úprava zůstala odložená ve frontě.");parkEdit(file,edit,reason:reason);lastError=reason
    }
-   catch let failure as CloudFailure where failure.status==400 || failure.status==413 {
+   catch let failure as CloudFailure where failure.status==400 {
     // Odmítnutý obsah se opakováním nespraví; úprava se odloží a zobrazí.
     let reason=LF("Server odmítl úpravu relace „%@“: %@",edit.fields.title,failure.message);parkEdit(file,edit,reason:reason);clearFailure(key);lastError=reason
    }
@@ -533,12 +534,17 @@ final class CloudLibrary {
  enum FailureKind{case permanent,timeout,transient,stop}
  static func classify(_ error:Error)->FailureKind {
   if let failure=error as? CloudFailure {
-   // Přístup, tarif a rate limit platí pro celou frontu.
-   if [401,402,403,429].contains(failure.status){return .stop}
-   if [400,413,415].contains(failure.status) || failure.code=="invalid_response"{return .permanent}
+   // Přístup, tarif, kvóta účtu (413) a rate limit platí pro celou frontu.
+   if [401,402,403,413,429].contains(failure.status){return .stop}
+   if [400,415].contains(failure.status) || failure.code=="invalid_response"{return .permanent}
    return .transient
   }
-  if let failure=error as? URLError{return failure.code == .timedOut ? .timeout:.stop}
+  if let failure=error as? URLError {
+   if failure.code == .timedOut{return .timeout}
+   // Celou frontu zastaví jen výpadek připojení; ostatní síťové chyby jsou chybou úlohy.
+   let offline:[URLError.Code]=[.notConnectedToInternet,.networkConnectionLost,.cannotConnectToHost,.cannotFindHost,.dnsLookupFailed,.internationalRoamingOff,.dataNotAllowed]
+   return offline.contains(failure.code) ? .stop:.transient
+  }
   return .transient
  }
  /// Zapíše chybu úlohy s odstupem; vrací, zda zastavit frontu a zda úlohu odložit.
@@ -601,10 +607,12 @@ final class CloudLibrary {
     retryAt = max(now().addingTimeInterval(5), Date(timeIntervalSince1970: soonest))
    }
   } catch {
-   if (error as? CloudFailure)?.status == 401 { markRevoked();return }
+   if (error as? CloudFailure)?.status == 401 { markRevoked(token: c.token);return }
    lastError = (error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
-   if let failure = error as? CloudFailure, [402, 413].contains(failure.status) { onQuotaFailure?(failure.message) }
-   let delay = max(5, (error as? CloudFailure)?.retryAfter ?? 15)
+   // Tarif nebo plné úložiště: celá fronta počká déle a pak to zkusí sama znovu.
+   let quota = (error as? CloudFailure).map { [402, 413].contains($0.status) } ?? false
+   if quota, let failure = error as? CloudFailure { onQuotaFailure?(failure.message) }
+   let delay = max(quota ? 900 : 5, (error as? CloudFailure)?.retryAfter ?? 15)
    retryAt = now().addingTimeInterval(delay + Double.random(in:0...2))
   }
  }
@@ -613,7 +621,6 @@ final class CloudLibrary {
   let (stop,parkIt)=noteFailure(error,key:key)
   if stop{return true}
   let message=(error as? CloudFailure)?.message ?? L("Přenos se nezdařil. Lokální fronta zůstává zachovaná pro další pokus.")
-  if let failure=error as? CloudFailure,failure.status==413{onQuotaFailure?(failure.message)}
   if parkIt{let reason=LF("Nahrání relace „%@“ opakovaně selhalo: %@",job.manifest.title,message);try park(directory,job,reason:reason);lastError=reason}
   else{drainFailure=message}
   return false

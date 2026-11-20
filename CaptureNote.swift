@@ -14,15 +14,18 @@ func draftSignature(_ draft:Draft,root:URL)->String {
 }
 let recoveryRoot = draftRoot.deletingLastPathComponent().appendingPathComponent("Draft Recovery", isDirectory: true)
 /// Text ze serveru nesmí v Markdownu vytvořit obrázek ani oddělovač relací.
+/// Escapování je vratné: před `[` za `!` a před `---` na samostatném řádku přibude vždy jedno zpětné lomítko.
 func escapeServerMarkdown(_ text:String)->String {
- text.replacingOccurrences(of:"![",with:"!\\[").replacingOccurrences(of:"(?m)^---[ \\t]*$",with:"\\\\---",options:.regularExpression)
+ text.replacingOccurrences(of:"!(\\\\*)\\[",with:"!$1\\\\[",options:.regularExpression)
+  .replacingOccurrences(of:"(?m)^(\\\\*)(---[ \\t]*)$",with:"$1\\\\$2",options:.regularExpression)
 }
 func unescapeServerMarkdown(_ text:String)->String {
- text.replacingOccurrences(of:"!\\[",with:"![").replacingOccurrences(of:"(?m)^\\\\---",with:"---",options:.regularExpression)
+ text.replacingOccurrences(of:"!(\\\\*)\\\\\\[",with:"!$1[",options:.regularExpression)
+  .replacingOccurrences(of:"(?m)^(\\\\*)\\\\(---[ \\t]*)$",with:"$1$2",options:.regularExpression)
 }
 /// Název ze serveru je vždy jeden řádek a nevloží obrázek.
 func serverTitle(_ title:String)->String {
- title.replacingOccurrences(of:"\r\n",with:" ").replacingOccurrences(of:"\n",with:" ").replacingOccurrences(of:"\r",with:" ").replacingOccurrences(of:"![",with:"!\\[")
+ escapeServerMarkdown(title.replacingOccurrences(of:"\r\n",with:" ").replacingOccurrences(of:"\n",with:" ").replacingOccurrences(of:"\r",with:" "))
 }
 let fm = FileManager.default
 let draftRoot = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Screenshot Note/Draft", isDirectory: true)

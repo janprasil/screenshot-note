@@ -733,6 +733,17 @@ final class TrashedFolderStub: URLProtocol {
  assert(local.isEmpty && recycled.last?.path==localTopic.folder && sent.count==calls)
  print("PASS: web-deleted folder keep/restore-before-answer/delete to macOS Trash, app delete of local vs cloud folder, unsupported server keeps everything")
  print("PASS: folder delete moves only indexed notes/images when the directory holds foreign files, whole directory otherwise")
+ // Starší podsložka relace: známé jsou jen její Markdown a assets/<obrázek>; cizí soubor uvnitř ji nedovolí smazat celou.
+ let tree=base.appendingPathComponent("tree"),sub=tree.appendingPathComponent("Starší"),subMarkdown=sub.appendingPathComponent("Starší.md"),subImage=sub.appendingPathComponent("assets/1.png")
+ try fm.createDirectory(at:subImage.deletingLastPathComponent(),withIntermediateDirectories:true);try "# Starší\n".write(to:subMarkdown,atomically:true,encoding:.utf8);try cloudFixturePNG().write(to:subImage)
+ SessionIndex.shared.put(SessionRecord(id:UUID().uuidString.lowercased(),file:SessionIndex.key(subMarkdown),start:0,length:10,hash:"",heading:"# Starší",title:"Starší",comment:"",template:defaultMarkdownTemplate,images:["1.png"],notes:[:],combined:false,footer:"",files:["Starší.md":"","assets/1.png":""],seen:0,base:SessionIndex.key(tree),folder:UUID().uuidString.lowercased()))
+ assert(!store.hasUnknownFiles(tree.path) && store.knownItems(tree).map{SessionIndex.key($0)}==[SessionIndex.key(sub)])
+ try "cizí".write(to:tree.appendingPathComponent("Kořen.txt"),atomically:true,encoding:.utf8)
+ assert(store.hasUnknownFiles(tree.path) && store.knownItems(tree).map{SessionIndex.key($0)}==[SessionIndex.key(sub)])
+ try "cizí".write(to:sub.appendingPathComponent("Poznámka.txt"),atomically:true,encoding:.utf8);try "cizí".write(to:sub.appendingPathComponent("assets/2.png"),atomically:true,encoding:.utf8)
+ assert(store.hasUnknownFiles(tree.path) && Set(store.knownItems(tree).map{SessionIndex.key($0)})==Set([SessionIndex.key(subMarkdown),SessionIndex.key(subImage)]))
+ try fm.removeItem(at:tree.appendingPathComponent("Kořen.txt"));assert(store.hasUnknownFiles(tree.path))
+ print("PASS: session subfolders count as known only when they hold nothing but the session's Markdown and assets; unknown files are checked recursively")
  // Nahrávání do složky v Koši se odloží s jasnou zprávou.
  let vault=CloudMemoryVault();var conn=cloudFixtureConnection();conn.expiresAt="2099-01-01T00:00:00Z";vault.value=conn;TrashedFolderStub.owner=conn.ownerID!
  let library=CloudLibrary(queue:base.appendingPathComponent("outbox"),vault:vault,endpoint:CloudEndpoint(conn.endpoint)!)
@@ -1220,8 +1231,25 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let dropped=try queue.enqueue(Draft(images:["old.png"],comment:"",title:"Zahodit",topic:topic),root:shots,folders:[topic])
  refuse[dropped.uuidString.lowercased()]=(409,"job_conflict");clock=clock.addingTimeInterval(4000);await queue.sync()
  try queue.discardParked(queue.parkedItems[0]);assert(queue.parkedItems.isEmpty && queue.pendingCount==0)
- assert(CloudLibrary.classify(URLError(.timedOut)) == .timeout && CloudLibrary.classify(CloudFailure("x",status:413)) == .permanent && CloudLibrary.classify(CloudFailure("x",status:503)) == .transient && CloudLibrary.classify(CloudFailure("x",status:429)) == .stop && CloudLibrary.classify(CloudFailure.invalid) == .permanent)
+ assert(CloudLibrary.classify(URLError(.timedOut)) == .timeout && CloudLibrary.classify(CloudFailure("x",status:413)) == .stop && CloudLibrary.classify(CloudFailure("x",status:415)) == .permanent && CloudLibrary.classify(CloudFailure("x",status:503)) == .transient && CloudLibrary.classify(CloudFailure("x",status:429)) == .stop && CloudLibrary.classify(CloudFailure.invalid) == .permanent)
+ // Jen výpadek připojení zastaví celou frontu, ostatní síťové chyby jsou chybou úlohy.
+ assert([URLError.Code.notConnectedToInternet,.networkConnectionLost,.cannotConnectToHost,.cannotFindHost,.dnsLookupFailed,.internationalRoamingOff,.dataNotAllowed].allSatisfy{CloudLibrary.classify(URLError($0)) == .stop})
+ assert(CloudLibrary.classify(URLError(.badServerResponse)) == .transient && CloudLibrary.classify(URLError(.secureConnectionFailed)) == .transient)
  print("PASS: a failing job no longer blocks later jobs, permanent failures back off and park after 3 tries, parked items save locally / retry / discard")
+ // 413 je kvóta účtu: celá fronta stojí s dlouhým odstupem, nic se neodkládá a po uvolnění místa se nahraje samo.
+ let quota=library("quota");var quotaMessages=0;quota.onQuotaFailure={_ in quotaMessages+=1}
+ let quotaFirst=UUID(uuidString:"00000000-0000-4000-8000-000000000001")!,quotaLater=UUID(uuidString:"ffffffff-ffff-4fff-8fff-ffffffffffff")!
+ try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Plno 1",topic:topic),root:shots,sessionID:quotaFirst,folders:[topic])
+ try quota.enqueue(Draft(images:["old.png"],comment:"",title:"Plno 2",topic:topic),root:shots,sessionID:quotaLater,folders:[topic])
+ refuse[quotaFirst.uuidString.lowercased()]=(413,"resource_limit")
+ for _ in 0..<4 {
+  clock=clock.addingTimeInterval(1000);ReviewStub.log=[];await quota.sync()
+  assert(!ReviewStub.log.contains{$0.1.contains(quotaLater.uuidString.lowercased())} && quota.retryAt>=clock.addingTimeInterval(890) && quota.parkedItems.isEmpty && quota.pendingCount==2)
+ }
+ assert(quotaMessages==4)
+ refuse[quotaFirst.uuidString.lowercased()]=nil;clock=clock.addingTimeInterval(1000);await quota.sync()
+ assert(quota.pendingCount==0 && committed[quotaFirst.uuidString.lowercased()] != nil && committed[quotaLater.uuidString.lowercased()] != nil)
+ print("PASS: 413 account quota stops the whole queue with a long backoff, never parks, and uploads automatically once space is freed")
  // Po odpojení nebo pod jiným účtem fronta nezmizí: položky jsou viditelné jako osiřelé a jdou uložit lokálně.
  let waiting=try queue.enqueue(Draft(images:["old.png"],comment:"",title:"Čeká",topic:topic),root:shots,folders:[topic])
  let otherVault=CloudMemoryVault();otherVault.value=cloudFixtureConnection()
@@ -1283,6 +1311,13 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  assert(patches.count==1 && edits.pendingCount==0 && edits.parkedItems.count==1 && edits.parkedItems[0].kind == .edit && edits.parkedItems[0].reason != nil)
  patchStatus=nil;try edits.retryParked(edits.parkedItems[0]);clock=clock.addingTimeInterval(4000);await edits.sync()
  assert(edits.pendingCount==0 && edits.parkedItems.isEmpty && server["title"] as? String=="T3")
+ // 413 u úpravy: úprava zůstává ve frontě, neodkládá se a po odstupu projde.
+ patchStatus=413
+ try edits.enqueueEdit(Draft(images:["old.png"],comment:"C0",title:"T4"),root:shots,sessionID:edit,base:shas,original:Fields(title:"T3",comment:"C0",captions:[""]),revision:server["revision"] as? String)
+ clock=clock.addingTimeInterval(4000);await edits.sync()
+ assert(edits.pendingCount==1 && edits.parkedItems.isEmpty && edits.retryAt>=clock.addingTimeInterval(890))
+ patchStatus=nil;clock=clock.addingTimeInterval(1000);await edits.sync()
+ assert(edits.pendingCount==0 && server["title"] as? String=="T4")
  print("PASS: PATCH without a stored revision fetches it first, merged edits rebase on the server version, 400 parks the edit and Retry sends it")
 
  // 6: druhá offline úprava se položí na čekající, nic se neztratí.
@@ -1317,13 +1352,17 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let calls=ReviewStub.log.count;await revoked.sync();assert(ReviewStub.log.count==calls)
  var expired=cloudFixtureConnection();expired.expiresAt="2001-01-01T00:00:00Z";let expiredVault=CloudMemoryVault();expiredVault.value=expired
  assert(library("expired",expiredVault).needsRepair)
+ // 401 požadavku se starým pověřením neoznačí nové připojení.
+ let swapVault=CloudMemoryVault();swapVault.value=cloudFixtureConnection();let swapped=library("swapped",swapVault)
+ swapped.markRevoked(token:"sn_device_v1_"+String(repeating:"b",count:43));assert(!swapped.needsRepair)
+ swapped.markRevoked(token:swapVault.value!.token);assert(swapped.needsRepair)
  let checkedVault=CloudMemoryVault();checkedVault.value=cloudFixtureConnection();let checked=library("checked",checkedVault)
  do{try await checked.refreshConnection();assertionFailure("Revoked pairing accepted")}catch{}
  assert(checked.needsRepair)
  var unauthorized=false
  for (status,retry) in [(429,300.0),(401,0.0)] {
   let folders=CloudFolders(file:root.appendingPathComponent("folders-\(status).json"),connection:{c},localTopics:{[]},request:{_,_,_,_ in throw CloudFailure("x",status:status,retryAfter:retry)})
-  folders.onUnauthorized={unauthorized=true}
+  folders.onUnauthorized={_ in unauthorized=true}
   await folders.refresh(c);assert(folders.lastError != nil && folders.retryAt>=Date().addingTimeInterval(max(retry,60)-5))
  }
  assert(unauthorized)
@@ -1371,6 +1410,11 @@ private func json(_ data:Data)->[String:Any]{(try? JSONSerialization.jsonObject(
  let plainNote=RemoteNote(id:note.id,title:note.title,comment:hostile,template:legacyDefaultMarkdownTemplate,captions:note.captions,images:note.images)
  let reopened=parsedSession(legacyDefaultMarkdownTemplate,cloudSessionBody(plainNote,images:["ok.png"]))
  assert(reopened.map{unescapeServerMarkdown($0.1)}==hostile && reopened?.2==["ok.png"])
+ // Vratnost i u textu, který už zpětná lomítka nebo mezery za --- obsahuje.
+ for tricky in ["!\\[literal]","\\---","\\\\---\t","--- ","---","a![b](assets/x.png)","![","!\\\\[x](<assets/y.png>)","x\n\\--- \n![[assets/z.png]]","!!["] {
+  let escaped=escapeServerMarkdown(tricky)
+  assert(unescapeServerMarkdown(escaped)==tricky && imageLinkNames(escaped).isEmpty && !escaped.components(separatedBy:"\n").contains{$0.hasPrefix("---")})
+ }
  print("PASS: server text is escaped in Markdown (no injected images, no session separator, single-line title) and unescaped on reopen")
 
  // 12: vygenerovaná kopie nepřepíše ručně upravený soubor.

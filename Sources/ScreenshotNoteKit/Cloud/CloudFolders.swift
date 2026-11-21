@@ -1076,7 +1076,9 @@ final class CloudFolders {
   let dated=sections.map{parseServerDate($0.0.created)}
   let ordered=dated.allSatisfy({$0 != nil}) ? zip(sections,dated).sorted{($0.1!,$0.0.1)<($1.1!,$1.0.1)}.map(\.0):sections.sorted{$0.1<$1.1}
   let marker="\u{0}sessions\u{0}"
-  var skeleton=renderCombinedTemplate(topic.combinedTemplate ?? defaultCombinedTemplate,folderName:topic.name,folderDescription:topic.detail,sessions:marker)
+  // Název a popis složky jsou data ze serveru.
+  let folderText=combinedFolderText(topic)
+  var skeleton=renderCombinedTemplate(topic.combinedTemplate ?? defaultCombinedTemplate,folderName:folderText.0,folderDescription:folderText.1,sessions:marker)
   if !skeleton.contains(marker){skeleton+=marker}
   let split=(skeleton as NSString).range(of:marker),header=(skeleton as NSString).substring(to:split.location),footer=(skeleton as NSString).substring(from:NSMaxRange(split))
   var text=header;var placed:[(SessionRecord,Int,String)]=[]

@@ -43,6 +43,7 @@ if CommandLine.arguments.contains("--cloud-self-test") {
 
 if CommandLine.arguments.contains("--self-test") {
  try cloudUnitTests()
+ try serverMarkdownTests()
  let interactiveUITests=CommandLine.arguments.contains("--interactive-ui-tests")
  _ = NSApplication.shared;NSApp.setActivationPolicy(interactiveUITests ? .accessory:.prohibited)
  AppLanguage.override="cs"

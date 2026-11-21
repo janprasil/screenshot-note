@@ -18,9 +18,10 @@ cp -X "$bin/ScreenshotNote" "$app/Contents/MacOS/ScreenshotNote"
 cp -X "$bin/screenshot-note-bridge" "$app/Contents/MacOS/screenshot-note-bridge"
 xattr -cr "$app"
 # Stabilní podpis drží přístup do Klíčenky napříč buildy; ad-hoc podpis se mění s každým buildem.
+# Hardened runtime brání vložení cizích knihoven; appka žádné výjimky nepotřebuje.
 identity="${SIGNING_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application/ {print $2; exit}')}"
-codesign --force --sign "${identity:--}" "$app/Contents/MacOS/screenshot-note-bridge"
-codesign --force --sign "${identity:--}" "$app"
+codesign --force --options runtime --sign "${identity:--}" "$app/Contents/MacOS/screenshot-note-bridge"
+codesign --force --options runtime --sign "${identity:--}" "$app"
 codesign --verify --strict "$app"
 # Kouřový test produkční binárky: start, lokalizace a odmítnutí starých testovacích přepínačů.
 "$app/Contents/MacOS/ScreenshotNote" --language-check >/dev/null
@@ -30,7 +31,7 @@ smoke=0;"$app/Contents/MacOS/ScreenshotNote" --self-test 2>/dev/null || smoke=$?
 tests_app="$build_root/Screenshot Note Tests.app"
 ditto "$app" "$tests_app"
 cp -X "$bin/ScreenshotNoteTestHost" "$tests_app/Contents/MacOS/ScreenshotNote"
-codesign --force --sign "${identity:--}" "$tests_app"
+codesign --force --options runtime --sign "${identity:--}" "$tests_app"
 tests="$tests_app/Contents/MacOS/ScreenshotNote"
 test_log="$build_root/tests.log"
 (

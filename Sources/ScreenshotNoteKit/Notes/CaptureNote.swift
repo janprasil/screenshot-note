@@ -99,7 +99,8 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    index.batch{if let old{index.remove(old)};index.shift(file:markdown,after:previous.start,by:length-previous.length);index.put(record)}
    if record.combined{tagCombinedFile(markdown)}else{writeSessionTag(markdown,record.id)}
   } else if combinedFile != nil {
-   let (header,footer)=combinedTemplateParts(draft.topic?.combinedTemplate ?? defaultCombinedTemplate,folderName:draft.topic?.name ?? "",folderDescription:draft.topic?.detail ?? "")
+   let folderText=combinedFolderText(draft.topic)
+   let (header,footer)=combinedTemplateParts(draft.topic?.combinedTemplate ?? defaultCombinedTemplate,folderName:folderText.0,folderDescription:folderText.1)
    var data:Data,head:Data
    record.combined=true
    if fm.fileExists(atPath:markdown.path) {
@@ -148,7 +149,7 @@ func renderSessionTemplate(_ template:String,title:String,screenshots:String,tex
 /// Komentáře pro {comments}: text, pod ním autor a místní čas, oddělené prázdným řádkem.
 func renderComments(_ comments:[RemoteNote.Comment])->String {
  let format=DateFormatter();format.locale=Locale(identifier:"en_US_POSIX");format.timeZone = .current;format.dateFormat="yyyy-MM-dd HH:mm"
- return comments.map{$0.body+"\n`"+($0.author_name ?? "")+"` - `"+(parseServerDate($0.created_at).map(format.string) ?? $0.created_at ?? "")+"`"}.joined(separator:"\n\n")
+ return comments.map{$0.body+"\n`"+($0.author_name ?? "").replacingOccurrences(of:"`",with:"'")+"` - `"+(parseServerDate($0.created_at).map(format.string) ?? $0.created_at ?? "")+"`"}.joined(separator:"\n\n")
 }
 func fillPlaceholders(_ template:String,_ values:[String:String])->String {
  let expression=try! NSRegularExpression(pattern:values.keys.map(NSRegularExpression.escapedPattern(for:)).joined(separator:"|"))
@@ -163,5 +164,10 @@ func combinedTemplateParts(_ template:String,folderName:String,folderDescription
  var header=fillPlaceholders(pieces[0],values)
  while header.contains("\n\n\n"){header=header.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
  return (header,fillPlaceholders(pieces[1],values))
+}
+/// Název a popis cloudové složky jsou data ze serveru; lokální složky zůstávají beze změny.
+func combinedFolderText(_ topic:Topic?)->(String,String) {
+ guard let topic else{return ("","")}
+ return topic.cloudFolderID == nil ? (topic.name,topic.detail):(serverTitle(topic.name),escapeServerMarkdown(topic.detail))
 }
 func validCombinedTemplate(_ template:String)->Bool{template.components(separatedBy:"{sessions}").count==2 && template.count<=20000 && !template.contains("\0")}

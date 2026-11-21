@@ -59,10 +59,16 @@ func restrictContextFile(_ url:URL,har:Bool,policy:ContextPolicy)->Bool {
 func contextRedactionCovers(_ bundle:URL,policy:ContextPolicy)->Bool {
  let wanted={(names:[String])in Set(names.map{$0.lowercased()})}
  if policy.redactHeaders.isEmpty && policy.redactQueryParams.isEmpty{return true}
- guard let data=try? Data(contentsOf:bundle),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
+ guard let data=try? boundedData(bundle,max:CloudAttachment.limit),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
        let used=object["policy"] as? [String:Any] else{return false}
  let headers=wanted(used["redactHeaders"] as? [String] ?? []),params=wanted(used["redactQueryParams"] as? [String] ?? [])
  return wanted(policy.redactHeaders).isSubset(of:headers) && wanted(policy.redactQueryParams).isSubset(of:params)
+}
+/// Před odesláním znovu podle aktuální politiky složky; mezitím mohl uživatel kontext vypnout nebo přidat redakci.
+func cloudAttachmentAllowed(_ directory:URL,index:Int,folder:UUID?)->Bool {
+ guard let folder else{return true}
+ let policy=CloudContextPolicies.policy(folder)
+ return policy.enabled && contextRedactionCovers(directory.appendingPathComponent("\(index).context.json"),policy:policy)
 }
 /// Příloha kontextu snímku v cloudu (`.context.json` nebo `.har`), soubor `<index>.<kind>` ve složce jobu.
 struct CloudAttachment: Codable, Equatable {
@@ -621,6 +627,7 @@ final class CloudLibrary {
   // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
   for item in job.attachments ?? [] {
    let file = directory.appendingPathComponent(item.filename)
+   guard cloudAttachmentAllowed(directory, index: item.index, folder: job.manifest.folder_id) else { continue }
    guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= CloudAttachment.limit, sessionFingerprint(data) == item.sha256 else { continue }
    do {
     _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,

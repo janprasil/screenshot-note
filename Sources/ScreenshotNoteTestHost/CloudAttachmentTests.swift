@@ -65,6 +65,13 @@ import AppKit
  let strictJob=try lib.enqueue(Draft(images:["b.png"],comment:"",title:"Strict",topic:topic),root:root,folders:[topic])
  try check(try job(strictJob).1["attachments"]==nil,"context without the folder's custom redaction is not uploaded")
  CloudContextPolicies.set(ContextPolicy(),for:folder)
+ // Odeslání znovu kontroluje aktuální politiku: job z doby bez redakce se po jejím přidání nepošle.
+ try check(cloudAttachmentAllowed(onDir,index:2,folder:folder) && cloudAttachmentAllowed(onDir,index:2,folder:nil),"queued attachment passes the current policy")
+ CloudContextPolicies.set(strict,for:folder)
+ try check(!cloudAttachmentAllowed(onDir,index:2,folder:folder),"redaction added after queueing blocks the upload")
+ var disabled=ContextPolicy();disabled.enabled=false;CloudContextPolicies.set(disabled,for:folder)
+ try check(!cloudAttachmentAllowed(onDir,index:2,folder:folder),"context turned off after queueing blocks the upload")
+ CloudContextPolicies.set(ContextPolicy(),for:folder)
 
  // Stažení: neplatné záznamy se zahodí, relace bez příloh má stejný otisk jako dřív.
  let path="/api/v1/sessions/"+on.uuidString.lowercased()

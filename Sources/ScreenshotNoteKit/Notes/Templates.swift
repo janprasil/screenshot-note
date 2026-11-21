@@ -56,7 +56,7 @@ final class TemplateDefaults {
 }
 
 /// Nápověda proměnných šablon pro editor; jediné místo textu.
-var sessionTemplateHint:String{L("Proměnné: {title}, {screenshots}, {text}, {comments}, {author}")}
+var sessionTemplateHint:String{L("Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}")}
 var fileTemplateHint:String{L("Proměnné: {folderName}, {folderDescription}, {sessions}")}
 /// Počet relací ve složce, kterých se změna šablony týká.
 func indexedSessionCount(_ topic:Topic)->Int {
@@ -70,7 +70,7 @@ func indexedSessionCount(_ topic:Topic)->Int {
  migrateLegacyMarkers(in:topic.destination)
  let index=SessionIndex.shared,folder=SessionIndex.key(topic.destination),template=topic.markdownTemplate ?? defaultMarkdownTemplate
  let records=index.all.filter{!$0.isCloud && SessionIndex.key($0.directory)==folder}
- func body(_ r:SessionRecord)->String{renderSessionTemplate(template,title:r.title,screenshots:screenshotsMarkdown(r.images,r.images.map{r.notes[$0] ?? ""}),text:r.comment)}
+ func body(_ r:SessionRecord)->String{let rendered=screenshotsWithContext(r.images,r.images.map{r.notes[$0] ?? ""},assets:r.directory.appendingPathComponent("assets"));return renderSessionTemplate(template,title:r.title,screenshots:rendered.screenshots,text:r.comment,context:rendered.context)}
  func exact(_ r:SessionRecord,_ ns:NSString)->Bool{r.start>=0 && r.start+r.length<=ns.length && sessionFingerprint(Data(ns.substring(with:NSRange(location:r.start,length:r.length)).utf8))==r.hash}
  var updated=0,edited=0
  index.batch {

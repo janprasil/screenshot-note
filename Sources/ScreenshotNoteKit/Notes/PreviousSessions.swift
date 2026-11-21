@@ -115,7 +115,7 @@ func rewriteImageLinks(_ text:String,order:[String],rename:[String:String]=[:])-
 func parsedSession(_ template:String,_ body:String)->(String,String,[String],[String:String])? {
  guard let values=extractTemplateValues(template,from:body),let screenshotText=values["{screenshots}"] else{return nil}
  let source=screenshotText as NSString,matches=imageLinks(screenshotText);var images:[String]=[],notes:[String:String]=[:]
- for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;notes[name]=source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))).trimmingCharacters(in:.newlines)}
+ for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;notes[name]=stripContextCallout(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))).trimmingCharacters(in:.newlines))}
  return (values["{title}"] ?? "",values["{text}"] ?? "",images,notes)
 }
 private let separator="\n\n---\n\n"
@@ -222,6 +222,9 @@ func checkedPreviousFile(_ target:PreviousSessionTarget)throws->String{
 }
 
 /// Read edited user content using the literals surrounding the template's placeholders.
+// {context} bere jen řádky souhrnu kontextu, aby nespolkl obrázky ani text vedle sebe.
+private let contextSummaryLine="- Screenshot [0-9]+: [^\\n]*\\]\\(<assets/[^>\\n]+\\.context\\.json>\\)"
+private let contextSummaryPattern="((?:"+contextSummaryLine+"(?:\\n"+contextSummaryLine+")*)?)"
 func extractTemplateValues(_ template:String,from body:String)->[String:String]?{
  // Šablona s {comments} se zkusí i ve tvaru bez komentářů (oříznutý konec).
  if template.contains("{comments}") {
@@ -233,9 +236,9 @@ func extractTemplateValues(_ template:String,from body:String)->[String:String]?
 }
 private func extractTemplateValues(_ template:String,from body:String,comments:Bool)->[String:String]?{
  let template=template.replacingOccurrences(of:"\u{0}",with:"{comments}")
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author)\\}")
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context)\\}")
  let source=template as NSString;let matches=expression.matches(in:template,range:NSRange(location:0,length:source.length));var pattern="\\A",offset=0;var keys:[String]=[]
- for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+"(.*?)";keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
+ for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+(source.substring(with:match.range)=="{context}" ? contextSummaryPattern:"(.*?)");keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
  pattern+=NSRegularExpression.escapedPattern(for:source.substring(from:offset));if !template.hasSuffix("\n"){pattern+="\\n"};pattern+="\\z"
  guard let regex=try? NSRegularExpression(pattern:pattern,options:[.dotMatchesLineSeparators]),let match=regex.firstMatch(in:body,range:NSRange(location:0,length:(body as NSString).length)) else{return nil}
  var values:[String:String]=[:];let ns=body as NSString
@@ -247,15 +250,17 @@ private func extractTemplateValues(_ template:String,from body:String,comments:B
 func workingDraft(from session:PreviousSession,topic:Topic,root:URL,queuedEdit:(UUID)->CloudLibrary.CloudEdit.Fields? = {CloudLibrary.shared.queuedEdit($0)})throws->Draft{
  _ = try checkedPreviousFile(session.target)
  let assets=URL(fileURLWithPath:session.target.path).deletingLastPathComponent().appendingPathComponent("assets")
- var target=session.target;target.imported=[:];var images:[String]=[];var notes:[String:String]=[:]
+ var target=session.target;target.imported=[:];var images:[String]=[];var notes:[String:String]=[:];var contexts:[String:String]=[:]
  do{
   for image in session.images{
    let name=UUID().uuidString+".png"
    let destination=root.appendingPathComponent(name);try fm.copyItem(at:assets.appendingPathComponent(image),to:destination);images.append(name)
    try copyAnnotationSidecar(from:assets.appendingPathComponent(image),to:destination);target.imported[name]=image;notes[name]=session.imageNotes[image]
+   if try importAssetContext(assets:assets,image:image,to:destination){contexts[name]=name+".context.json"}
   }
  }catch{for name in images{removeAnnotatedImage(root.appendingPathComponent(name))};throw error}
  var draft=Draft(images:images,comment:session.comment,title:session.title,topic:topic,previous:target,imageNotes:notes)
+ if !contexts.isEmpty{draft.contexts=contexts}
  if topic.cloudFolderID != nil {
   // Cloudová relace: escapovaný text ze serveru se vrátí do původní podoby.
   draft.title=unescapeServerMarkdown(session.title);draft.comment=unescapeServerMarkdown(session.comment);draft.imageNotes=notes.mapValues(unescapeServerMarkdown)

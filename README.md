@@ -33,7 +33,7 @@ Your folder/
     Note title_2.png
 ```
 
-Notes use Obsidian image links. Each configuration can customize the output layout using `{title}`, `{screenshots}` and `{text}` (optionally `{comments}` and, for cloud sessions, `{author}`). `{screenshots}` includes each image followed by its individual note. Filenames remove diacritics and add a numeric suffix on collision. Existing files are not silently overwritten. New installations default to `~/Pictures/Screenshot Note`.
+Notes use Obsidian image links. Each configuration can customize the output layout using `{title}`, `{screenshots}` and `{text}` (optionally `{comments}`, `{context}` and, for cloud sessions, `{author}`). `{screenshots}` includes each image followed by its individual note. With the browser connection on, a capture of a frontmost Chromium browser stores the extension's context next to the image (`assets/<name>.context.json` and `assets/<name>.har`), adds a collapsible callout under the image and fills `{context}` with a per-session summary; cloud folders drop the context for now. Filenames remove diacritics and add a numeric suffix on collision. Existing files are not silently overwritten. New installations default to `~/Pictures/Screenshot Note`.
 
 ### Markdown template
 
@@ -111,6 +111,7 @@ Tests are not part of the app binary. `./build.sh` builds the `ScreenshotNoteTes
 "/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --self-test
 "/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --folder-transfer-self-test
 "/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --bridge-self-test
+"/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --context-self-test
 python3 tests/cloud-rest.py "/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote"
 ```
 

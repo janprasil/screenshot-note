@@ -220,25 +220,33 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let process=Process();process.executableURL=URL(fileURLWithPath:"/usr/sbin/screencapture")
    let mode=full ? (fromOpenComposer ? ["-D",String((pointerDisplay ?? 0)+1)]:["-m"]):["-i"]
    process.arguments=["-x"]+mode+[file.path]
+   // Kontext z prohlížeče v popředí se žádá souběžně se snímkem; bez rozšíření je nil hned.
+   let context=PendingCaptureContext.start()
    capturing=true
    hiddenWindows=NSApp.orderedWindows.filter{$0.isVisible}
    for window in hiddenWindows {window.orderOut(nil)}
    process.terminationHandler={p in DispatchQueue.main.async{
-    self.capturing=false
     guard fm.fileExists(atPath:file.path) else{
+     self.capturing=false
      if active == nil {try? fm.removeItem(at:root)}
      restoreWindows();restoreComposerSize()
      if full && p.terminationStatus != 0{showError(L("Screenshot se nepodařilo pořídit. Zkontroluj oprávnění pro záznam obrazovky."))}
      return
     }
+    // Na kontext se po snímku čeká nejvýš 1 s, pak se pokračuje bez něj.
+    let deliver={(files:CaptureContextFiles?) in
+    self.capturing=false
+    let attached=files.map{(try? $0.write(besides:file)) != nil} ?? false
     if let active=active {
-     guard active.appendCapturedImage(file.lastPathComponent) else{removeAnnotatedImage(file);restoreWindows();restoreComposerSize();return}
+     guard active.appendCapturedImage(file.lastPathComponent,context:attached) else{removeAnnotatedImage(file);restoreWindows();restoreComposerSize();return}
      active.snapshotFields();self.autosave(active.draft,root:root)
      // Keep an open annotation/Markdown editor in front. Otherwise show the new thumbnail.
      if !active.childEditorOpen {active.expandCompact()}
      restoreWindows()
      if !active.childEditorOpen {active.window.makeKeyAndOrderFront(nil)}
-    }else{restoreWindows();let before=draft;draft.images.append(file.lastPathComponent);self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
+    }else{restoreWindows();let before=draft;draft.images.append(file.lastPathComponent);if attached{draft.contexts=(draft.contexts ?? [:]).merging([file.lastPathComponent:file.lastPathComponent+".context.json"]){$1}};self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
+    }
+    if let context{context.wait(upTo:1,deliver)}else{deliver(nil)}
    }}
    // Give WindowServer a frame to remove our panels before taking the screenshot.
    DispatchQueue.main.asyncAfter(deadline:.now()+0.15){
@@ -250,8 +258,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  func persist(_ draft:Draft,root:URL,to storage:URL=draftRoot)throws{
   try fm.createDirectory(at:storage,withIntermediateDirectories:true)
-  let old=try readDraft(storage);var replacement=draft;replacement.images=[];replacement.previous?.imported=[:];replacement.imageNotes=[:];var created:[URL]=[]
-  do {for image in draft.images{let name=UUID().uuidString+".png";let target=storage.appendingPathComponent(name);try fm.copyItem(at:root.appendingPathComponent(image),to:target);created.append(target);try copyAnnotationSidecar(from:root.appendingPathComponent(image),to:target);replacement.images.append(name);replacement.imageNotes?[name]=draft.imageNotes?[image];if let original=draft.previous?.imported[image]{replacement.previous?.imported[name]=original}};try stage(replacement,root:storage)}catch{for url in created{removeAnnotatedImage(url)};throw error}
+  let old=try readDraft(storage);var replacement=draft;replacement.images=[];replacement.previous?.imported=[:];replacement.imageNotes=[:];replacement.contexts=draft.contexts.map{_ in [:]};var created:[URL]=[]
+  do {for image in draft.images{let name=UUID().uuidString+".png";let target=storage.appendingPathComponent(name);try fm.copyItem(at:root.appendingPathComponent(image),to:target);created.append(target);try copyAnnotationSidecar(from:root.appendingPathComponent(image),to:target);replacement.images.append(name);replacement.imageNotes?[name]=draft.imageNotes?[image];if draft.contexts?[image] != nil{replacement.contexts?[name]=name+".context.json"};if let original=draft.previous?.imported[image]{replacement.previous?.imported[name]=original}};try stage(replacement,root:storage)}catch{for url in created{removeAnnotatedImage(url)};throw error}
   for name in old.images{removeAnnotatedImage(storage.appendingPathComponent(name))}
  }
  func present(_ draft:Draft,root:URL,baseline:Draft?=nil){

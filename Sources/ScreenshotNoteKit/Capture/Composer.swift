@@ -234,7 +234,7 @@ final class Composer:NSObject,NSWindowDelegate {
   let chosen=previousChoices[selected-1]
   if chosen.target.id==draft.previous?.id && chosen.target.fingerprint==draft.previous?.fingerprint{return}
   snapshotFields();selectionText[draft.previous?.cacheKey ?? "new"]=(draft.title ?? "",draft.comment)
-  let fresh=draft.images;var notes=draft.imageNotes ?? [:];var reused=Set<String>()
+  let fresh=draft.images;var notes=draft.imageNotes ?? [:];var reused=Set<String>();var contexts=draft.contexts ?? [:]
   var imported:[String:String]=[:];var importedNames:[String]=[]
   do{
    _ = try checkedPreviousFile(chosen.target)
@@ -245,9 +245,10 @@ final class Composer:NSObject,NSWindowDelegate {
      reused.insert(existing);imported[existing]=image;if notes[existing]==nil{notes[existing]=chosen.imageNotes[image]};continue
     }
     let name=UUID().uuidString+".png";let target=root.appendingPathComponent(name);try data.write(to:target,options:.withoutOverwriting);importedNames.append(name);try copyAnnotationSidecar(from:source,to:target);imported[name]=image;notes[name]=chosen.imageNotes[image]
+    if try importAssetContext(assets:assets,image:image,to:target){contexts[name]=name+".context.json"}
    }
   }catch{for name in importedNames{removeAnnotatedImage(root.appendingPathComponent(name))};showError(error.localizedDescription);restorePreviousSelection();return}
-  draft.images=importedNames+fresh;draft.imageNotes=notes;var target=chosen.target;target.imported=imported;draft.previous=target
+  draft.images=importedNames+fresh;draft.imageNotes=notes;draft.contexts=contexts.isEmpty ? nil:contexts;var target=chosen.target;target.imported=imported;draft.previous=target
   let addedComment=draft.comment
   let text=selectionText[target.cacheKey] ?? (chosen.title,chosen.comment+(addedComment.isEmpty || addedComment==chosen.comment ? "":"\n\n"+addedComment))
   draft.title=text.0;draft.comment=text.1;titleField.stringValue=text.0;comment.markdownText=text.1
@@ -310,11 +311,11 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  func expandCompact(){guard isCompact,let content=expandedContent,let frame=expandedFrame else{return};let visible=window.isVisible;let current=window.frame;let destination=NSRect(x:current.maxX-frame.width,y:current.maxY-frame.height,width:frame.width,height:frame.height);window.contentView=content;window.setFrame(destination,display:true,animate:visible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !isExportingDesign);isCompact=false;expandedContent=nil;expandedFrame=nil;if visible{window.makeKeyAndOrderFront(nil)}}
  func reveal(){expandCompact();presentScreenshotPanel(window)}
- @discardableResult func appendCapturedImage(_ filename:String)->Bool{
+ @discardableResult func appendCapturedImage(_ filename:String,context:Bool=false)->Bool{
   guard !draft.images.contains(filename),!filename.contains("/"),fm.fileExists(atPath:root.appendingPathComponent(filename).path) else{return false}
-  draft.images.append(filename);reloadThumbnails();thumbnails.scroll(NSPoint(x:max(0,thumbnails.bounds.width-thumbnailScroll.contentSize.width),y:0));return true
+  draft.images.append(filename);if context{draft.contexts=(draft.contexts ?? [:]).merging([filename:filename+".context.json"]){$1}};reloadThumbnails();thumbnails.scroll(NSPoint(x:max(0,thumbnails.bounds.width-thumbnailScroll.contentSize.width),y:0));return true
  }
- @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
+ @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
  @objc func expandComment(){childEditorOpen=true;defer{childEditorOpen=false};window.makeFirstResponder(nil);let editor=MarkdownEditor();if let value=editor.run(comment.markdownText){comment.markdownText=value};window.makeKeyAndOrderFront(nil)}
  @objc func edit(_ sender:NSButton){
   guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images[sender.tag]

@@ -32,6 +32,12 @@ if CommandLine.arguments.contains("--bridge-self-test") {
  dispatchMain()
 }
 
+if CommandLine.arguments.contains("--context-self-test") {
+ _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
+ Task{@MainActor in do{try await captureContextTests();print("Capture context self-test passed");exit(0)}catch{fputs("Capture context test failed: \(error)\n",stderr);exit(1)}}
+ dispatchMain()
+}
+
 if CommandLine.arguments.contains("--cloud-self-test") {
  _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
  Task { @MainActor in

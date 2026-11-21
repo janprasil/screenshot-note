@@ -10,12 +10,12 @@ python3 tests/localization-keys.py
 cp -R -X Localizations/en.lproj Localizations/cs.lproj "$app/Contents/Resources/"
 cp -X Info.plist "$app/Contents/Info.plist"
 python3 scripts/configure-build.py "$app/Contents/Info.plist"
-task_arch="$(uname -m)"
-# Zdroje appky podle oblastí v Sources/; testy jsou zatím v binárce.
-app_sources=(Sources/ScreenshotNoteKit/**/*.swift Sources/BridgeWire/*.swift Sources/ScreenshotNoteTestHost/*.swift Sources/ScreenshotNote/main.swift)
-xcrun swiftc -target "${task_arch}-apple-macosx13.0" "${app_sources[@]}" -o "$app/Contents/MacOS/ScreenshotNote"
-# Native Messaging helper pro prohlížeče, jen Foundation.
-xcrun swiftc -target "${task_arch}-apple-macosx13.0" -parse-as-library Sources/BridgeWire/BridgeWire.swift Sources/ScreenshotNoteBridge/BridgeHost.swift -o "$app/Contents/MacOS/screenshot-note-bridge"
+# SwiftPM kompiluje appku i Native Messaging helper; .app se skládá zde.
+swift build -c release --product ScreenshotNote
+swift build -c release --product screenshot-note-bridge
+bin="$(swift build -c release --show-bin-path)"
+cp -X "$bin/ScreenshotNote" "$app/Contents/MacOS/ScreenshotNote"
+cp -X "$bin/screenshot-note-bridge" "$app/Contents/MacOS/screenshot-note-bridge"
 xattr -cr "$app"
 # Stabilní podpis drží přístup do Klíčenky napříč buildy; ad-hoc podpis se mění s každým buildem.
 identity="${SIGNING_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application/ {print $2; exit}')}"

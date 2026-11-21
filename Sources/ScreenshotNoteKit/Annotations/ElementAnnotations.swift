@@ -7,9 +7,19 @@ struct ElementInfo:Codable,Equatable {var number:Int;var selector:String;var tag
 /// Prvek mapy v souřadnicích editoru (pixely obrázku, počátek vlevo dole).
 /// Rozpracovaný výběr: anotace, aktuální prvek, prvek pod prvním klikem a zda je popis potvrzený.
 struct ActiveElement {var mark:Int;var target:Int;var origin:Int;var confirmed=false}
-/// Nejvyšší číslo anotace Element, které už popisek obsahuje (relace otevřená znovu).
+/// Číslo a text komentáře anotace: Element má popis v `text`, ostatní tvary v `comment`.
+extension Mark {
+ var noteNumber:Int?{tool == .element ? element?.number:number}
+ var noteText:String{tool == .element ? text:(comment ?? "")}
+ /// Odznak čísla: u čar u počátku, u ostatních tvarů v levém horním rohu.
+ var badgeAnchor:NSPoint{[.pen,.arrow].contains(tool) ? (points.first ?? bounds.origin):NSPoint(x:bounds.minX,y:bounds.maxY)}
+ var noteLabel:String{
+  switch tool{case .pen:L("Kresba");case .arrow:L("Šipka");case .ellipse:L("Kruh");case .rectangle:L("Rámeček");case .text:L("Text");default:"Element"}
+ }
+}
+/// Nejvyšší číslo anotace, které už popisek obsahuje (relace otevřená znovu).
 func highestElementNumber(in caption:String)->Int{
- let expression=try! NSRegularExpression(pattern:"^- \\*\\*\\[(\\d{1,6})\\] Element\\*\\*",options:[.anchorsMatchLines]),ns=caption as NSString
+ let expression=try! NSRegularExpression(pattern:"^- \\*\\*\\[(\\d{1,6})\\] [^*\\n]{1,40}\\*\\*",options:[.anchorsMatchLines]),ns=caption as NSString
  return expression.matches(in:caption,range:NSRange(location:0,length:ns.length)).compactMap{Int(ns.substring(with:$0.range(at:1)))}.max() ?? 0
 }
 struct ElementTarget:Equatable {var index:Int;var selector:String;var tag:String;var name:String;var text:String;var depth:Int;var rect:NSRect}
@@ -54,11 +64,15 @@ private func codeSpan(_ value:String)->String{
  let fence=String(repeating:"`",count:longest+1),pad=value.hasPrefix("`") || value.hasSuffix("`") ? " ":""
  return fence+pad+value+pad+fence
 }
-/// Řádky `- **[1] Element** `selector` „name“: popis` seřazené podle čísla; prvky mimo ořez vynechá.
+/// Řádky `- **[1] Element** `selector` „name“: popis` a `- **[2] Rámeček**: komentář` seřazené podle čísla; anotace mimo ořez vynechá.
 func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->String{
  marks.compactMap{mark->(Int,String)? in
-  guard mark.tool == .element,let info=mark.element else{return nil}
   if let crop,mark.bounds.intersection(crop).isNull{return nil}
+  if mark.tool != .element,let number=mark.number {
+   let note=flattened(mark.comment ?? "",limit:2000);guard !note.isEmpty else{return nil}
+   return (number,"- **[\(number)] \(mark.noteLabel)**: "+note)
+  }
+  guard mark.tool == .element,let info=mark.element else{return nil}
   // Selektor nesmí vypadat jako odkaz na obrázek, jinak by ho znovuotevření relace bralo jako snímek.
   var selector=flattened(info.selector,limit:300);if !imageLinks(selector).isEmpty{selector=flattened(info.tag,limit:40);if !imageLinks(selector).isEmpty{selector=""}}
   let label=flattened(info.name.isEmpty ? info.text:info.name,limit:80),note=flattened(mark.text,limit:2000)
@@ -95,14 +109,15 @@ func adjustContextCapture(_ contextFile:URL,annotations:URL){
 
 extension DrawingView:NSTextFieldDelegate {
  var visibleElements:[ElementTarget]{clippedTargets(elementMap,to:viewport)}
- var nextElementNumber:Int{max(marks.compactMap{$0.element?.number}.max() ?? 0,firstElementNumber-1)+1}
+ var nextElementNumber:Int{max(marks.compactMap{$0.noteNumber}.max() ?? 0,firstElementNumber-1)+1}
  func elementMark(_ target:ElementTarget,number:Int)->Mark{
   var mark=Mark(tool:.element,points:[target.rect.origin,NSPoint(x:target.rect.maxX,y:target.rect.maxY)],color:color,width:max(2,min(thickness,6)),text:"",bold:false,italic:false,underline:false,fontSize:fontSize)
   mark.element=ElementInfo(number:number,selector:target.selector,tag:target.tag,name:target.name,text:target.text);return mark
  }
  func renumberElements(){
-  let order=marks.indices.filter{marks[$0].element != nil}.sorted{marks[$0].element!.number<marks[$1].element!.number}
-  for (number,index) in order.enumerated(){marks[index].element?.number=firstElementNumber+number}
+  // Elementy i komentované tvary sdílejí jednu řadu čísel.
+  let order=marks.indices.filter{marks[$0].noteNumber != nil}.sorted{marks[$0].noteNumber!<marks[$1].noteNumber!}
+  for (number,index) in order.enumerated(){if marks[index].tool == .element{marks[index].element?.number=firstElementNumber+number}else{marks[index].number=firstElementNumber+number}}
  }
  /// Klik vybere nejmenší prvek; opakovaný klik na stejný prvek nebo s ⌥ posune výběr na rodiče.
  func elementClick(_ point:NSPoint,parent:Bool){
@@ -125,9 +140,10 @@ extension DrawingView:NSTextFieldDelegate {
   activeElement=nil;hoverElement=nil;needsDisplay=true;changed?()
  }
  func startElementNote(_ index:Int){
-  guard marks.indices.contains(index),marks[index].tool == .element else{return}
+  guard marks.indices.contains(index) else{return}
   commitElementNote()
-  let field=NSTextField(frame:.zero);field.placeholderString=L("Popis elementu · Enter potvrdí, Esc zruší výběr");field.stringValue=marks[index].text;field.font = .systemFont(ofSize:13);field.focusRingType = .none;field.bezelStyle = .roundedBezel;field.delegate=self
+  let element=marks[index].tool == .element
+  let field=NSTextField(frame:.zero);field.placeholderString=element ? L("Popis elementu · Enter potvrdí, Esc zruší výběr"):L("Komentář k objektu · Enter potvrdí, prázdný ho odebere");field.stringValue=marks[index].noteText;field.font = .systemFont(ofSize:13);field.focusRingType = .none;field.bezelStyle = .roundedBezel;field.delegate=self
   elementField=field;elementFieldIndex=index;addSubview(field);updateElementField();window?.makeFirstResponder(field)
  }
  func updateElementField(){
@@ -153,22 +169,46 @@ extension DrawingView:NSTextFieldDelegate {
   let value=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
   dropElementField()
   if marks.indices.contains(i),marks[i].tool == .element,marks[i].text != value{snapshot();marks[i].text=value;changed?()}
+  // Komentář tvaru dostane další číslo; prázdný číslo odebere a ostatní se přečíslují.
+  else if marks.indices.contains(i),marks[i].tool != .element,(marks[i].comment ?? "") != value {
+   snapshot()
+   if value.isEmpty{marks[i].comment=nil;marks[i].number=nil;renumberElements()}
+   else{if marks[i].number == nil{marks[i].number=nextElementNumber};marks[i].comment=value}
+   changed?()
+  }
   needsDisplay=true
  }
  func control(_ control:NSControl,textView:NSTextView,doCommandBy selector:Selector)->Bool{
   guard control === elementField else{return false}
   if selector==#selector(NSResponder.insertNewline(_:)){confirmElementNote();return true}
-  if selector==#selector(NSResponder.cancelOperation(_:)){cancelActiveElement();return true}
+  if selector==#selector(NSResponder.cancelOperation(_:)){if let i=elementFieldIndex,marks.indices.contains(i),marks[i].tool != .element{dropElementField()}else{cancelActiveElement()};return true}
   return false
  }
  func controlTextDidEndEditing(_ notification:Notification){if (notification.object as AnyObject?) === elementField{commitElementNote()}}
 
+ /// Pravé tlačítko na anotaci: komentář i u textu, kde dvojklik upravuje samotný text.
+ override func menu(for event:NSEvent)->NSMenu?{
+  guard tool == .select,imageRect.contains(convert(event.locationInWindow,from:nil)),let index=hit(point(event)) else{return nil}
+  choose(index);let menu=NSMenu()
+  let edit=NSMenuItem(title:L("Komentář…"),action:#selector(editNoteFromMenu(_:)),keyEquivalent:"");edit.target=self;edit.tag=index;menu.addItem(edit)
+  if marks[index].tool != .element,marks[index].number != nil{let remove=NSMenuItem(title:L("Odebrat komentář"),action:#selector(removeNoteFromMenu(_:)),keyEquivalent:"");remove.target=self;remove.tag=index;menu.addItem(remove)}
+  return menu
+ }
+ @objc func editNoteFromMenu(_ sender:NSMenuItem){startElementNote(sender.tag)}
+ @objc func removeNoteFromMenu(_ sender:NSMenuItem){
+  guard marks.indices.contains(sender.tag),marks[sender.tag].tool != .element else{return}
+  snapshot();marks[sender.tag].comment=nil;marks[sender.tag].number=nil;renumberElements();needsDisplay=true;changed?()
+ }
  /// Přerušovaný obdélník a číselný odznak; obojí zůstává uvnitř ořezu.
  func paintElement(_ mark:Mark){
   let rect=mark.bounds.intersection(viewport);guard !rect.isNull else{return}
   let path=NSBezierPath(rect:rect.insetBy(dx:mark.width/2,dy:mark.width/2));path.lineWidth=mark.width;path.setLineDash([mark.width*3,mark.width*2],count:2,phase:0);mark.color.setStroke();path.stroke()
   guard let number=mark.element?.number else{return}
-  let size=max(24,mark.width*6),x=max(viewport.minX+size/2,min(viewport.maxX-size/2,rect.minX)),y=max(viewport.minY+size/2,min(viewport.maxY-size/2,rect.maxY))
+  paintBadge(number,at:NSPoint(x:rect.minX,y:rect.maxY),mark:mark)
+ }
+ /// Kruhový odznak s číslem anotace, vždy celý uvnitř ořezu.
+ func paintBadge(_ number:Int,at anchor:NSPoint,mark:Mark){
+  let size=max(24,mark.width*6),x=max(viewport.minX+size/2,min(viewport.maxX-size/2,anchor.x)),y=max(viewport.minY+size/2,min(viewport.maxY-size/2,anchor.y))
   let badge=NSRect(x:x-size/2,y:y-size/2,width:size,height:size);mark.color.setFill();NSBezierPath(ovalIn:badge).fill()
   let label="\(number)" as NSString,attributes:[NSAttributedString.Key:Any]=[.font:NSFont.systemFont(ofSize:size*0.55,weight:.bold),.foregroundColor:NSColor.white]
   let text=label.size(withAttributes:attributes);label.draw(at:NSPoint(x:badge.midX-text.width/2,y:badge.midY-text.height/2),withAttributes:attributes)

@@ -92,6 +92,21 @@ import AppKit
  try check(captionWithElements("Popisek",image:image)=="Popisek\n\n"+expected && captionWithElements("",image:image)==expected,"caption with elements")
  try check(captionWithElements("Jen text",image:folder.appendingPathComponent("missing.png"))=="Jen text","caption without annotations")
  try check(captionWithElements("",image:image,pageData:false)=="- **[1] Element**: Klik nic neudělá\n- **[2] Element**\n- **[4] Element**\n- **[5] Element**","cloud caption without page data")
+ // Komentáře tvarů: společná řada čísel s elementy, prázdný komentář číslo odebere, ostatní se přečíslují.
+ let notes=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
+ func shape(_ tool:Tool,_ rect:NSRect)->Mark{Mark(tool:tool,points:[rect.origin,NSPoint(x:rect.maxX,y:rect.maxY)],color:.red,width:3,text:"",bold:false,italic:false,underline:false,fontSize:14)}
+ notes.marks=[shape(.rectangle,NSRect(x:10,y:10,width:100,height:100)),exported(1,NSRect(x:200,y:200,width:50,height:50),selector:"#a"),shape(.arrow,NSRect(x:300,y:300,width:80,height:20))]
+ func comment(_ index:Int,_ text:String){notes.startElementNote(index);notes.elementField?.stringValue=text;notes.commitElementNote()}
+ comment(0,"Špatné zarovnání");comment(2,"Sem klikni")
+ try check(notes.marks[0].number==2 && notes.marks[2].number==3 && notes.marks[1].element?.number==1,"shape comments continue the element numbering")
+ let shapeLines=elementMarkdownLines(notes.marks,crop:nil,pageData:false)
+ try check(shapeLines=="- **[1] Element**\n- **[2] Rámeček**: Špatné zarovnání\n- **[3] Šipka**: Sem klikni","shape comment lines:\n\(shapeLines)")
+ comment(0,"");try check(notes.marks[0].number==nil && notes.marks[0].comment==nil && notes.marks[2].number==2,"empty comment removes the number and renumbers")
+ notes.undoChange();try check(notes.marks[0].number==2 && notes.marks[0].comment=="Špatné zarovnání","comment removal can be undone")
+ let commented=try JSONDecoder().decode(Mark.self,from:JSONEncoder().encode(notes.marks[0]))
+ try check(commented.comment=="Špatné zarovnání" && commented.number==2,"shape comment round trip")
+ try check(highestElementNumber(in:"- **[1] Element**\n- **[7] Rámeček**: x")==7,"highest number includes shape comments")
+ let rendered=notes.png();try check(rendered != nil,"export with comment badges renders")
  // Úprava popisu existujícího elementu jde vrátit.
  let undoCanvas=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
  undoCanvas.marks=[exported(1,button.rect,selector:"#b",note:"Původní")];undoCanvas.startElementNote(0);undoCanvas.elementField?.stringValue="Nový";undoCanvas.commitElementNote()

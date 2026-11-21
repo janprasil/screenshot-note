@@ -137,7 +137,7 @@
 "Vyjmout" = "Vyjmout";
 "Vyplň název konfigurace a absolutní cestu ke složce." = "Vyplň název konfigurace a absolutní cestu ke složce.";
 "Víceřádkový komentář · kliknutím otevřít Markdown editor" = "Víceřádkový komentář · kliknutím otevřít Markdown editor";
-"Výběr · tažením přesunout, dvojklikem upravit text" = "Výběr · tažením přesunout, dvojklikem upravit text";
+"Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář" = "Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář";
 "Výchozí" = "Výchozí";
 "Výchozí konfigurace pro nové relace" = "Výchozí konfigurace pro nové relace";
 "Výchozí · " = "Výchozí · ";
@@ -548,3 +548,9 @@
 "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.";
 "Zapnout" = "Zapnout";
 "Kontext snímku %ld se do cloudu nenahrál: %@" = "Kontext snímku %ld se do cloudu nenahrál: %@";
+"Komentář k objektu · Enter potvrdí, prázdný ho odebere" = "Komentář k objektu · Enter potvrdí, prázdný ho odebere";
+"Kresba" = "Kresba";
+"Kruh" = "Kruh";
+"Text" = "Text";
+"Komentář…" = "Komentář…";
+"Odebrat komentář" = "Odebrat komentář";

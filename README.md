@@ -114,25 +114,25 @@ The checks cover filenames and collisions, export modes, persistent drafts, prev
 
 | File | Responsibility |
 |---|---|
-| `main.swift` | Menu bar app, capture workflow and regression checks |
-| `CaptureNote.swift` | Drafts, filenames and Markdown export |
-| `CloudLibrary.swift` | Device pairing, Keychain, REST uploads, persistent outbox and share links |
-| `CloudSettings.swift` | Native cloud connection and retry controls |
-| `CloudTests.swift` | Offline and loopback native cloud checks |
-| `Interface.swift` | Capture window (incl. Copy link), settings and shortcuts |
-| `SessionPicker.swift` | Configuration/session selection dialogs |
-| `ImageNoteEditor.swift` | Per-image note dialog and Markdown expansion |
-| `CenteredFields.swift` | Centered text fields and window close actions |
-| `Topics.swift` | Configuration model and editor |
-| `PreviousSessions.swift` | Discovery and updates of exported sessions |
-| `Annotations.swift` | Editable image annotations, dirty-close confirmation and crop |
-| `AnnotationGeometry.swift` | Selection handles, object scaling and rotation |
-| `MarkdownEditor.swift` | Comment editor and live text styling |
-| `Design.swift` | Shared visual components and semantic colors |
-| `DesignPreview.swift` | Reproducible native previews with synthetic data |
-| `Localization.swift` | System-language resolution and string lookup |
+| `Sources/ScreenshotNote/main.swift` | Menu bar app, capture workflow and regression checks |
+| `Sources/ScreenshotNoteKit/Notes/CaptureNote.swift` | Drafts, filenames and Markdown export |
+| `Sources/ScreenshotNoteKit/Cloud/CloudLibrary.swift` | Device pairing, Keychain, REST uploads, persistent outbox and share links |
+| `Sources/ScreenshotNoteKit/Settings/CloudSettings.swift` | Native cloud connection and retry controls |
+| `Sources/ScreenshotNoteTestHost/CloudTests.swift` | Offline and loopback native cloud checks |
+| `Sources/ScreenshotNoteKit/Capture/Interface.swift` | Capture window (incl. Copy link), settings and shortcuts |
+| `Sources/ScreenshotNoteKit/Capture/SessionPicker.swift` | Configuration/session selection dialogs |
+| `Sources/ScreenshotNoteKit/Capture/ImageNoteEditor.swift` | Per-image note dialog and Markdown expansion |
+| `Sources/ScreenshotNoteKit/UI/CenteredFields.swift` | Centered text fields and window close actions |
+| `Sources/ScreenshotNoteKit/Notes/Topics.swift` | Configuration model and editor |
+| `Sources/ScreenshotNoteKit/Notes/PreviousSessions.swift` | Discovery and updates of exported sessions |
+| `Sources/ScreenshotNoteKit/Annotations/Annotations.swift` | Editable image annotations, dirty-close confirmation and crop |
+| `Sources/ScreenshotNoteKit/Annotations/AnnotationGeometry.swift` | Selection handles, object scaling and rotation |
+| `Sources/ScreenshotNoteKit/Notes/MarkdownEditor.swift` | Comment editor and live text styling |
+| `Sources/ScreenshotNoteKit/UI/Design.swift` | Shared visual components and semantic colors |
+| `Sources/ScreenshotNoteKit/UI/DesignPreview.swift` | Reproducible native previews with synthetic data |
+| `Sources/ScreenshotNoteKit/Localization/Localization.swift` | System-language resolution and string lookup |
 | `Localizations/` | Native English and Czech translation catalogs |
-| `About.swift` | Branded About window |
+| `Sources/ScreenshotNoteKit/App/About.swift` | Branded About window |
 
 Preferences are stored using macOS UserDefaults. Unfinished drafts and editable annotation data are stored in `~/Library/Application Support/Screenshot Note`. Exported notes and images go only to the configured folders.
 

@@ -90,6 +90,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   func copyContext(_ image:String,as filename:String)throws{
    guard keepContext,draft.contexts?[image] != nil else{return}
    for (source,target) in zip(contextSidecars(root.appendingPathComponent(image)),assetContextFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
+   adjustContextCapture(assetContextFiles(assets,filename)[0],annotations:annotationSidecar(root.appendingPathComponent(image)))
   }
   for (index, image) in draft.images.enumerated() {
    if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){
@@ -102,12 +103,14 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    try fm.copyItem(at:root.appendingPathComponent(image), to:target); copied.append(target)
    try copyContext(image,as:filename);imageNames.append(filename)
   }
-  let rendered=screenshotsWithContext(imageNames,draft.images.map{draft.imageNotes?[$0] ?? ""},assets:assets,without:Set(removedContext.keys))
+  // Anotace Element se vypíšou pod popisek obrázku a zůstanou v něm i pro přerenderování.
+  let captions=draft.images.map{captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0))}
+  let rendered=screenshotsWithContext(imageNames,captions,assets:assets,without:Set(removedContext.keys))
   let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   // Replace placeholders in a single pass so user content containing tokens stays literal.
   let body=renderSessionTemplate(template,title:title,screenshots:rendered.screenshots,text:draft.comment,context:rendered.context)
-  var notes:[String:String]=[:];for (filename,image) in zip(imageNames,draft.images){notes[filename]=draft.imageNotes?[image] ?? ""}
+  var notes:[String:String]=[:];for (filename,caption) in zip(imageNames,captions){notes[filename]=caption}
   // Markdown nenese žádné skryté značky; identitu drží index a xattr.
   let content=body,index=SessionIndex.shared,length=(content as NSString).length
   var hashes:[String:String]=[:]

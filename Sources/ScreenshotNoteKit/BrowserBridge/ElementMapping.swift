@@ -111,7 +111,7 @@ final class WebAreaProbe:@unchecked Sendable {
 }
 
 /// Element z mapy v pixelech obrázku. `index` je pořadí v `elements` bundlu.
-struct MappedElement:Equatable {let index:Int,selector:String,depth:Int,rect:CGRect}
+struct MappedElement:Equatable {let index:Int,selector:String,depth:Int,rect:CGRect;var tag="",name="",text=""}
 
 /// Obsah stránky na obrazovce (globální body) a zoom stránky; nil, když se poloha nedá spolehlivě určit.
 func pageContentFrame(_ geometry:[String:Any],capture:CaptureGeometry)->(frame:CGRect,zoom:CGFloat)?{
@@ -145,14 +145,17 @@ func mapElements(_ context:[String:Any],capture:CaptureGeometry)->[MappedElement
   let screen=CGRect(x:content.frame.minX+(css.minX-offsetX)*scale,y:content.frame.minY+(css.minY-offsetY)*scale,width:css.width*scale,height:css.height*scale).intersection(visible)
   guard !screen.isNull,screen.width>=0.5,screen.height>=0.5 else{continue}
   let pixels=CGRect(x:(screen.minX-capture.rect.minX)*capture.imageScale,y:(screen.minY-capture.rect.minY)*capture.imageScale,width:screen.width*capture.imageScale,height:screen.height*capture.imageScale)
-  result.append(MappedElement(index:index,selector:element["selector"] as? String ?? "",depth:(element["depth"] as? NSNumber)?.intValue ?? 0,rect:pixels))
+  func string(_ key:String)->String{String((element[key] as? String ?? "").prefix(2000))}
+  result.append(MappedElement(index:index,selector:string("selector"),depth:(element["depth"] as? NSNumber)?.intValue ?? 0,rect:pixels,tag:string("tag"),name:string("name"),text:string("text")))
  }
  return result
 }
 /// Mapa elementů ze souboru kontextu; bez uložené geometrie výřezu (výběr oblasti) je prázdná.
-func mapElements(contextFile:URL)->[MappedElement]{
+/// S `imageSize` vrací prázdnou mapu, když obrázek neodpovídá výřezu (např. už oříznutý).
+func mapElements(contextFile:URL,imageSize:CGSize?=nil)->[MappedElement]{
  guard let size=(try? fm.attributesOfItem(atPath:contextFile.path))?[.size] as? NSNumber,size.intValue<=maxContextBytes,let data=try? Data(contentsOf:contextFile),
   let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],let capture=CaptureGeometry(json:object["capture"]) else{return []}
+ if let imageSize,abs(imageSize.width-capture.rect.width*capture.imageScale)>1 || abs(imageSize.height-capture.rect.height*capture.imageScale)>1{return []}
  return mapElements(object,capture:capture)
 }
 

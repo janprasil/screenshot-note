@@ -540,3 +540,5 @@
 "%ld selhaný" = "%ld failed";
 "%ld selhané" = "%ld failed";
 "%ld selhaných" = "%ld failed";
+"Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší" = "Page element · click to select, click again or ⌥ for the parent, Esc to cancel";
+"Popis elementu · Enter potvrdí, Esc zruší výběr" = "Element note · Enter to confirm, Esc to cancel";

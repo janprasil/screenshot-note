@@ -34,7 +34,7 @@ if CommandLine.arguments.contains("--bridge-self-test") {
 
 if CommandLine.arguments.contains("--context-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
- Task{@MainActor in do{try await captureContextTests();try elementMappingTests();print("Capture context self-test passed");exit(0)}catch{fputs("Capture context test failed: \(error)\n",stderr);exit(1)}}
+ Task{@MainActor in do{try await captureContextTests();try elementMappingTests();try elementAnnotationTests();print("Capture context self-test passed");exit(0)}catch{fputs("Capture context test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 

@@ -211,10 +211,12 @@ final class CloudLibrary {
    if withContext, index >= (base?.count ?? 0) {
     for (kind, source) in zip(["context","har"], contextSidecars(root.appendingPathComponent(filename))) where fm.fileExists(atPath: source.path) {
      let staged = staging.appendingPathComponent("\(index + 1)."+(kind=="har" ? "har":"context.json"))
-     try boundedData(source, max: CloudAttachment.limit).write(to: staged, options: .atomic)
+     // Příloha nad limit cloudu se vynechá; snímek se uloží bez ní.
+     guard let raw = try? boundedData(source, max: CloudAttachment.limit) else { continue }
+     try raw.write(to: staged, options: .atomic)
      // Ořez z editoru posune capture stejně jako lokální export, jinak by mapa po stažení neseděla.
      if kind == "context" { adjustContextCapture(staged, annotations: annotationSidecar(root.appendingPathComponent(filename))) }
-     let side = try boundedData(staged, max: CloudAttachment.limit)
+     guard let side = try? boundedData(staged, max: CloudAttachment.limit) else { try? fm.removeItem(at: staged); continue }
      attachments.append(CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side)))
     }
    }
@@ -268,6 +270,8 @@ final class CloudLibrary {
      for kind in ["context","har"] {
       do{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(item.sessionID.uuidString.lowercased())/attachments/\(index)/\(kind)",method:"DELETE",token:c.token)}
       catch let failure as CloudFailure where failure.status==404{}
+      // Bez oprávnění nebo v koši se mazání neopakuje; přílohy zůstanou na serveru.
+      catch let failure as CloudFailure where [400,403,409].contains(failure.status){lastError=failure.message;break}
      }
     }
     try? fm.removeItem(at:file);clearFailure(key)
@@ -565,17 +569,22 @@ final class CloudLibrary {
   }
   guard state.state == "committed", job.manifestDigest == state.manifest_digest,
         Set(state.confirmed_indices) == Set(job.manifest.images.map(\.index)) else { throw CloudFailure.invalid }
-  // Přílohy až po commitu; opakování úlohy je pošle znovu, stejný hash server jen potvrdí.
-  for item in job.attachments ?? [] {
-   let file = directory.appendingPathComponent(item.filename), data = try Data(contentsOf:file,options:.mappedIfSafe)
-   guard data.count == item.bytes, data.count <= CloudAttachment.limit, sessionFingerprint(data) == item.sha256 else { throw CloudFailure.invalid }
-   _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
-    headers:["Content-Type":"application/json","x-bytes":String(item.bytes),"x-sha256":item.sha256])
-  }
   // Doplněná relace přepíše účtenku novým digestem; ID relace zůstává.
   let receipt=committedFile(job.sessionID,c)
   try fm.createDirectory(at:receipt.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(CommittedUpload(owner:owner,origin:c.endpoint,id:job.sessionID,folder:job.manifest.folder_id,digest:state.manifest_digest)).write(to:receipt,options:.atomic)
+  // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
+  for item in job.attachments ?? [] {
+   let file = directory.appendingPathComponent(item.filename)
+   guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= CloudAttachment.limit, sessionFingerprint(data) == item.sha256 else { continue }
+   do {
+    _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
+     headers:["Content-Type":"application/json","x-bytes":String(item.bytes),"x-sha256":item.sha256])
+   } catch let failure as CloudFailure where [400,402,403,404,409,413,415].contains(failure.status) {
+    // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu.
+    NSLog("Cloud context attachment skipped: HTTP %ld %@",failure.status,failure.code ?? "")
+   }
+  }
   try fm.removeItem(at:directory)
  }
  private func park(_ directory:URL,_ job:CloudJob,reason:String)throws {

@@ -54,10 +54,11 @@ import AppKit
  try check(lib.pendingCount==4,"queued removal keeps the sync loop running")
  try fm.removeItem(at:contextSidecars(root.appendingPathComponent("a.png"))[0])
 
- // Limit 16 MiB: větší příloha se do fronty nedostane.
+ // Limit 16 MiB: větší příloha se vynechá, relace se uloží bez ní.
  try Data(count:CloudAttachment.limit+1).write(to:sides[1])
- do{_ = try lib.enqueue(Draft(images:["b.png"],comment:"",title:"Big",topic:topic),root:root,folders:[topic]);throw BrowserBridgeError(message:"oversized attachment queued")}
- catch is BrowserBridgeError{throw BrowserBridgeError(message:"oversized attachment queued")}catch{}
+ let big=try lib.enqueue(Draft(images:["b.png"],comment:"",title:"Big",topic:topic),root:root,folders:[topic])
+ let bigItems=try JSONDecoder().decode([CloudAttachment].self,from:JSONSerialization.data(withJSONObject:try job(big).1["attachments"] ?? []))
+ try check(bigItems.map(\.kind)==["context"],"oversized attachment is skipped, the session still queues")
  try har.write(to:sides[1])
 
  // Stažení: neplatné záznamy se zahodí, relace bez příloh má stejný otisk jako dřív.

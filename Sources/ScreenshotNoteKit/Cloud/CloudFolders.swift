@@ -1176,8 +1176,8 @@ final class CloudFolders {
   for image in note.images {
    for item in image.attachments ?? [] {
     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
-    let data=try await request(endpoint,item.path,token,CloudAttachment.limit+1)
-    guard data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{throw CloudFailure.invalid}
+    // Chybějící nebo poškozená příloha neblokuje stažení relace; snímek zůstane bez kontextu.
+    guard let data=try? await request(endpoint,item.path,token,CloudAttachment.limit+1),data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{continue}
     result[image.index,default:[:]][item.kind]=data
    }
   }
@@ -1190,7 +1190,12 @@ final class CloudFolders {
    for (kind,target) in zip(["context","har"],assetContextFiles(assets,name)) {
     let key=prefix+target.lastPathComponent
     if let data=contexts[position+1]?[kind] {
-     if fileHash(target) != sessionFingerprint(data){try data.write(to:target,options:.atomic);try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:target.path)}
+     if fileHash(target) != sessionFingerprint(data) {
+      // Soubor vzniká rovnou jako 0600 a přejmenuje se na místo.
+      let temporary=assets.appendingPathComponent(".\(UUID().uuidString).tmp")
+      guard fm.createFile(atPath:temporary.path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}
+      guard rename(temporary.path,target.path)==0 else{try? fm.removeItem(at:temporary);throw CloudFailure.invalid}
+     } else{try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:target.path)}
      files[key]=sessionFingerprint(data)
     // Smazat jen přílohu staženou dřív z cloudu; místní soubor zůstává.
     } else if previous[key] != nil,fm.fileExists(atPath:target.path){try fm.removeItem(at:target)}

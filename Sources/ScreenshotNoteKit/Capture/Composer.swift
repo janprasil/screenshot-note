@@ -78,6 +78,8 @@ final class SessionCommentField:CenteredTextField {
 final class Composer:NSObject,NSWindowDelegate {
  var window:NSWindow!;var draft:Draft;let root:URL;var complete:((Int,Draft)->Void)?
  let titleField=CenteredTextField();let comment=SessionCommentField();var buttons:[NSButton]=[]
+ // Souhrn kontextu podle obrázku; čte se jednou, soubor může mít desítky MiB.
+ private var contextSummaries:[String:ContextSummary?]=[:]
  let thumbnails=NSView();let thumbnailScroll=NSScrollView();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
  let laterButton=AppButton();let saveButton=AppButton();var availableTopics:[Topic]=[]
  let copyLinkButton=AppButton();var sharing=false;private var shareFeedback:DispatchWorkItem?
@@ -271,6 +273,7 @@ final class Composer:NSObject,NSWindowDelegate {
    note.expandedTitle=L("Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
    note.frame=NSRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2);note.collapsedFrame=note.frame;button.addHoverAction(note)
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
+   if draft.contexts?[image] != nil{thumbnails.addSubview(contextBadge(image,index:i))}
   }
   if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Přidej výřez nebo snímek celé obrazovky."),NSRect(x:8,y:102,width:720,height:24)))}
   laterButton.isEnabled=true;saveButton.isEnabled = !draft.images.isEmpty;addShotButton.isEnabled=true;updatePreviousAvailability()
@@ -315,7 +318,33 @@ final class Composer:NSObject,NSWindowDelegate {
   guard !draft.images.contains(filename),!filename.contains("/"),fm.fileExists(atPath:root.appendingPathComponent(filename).path) else{return false}
   draft.images.append(filename);if context{draft.contexts=(draft.contexts ?? [:]).merging([filename:filename+".context.json"]){$1}};reloadThumbnails();thumbnails.scroll(NSPoint(x:max(0,thumbnails.bounds.width-thumbnailScroll.contentSize.width),y:0));return true
  }
- @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
+ @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);contextSummaries[name]=nil;removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
+ /// Odznak kontextu z prohlížeče: počet chyb a selhaných requestů, kliknutím nabídka s odebráním.
+ private func contextBadge(_ image:String,index:Int)->AppButton {
+  if contextSummaries[image]==nil{contextSummaries[image]=(try? boundedData(root.appendingPathComponent(image).appendingPathExtension("context.json"),max:maxContextBytes)).flatMap(ContextSummary.init)}
+  let summary=contextSummaries[image] ?? nil
+  let title=summary.map(contextBadgeTitle) ?? L("Kontext")
+  let width=min(188,(title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width+39)
+  let badge=styledButton(title,symbol:"ladybug",frame:NSRect(x:CGFloat(index)*238+4,y:198,width:width,height:24),target:self,action:#selector(showContextMenu(_:)));badge.tag=index
+  badge.toolTip=L("Kontext z prohlížeče")+(summary.map{": "+$0.counts} ?? "");badge.setAccessibilityLabel(badge.toolTip)
+  return badge
+ }
+ @objc func showContextMenu(_ sender:NSButton){
+  guard draft.images.indices.contains(sender.tag) else{return}
+  let menu=NSMenu();menu.autoenablesItems=false
+  if let summary=contextSummaries[draft.images[sender.tag]] ?? nil {
+   let info=NSMenuItem(title:(summary.url.isEmpty ? L("Kontext z prohlížeče"):summary.url),action:nil,keyEquivalent:"");info.isEnabled=false;info.toolTip=summary.counts;menu.addItem(info);menu.addItem(.separator())
+  }
+  let remove=NSMenuItem(title:L("Odebrat kontext"),action:#selector(removeContext(_:)),keyEquivalent:"");remove.target=self;remove.tag=sender.tag;remove.image=NSImage(systemSymbolName:"trash",accessibilityDescription:nil);menu.addItem(remove)
+  menu.popUp(positioning:nil,at:NSPoint(x:0,y:sender.isFlipped ? sender.bounds.maxY+4:sender.bounds.minY-4),in:sender)
+ }
+ @objc func removeContext(_ sender:NSMenuItem){guard draft.images.indices.contains(sender.tag) else{return};removeImageContext(draft.images[sender.tag])}
+ /// Smaže soubory kontextu v pracovní složce; u znovuotevřené relace je finish smaže i z assets/.
+ func removeImageContext(_ image:String){dropImageContext(image);reloadThumbnails()}
+ func dropImageContext(_ image:String){
+  draft.contexts?.removeValue(forKey:image);if draft.contexts?.isEmpty==true{draft.contexts=nil};contextSummaries[image]=nil
+  for url in contextSidecars(root.appendingPathComponent(image)){try? fm.removeItem(at:url)}
+ }
  @objc func expandComment(){childEditorOpen=true;defer{childEditorOpen=false};window.makeFirstResponder(nil);let editor=MarkdownEditor();if let value=editor.run(comment.markdownText){comment.markdownText=value};window.makeKeyAndOrderFront(nil)}
  @objc func edit(_ sender:NSButton){
   guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images[sender.tag]

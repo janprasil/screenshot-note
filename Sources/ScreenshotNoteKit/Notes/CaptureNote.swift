@@ -74,6 +74,8 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
  let markdown = previous.map{URL(fileURLWithPath:$0.path)} ?? combinedFile.map{dest.appendingPathComponent($0)} ?? dest.appendingPathComponent(uniqueName(readable){fm.fileExists(atPath:dest.appendingPathComponent($0+".md").path)}+".md")
  let name = combinedFile == nil ? markdown.deletingPathExtension().lastPathComponent:readable
  var copied:[URL] = []; var imageNames:[String] = []
+ // Kontext odebraný u znovupoužitého obrázku; z assets/ se smaže až po zápisu Markdownu.
+ var removedContext:[String:[URL]]=[:]
  do {
   // Kontext z prohlížeče jde jen do lokálních složek; u cloudových se zahodí (upload přijde později).
   let keepContext=draft.topic?.cloudFolderID == nil
@@ -82,7 +84,10 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    for (source,target) in zip(contextSidecars(root.appendingPathComponent(image)),assetContextFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
   }
   for (index, image) in draft.images.enumerated() {
-   if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){try copyContext(image,as:originalName);imageNames.append(originalName);continue}
+   if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){
+    if draft.contexts?[image]==nil{let stale=assetContextFiles(assets,originalName).filter{fm.fileExists(atPath:$0.path)};if !stale.isEmpty{removedContext[originalName]=stale}}
+    try copyContext(image,as:originalName);imageNames.append(originalName);continue
+   }
    // Název musí být volný pro obrázek i pro oba soubory kontextu.
    let base=uniqueName(name+"-\(index+1)"){candidate in ["png","context.json","har"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}
    let target = assets.appendingPathComponent(base+".png")
@@ -90,7 +95,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    try fm.copyItem(at:root.appendingPathComponent(image), to:target); copied.append(target)
    try copyContext(image,as:filename);imageNames.append(filename)
   }
-  let rendered=screenshotsWithContext(imageNames,draft.images.map{draft.imageNotes?[$0] ?? ""},assets:assets)
+  let rendered=screenshotsWithContext(imageNames,draft.images.map{draft.imageNotes?[$0] ?? ""},assets:assets,without:Set(removedContext.keys))
   let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   // Replace placeholders in a single pass so user content containing tokens stays literal.
@@ -99,7 +104,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   // Markdown nenese žádné skryté značky; identitu drží index a xattr.
   let content=body,index=SessionIndex.shared,length=(content as NSString).length
   var hashes:[String:String]=[:]
-  for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}}}
+  for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));if removedContext[name] != nil{continue};for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}}}
   var record=SessionRecord(id:previous?.session ?? UUID().uuidString,file:SessionIndex.key(markdown),start:0,length:length,hash:sessionFingerprint(Data(content.utf8)),heading:firstLine(content),title:title,comment:draft.comment,template:template,images:imageNames,notes:notes,combined:false,footer:"",files:hashes,seen:0)
   if let previous=previous {
    let original=try checkedPreviousFile(previous)
@@ -128,6 +133,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    index.put(record);tagCombinedFile(markdown)
   } else {try Data(content.utf8).write(to:markdown,options:.withoutOverwriting);index.put(record);writeSessionTag(markdown,record.id)}
  } catch { for file in copied { try? fm.removeItem(at:file) }; throw error }
+ for file in removedContext.values.joined(){try? fm.removeItem(at:file)}
  clearDraft(draft,root:root)
 }
 

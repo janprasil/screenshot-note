@@ -63,19 +63,53 @@ struct CaptureContextFiles {
  }
 }
 
+/// Politika kontextu lokální složky. Rozšíření z ní smí redakci jen přidat; cookies a autorizační hlavičky skryje vždy.
+struct ContextPolicy:Codable,Equatable {
+ var enabled=true,includeConsole=true,includeNetwork=true,includeElements=true,includeElementText=true,includeBodies=false
+ var redactHeaders:[String]=[],redactQueryParams:[String]=[]
+ init(){}
+ // Chybějící nebo poškozené pole dostane výchozí hodnotu, aby nespadl celý seznam složek.
+ init(from decoder:Decoder)throws{
+  let c=try decoder.container(keyedBy:CodingKeys.self),d=ContextPolicy()
+  func flag(_ key:CodingKeys,_ fallback:Bool)->Bool{((try? c.decodeIfPresent(Bool.self,forKey:key)) ?? nil) ?? fallback}
+  func list(_ key:CodingKeys)->[String]{Self.names(((try? c.decodeIfPresent([String].self,forKey:key)) ?? nil) ?? [])}
+  enabled=flag(.enabled,d.enabled);includeConsole=flag(.includeConsole,d.includeConsole);includeNetwork=flag(.includeNetwork,d.includeNetwork)
+  includeElements=flag(.includeElements,d.includeElements);includeElementText=flag(.includeElementText,d.includeElementText);includeBodies=flag(.includeBodies,d.includeBodies)
+  redactHeaders=list(.redactHeaders);redactQueryParams=list(.redactQueryParams)
+ }
+ /// Jména ze seznamu oddělená čárkou nebo řádkem; bez prázdných a duplicit, limity jako v rozšíření.
+ static func names(_ values:[String])->[String]{
+  var result:[String]=[]
+  for value in values.flatMap({$0.components(separatedBy:CharacterSet(charactersIn:",;").union(.newlines))}) {
+   let name=value.trimmingCharacters(in:.whitespaces)
+   if !name.isEmpty,name.count<=200,!name.unicodeScalars.contains(where:{CharacterSet.controlCharacters.contains($0)}),!result.contains(where:{$0.caseInsensitiveCompare(name) == .orderedSame}){result.append(name)}
+   if result.count==200{break}
+  }
+  return result
+ }
+ /// `CapturePolicy` pro capture.request podle PROTOCOL.md.
+ var protocolJSON:[String:Any]{
+  ["includeConsole":includeConsole,"includeNetwork":includeNetwork,"includeBodies":includeNetwork && includeBodies,"includeElements":includeElements,"includeElementText":includeElements && includeElementText,
+   "redactCookies":true,"redactAuthHeaders":true,"redactHeaders":redactHeaders,"redactQueryParams":redactQueryParams]
+ }
+}
+extension Topic {
+ /// Cloudové složky kontext zatím nepřikládají (upload je F6); lokální podle své politiky.
+ var contextAvailable:Bool{cloudFolderID == nil}
+ var effectiveContextPolicy:ContextPolicy?{let policy=contextPolicy ?? ContextPolicy();return contextAvailable && policy.enabled ? policy:nil}
+}
+
 /// Kontext vyžádaný souběžně se screencapture. Bez spojení s rozšířením se nečeká vůbec.
 final class PendingCaptureContext:@unchecked Sendable {
- // Výchozí politika rozšíření; F3 ji napojí na nastavení.
- static var policy:[String:Any]?{nil}
  private let lock=NSLock();private var done=false;private var files:CaptureContextFiles?
  private var waiters:[(CaptureContextFiles?)->Void]=[]
- static func start(bridge:BrowserBridge = .shared)->PendingCaptureContext?{
-  guard bridge.isRunning,!bridge.clients.isEmpty,let target=browserCaptureTarget() else{return nil}
-  return PendingCaptureContext(bridge:bridge,target:target)
+ /// Složka s vypnutým kontextem request vůbec nepošle.
+ static func start(topic:Topic?,bridge:BrowserBridge = .shared,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
+  guard let policy=(topic ?? Topics.initialTopic).effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
+  return PendingCaptureContext(bridge:bridge,target:target,policy:policy.protocolJSON)
  }
  /// Deadline pokrývá i interaktivní výběr výřezu; po snímku se čeká jen `wait(upTo:)`.
- init(bridge:BrowserBridge,target:[String:Any]?,timeout:TimeInterval=30){
-  let policy=Self.policy
+ init(bridge:BrowserBridge,target:[String:Any]?,policy:[String:Any]?=nil,timeout:TimeInterval=30){
   // Víc prohlížečů odpovídá souběžně; platí jen bundle z cílového okna.
   let bounds=target?["windowBounds"] as? [String:CGFloat]
   Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout,accept:{bundleMatches($0,bounds:bounds)});self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
@@ -139,6 +173,11 @@ struct ContextSummary {
   return parts.isEmpty ? L("bez chyb"):parts.joined(separator:", ")
  }
 }
+/// Krátký titulek odznaku v komposeru.
+func contextBadgeTitle(_ summary:ContextSummary)->String {
+ let parts=[summary.errors>0 ? LP(summary.errors,"%ld chyba","%ld chyby","%ld chyb",summary.errors):nil,summary.failedCount>0 ? LP(summary.failedCount,"%ld selhaný","%ld selhané","%ld selhaných",summary.failedCount):nil].compactMap{$0}
+ return parts.isEmpty ? L("Kontext"):parts.joined(separator:" · ")
+}
 /// Odkazy na exportované soubory kontextu.
 func contextLinks(_ base:String,har:Bool)->String{((har ? ["[HAR](<assets/\(base).har>)"]:[])+["["+L("konzole")+"](<assets/\(base).context.json>)"]).joined(separator:" · ")}
 /// Sbalitelný callout pod obrázkem podle PROTOCOL.md.
@@ -170,12 +209,12 @@ func importAssetContext(assets:URL,image:String,to destination:URL)throws->Bool 
  return true
 }
 /// {screenshots} s callouty pod obrázky a {context} podle souborů kontextu v assets/.
-func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL)->(screenshots:String,context:String) {
+func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL,without excluded:Set<String> = [])->(screenshots:String,context:String) {
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
  let blocks=zip(names,captions).enumerated().map{(offset,pair)->String in
   var text=imageMarkdown(pair.0,offset+1)+(pair.1.isEmpty ? "":"\n\n"+pair.1)
   let files=assetContextFiles(assets,pair.0)
-  if let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
+  if !excluded.contains(pair.0),let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=fm.fileExists(atPath:files[1].path)
    text+="\n\n"+contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
   }

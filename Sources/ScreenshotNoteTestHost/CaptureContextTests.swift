@@ -22,9 +22,30 @@ import AppKit
 
  // Bez běžícího bridge se nečeká ani nehledá okno.
  let stopped=BrowserBridge(socketPath:root.appendingPathComponent("none.sock").path)
- let started=Date();try check(PendingCaptureContext.start(bridge:stopped)==nil && Date().timeIntervalSince(started)<0.2,"capture context waits without a bridge")
+ let local=Topic(id:"start",name:"S",detail:"",folder:root.path,combined:false,combinedFile:"N.md")
+ let started=Date();try check(PendingCaptureContext.start(topic:local,bridge:stopped,target:{[:]})==nil && Date().timeIntervalSince(started)<0.2,"capture context waits without a bridge")
  let empty=await withCheckedContinuation{(c:CheckedContinuation<Bool,Never>) in PendingCaptureContext(bridge:stopped,target:nil).wait(upTo:1){c.resume(returning:$0==nil)}}
  try check(empty,"failed request must deliver no context")
+
+ // Politika složky: roundtrip, starý config bez politiky, poškozená pole a mapování na CapturePolicy.
+ var custom=ContextPolicy();custom.includeConsole=false;custom.includeBodies=true;custom.includeElementText=false;custom.redactHeaders=["X-Tenant"];custom.redactQueryParams=["email","phone"]
+ var stored=local;stored.contextPolicy=custom
+ let decoded=try JSONDecoder().decode(Topic.self,from:JSONEncoder().encode(stored))
+ try check(decoded.contextPolicy==custom && decoded==stored,"context policy roundtrip")
+ let legacyTopic=try JSONDecoder().decode([Topic].self,from:Data(#"[{"id":"a","name":"A","detail":"","folder":"/tmp/a","combined":false,"combinedFile":"N.md"}]"#.utf8))[0]
+ try check(legacyTopic.contextPolicy==nil && legacyTopic.effectiveContextPolicy==ContextPolicy(),"old topic without a context policy")
+ let damaged=try JSONDecoder().decode(Topic.self,from:Data(#"{"id":"b","name":"B","detail":"","folder":"/tmp/b","combined":false,"combinedFile":"N.md","contextPolicy":{"enabled":"yes","includeConsole":false,"redactHeaders":[" X-A ","x-a","",7],"future":1}}"#.utf8))
+ try check(damaged.contextPolicy?.enabled==true && damaged.contextPolicy?.includeConsole==false && damaged.contextPolicy?.includeNetwork==true && damaged.contextPolicy?.redactHeaders==[] && damaged.contextPolicy?.redactQueryParams==[],"damaged context policy fields: \(String(describing:damaged.contextPolicy))")
+ try check(ContextPolicy.names([" X-A , x-a;\nX-B,,"])==["X-A","X-B"] && ContextPolicy.names([String(repeating:"h",count:201)]).isEmpty && ContextPolicy.names([(0..<300).map{"h\($0)"}.joined(separator:",")]).count==200,"policy name lists")
+ let wire=custom.protocolJSON
+ try check(wire["includeConsole"] as? Bool==false && wire["includeNetwork"] as? Bool==true && wire["includeBodies"] as? Bool==true && wire["includeElements"] as? Bool==true && wire["includeElementText"] as? Bool==false,"policy flags for the protocol")
+ try check(wire["redactCookies"] as? Bool==true && wire["redactAuthHeaders"] as? Bool==true && wire["redactHeaders"] as? [String]==["X-Tenant"] && wire["redactQueryParams"] as? [String]==["email","phone"] && wire["enabled"]==nil,"policy redaction for the protocol")
+ var dependent=ContextPolicy();dependent.includeNetwork=false;dependent.includeBodies=true;dependent.includeElements=false
+ try check(dependent.protocolJSON["includeBodies"] as? Bool==false && dependent.protocolJSON["includeElementText"] as? Bool==false && JSONSerialization.isValidJSONObject(ContextPolicy().protocolJSON),"dependent policy flags")
+ var disabled=local;disabled.contextPolicy=ContextPolicy();disabled.contextPolicy?.enabled=false
+ var cloudFolder=local;cloudFolder.cloudFolderID=UUID();cloudFolder.contextPolicy=custom
+ try check(disabled.effectiveContextPolicy==nil && cloudFolder.effectiveContextPolicy==nil && stored.effectiveContextPolicy==custom,"disabled and cloud folders send no policy")
+ try check(contextPolicySummary(ContextPolicy())=="Konzole, network, prvky s texty · cookies a tokeny vždy skryté","policy summary: \(contextPolicySummary(ContextPolicy()))")
 
  // Odpověď jiného okna se nepřijme; zoom stránky měřítko geometrie mění.
  func geometry(_ x:Double,_ y:Double,_ w:Double,_ h:Double)->Data{try! JSONSerialization.data(withJSONObject:["page":["geometry":["screenX":x,"screenY":y,"outerWidth":w,"outerHeight":h]]])}
@@ -105,6 +126,21 @@ import AppKit
  let rerendered=try String(contentsOf:markdown,encoding:.utf8)
  try check(rerendered.hasPrefix("# Bug\n\n- Screenshot 1: ") && rerendered.contains("> [!bug]- Kontext: "),"rerender drops context:\n\(rerendered)")
 
+ // Odebrání kontextu bez překreslení náhledů (NSButton v test hostu bez run loopu visí). U znovuotevřeného obrázku smaže po uložení i soubory v assets/.
+ found=try previousSessions(for:topic)
+ let again=root.appendingPathComponent("again");try fm.createDirectory(at:again,withIntermediateDirectories:true)
+ let reopenedAgain=try workingDraft(from:found[0],topic:topic,root:again),firstAgain=reopenedAgain.images[0]
+ let editor=Composer(draft:reopenedAgain,root:again);editor.dropImageContext(firstAgain)
+ try check(editor.draft.contexts?[firstAgain]==nil && editor.draft.images.contains(firstAgain) && !contextSidecars(again.appendingPathComponent(firstAgain)).contains{fm.fileExists(atPath:$0.path)},"remove context from a reopened image")
+ try check(exported.allSatisfy{fm.fileExists(atPath:$0.path)},"asset context removed before saving")
+ try finishSession(editor.draft,root:again)
+ let without=try String(contentsOf:markdown,encoding:.utf8),cleared=SessionIndex.shared.records(file:markdown).first
+ try check(!exported.contains{fm.fileExists(atPath:$0.path)} && !without.contains("[!bug]-") && !without.contains("Screenshot 1: ") && fm.fileExists(atPath:assets.appendingPathComponent(stem+"-1.png").path),"removed context stays in assets:\n\(without)")
+ try check(cleared?.files["assets/\(stem)-1.context.json"]==nil && cleared?.files["assets/\(stem)-1.har"]==nil && cleared?.files["assets/\(stem)-1.png"] != nil,"index keeps hashes of removed context")
+ found=try previousSessions(for:topic)
+ let third=root.appendingPathComponent("third");try fm.createDirectory(at:third,withIntermediateDirectories:true)
+ try check(try workingDraft(from:found[0],topic:topic,root:third).contexts==nil,"reopen brings removed context back")
+
  // Cloudová složka: kontext se zahodí, nic se nenahraje ani neexportuje.
  let cloud=root.appendingPathComponent("cloud");try shot("e.png",5,context:true)
  var cloudTopic=topic;cloudTopic.id="cloud";cloudTopic.folder=cloud.path;cloudTopic.cloudFolderID=UUID()
@@ -118,6 +154,12 @@ import AppKit
  let composer=Composer(draft:Draft(images:["f.png"],comment:"",contexts:["f.png":"f.png.context.json"]),root:work)
  let button=NSButton();button.tag=0;composer.removeImage(button)
  try check(composer.draft.images.isEmpty && composer.draft.contexts?.isEmpty != false && !contextSidecars(work.appendingPathComponent("f.png")).contains{fm.fileExists(atPath:$0.path)},"removing an image keeps its context")
+
+ // Odebrání kontextu u nového obrázku: obrázek zůstane, sidecary zmizí.
+ try Data([8]).write(to:work.appendingPathComponent("h.png"));try files!.write(besides:work.appendingPathComponent("h.png"))
+ let fresh=Composer(draft:Draft(images:["h.png"],comment:"",contexts:["h.png":"h.png.context.json"]),root:work);fresh.dropImageContext("h.png")
+ try check(fresh.draft.images==["h.png"] && fresh.draft.contexts==nil && fm.fileExists(atPath:work.appendingPathComponent("h.png").path) && !contextSidecars(work.appendingPathComponent("h.png")).contains{fm.fileExists(atPath:$0.path)},"remove context from a new image")
+ try check(contextBadgeTitle(ContextSummary(files!.context)!)=="2 chyby · 2 selhané","context badge title")
 
  // Draft ze starší verze bez pole contexts; neplatné mapování se zahodí.
  let old=root.appendingPathComponent("old");try fm.createDirectory(at:old,withIntermediateDirectories:true)

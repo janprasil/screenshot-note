@@ -72,6 +72,19 @@ func browserBridgeTests()async throws{
  _=BridgeWire.writeAll(input,BridgeWire.frame(json(["type":"capture.result","id":reply?["id"] as? String ?? "","bundle":["format":"screenshot-note-context","version":1]])))
  let bundle=await request.value.flatMap{(try? JSONSerialization.jsonObject(with:$0)) as? [String:Any]}
  try check(bundle?["format"] as? String=="screenshot-note-context","bundle not returned")
+ // Politika složky jde v capture.request; složka s vypnutým kontextem nepošle nic.
+ var folder=Topic(id:"bridge",name:"B",detail:"",folder:directory.path,combined:false,combinedFile:"N.md");folder.contextPolicy=ContextPolicy();folder.contextPolicy?.enabled=false
+ try check(PendingCaptureContext.start(topic:folder,bridge:server,target:{["windowTitle":"Test"]})==nil,"disabled context started a request")
+ reply=await blocking{output.next(0.5)}
+ try check(reply==nil,"disabled context sent: \(String(describing:reply))")
+ folder.contextPolicy?.enabled=true;folder.contextPolicy?.includeConsole=false;folder.contextPolicy?.redactHeaders=["X-Tenant"]
+ let pending=PendingCaptureContext.start(topic:folder,bridge:server,target:{["windowTitle":"Test"]})
+ reply=await blocking{output.next()}
+ let sent=reply?["policy"] as? [String:Any]
+ try check(pending != nil && reply?["type"] as? String=="capture.request" && sent?["includeConsole"] as? Bool==false && sent?["redactHeaders"] as? [String]==["X-Tenant"] && sent?["redactCookies"] as? Bool==true,"folder policy not sent: \(String(describing:reply))")
+ _=BridgeWire.writeAll(input,BridgeWire.frame(json(["type":"capture.result","id":reply?["id"] as? String ?? "","bundle":["format":"screenshot-note-context","version":1]])))
+ let delivered=await withCheckedContinuation{(c:CheckedContinuation<Bool,Never>) in DispatchQueue.main.async{pending!.wait(upTo:4){c.resume(returning:$0 != nil)}}}
+ try check(delivered,"policy request result not delivered")
  let refused=Task{await server.request(timeout:4)}
  reply=await blocking{output.next()}
  _=BridgeWire.writeAll(input,BridgeWire.frame(json(["type":"capture.error","id":reply?["id"] as? String ?? "","code":"disabled","message":"off"])))

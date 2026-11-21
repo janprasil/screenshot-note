@@ -221,7 +221,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let mode=full ? (fromOpenComposer ? ["-D",String((pointerDisplay ?? 0)+1)]:["-m"]):["-i"]
    process.arguments=["-x"]+mode+[file.path]
    // Kontext z prohlížeče v popředí se žádá souběžně se snímkem; bez rozšíření je nil hned.
-   let context=PendingCaptureContext.start()
+   let context=PendingCaptureContext.start(topic:draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}} ?? draft.topic)
    capturing=true
    hiddenWindows=NSApp.orderedWindows.filter{$0.isVisible}
    for window in hiddenWindows {window.orderOut(nil)}

@@ -11,6 +11,8 @@ struct Topic:Codable,Equatable {
  var confirmLocalDeletes:Bool? = nil
  // Týmová složka: název týmu a role přihlášeného uživatele z katalogu.
  var cloudOwnerName:String? = nil;var cloudTeam:Bool? = nil;var cloudRole:String? = nil
+ // Kontext z prohlížeče u lokální složky; nil znamená výchozí politiku.
+ var contextPolicy:ContextPolicy? = nil
  /// Zobrazovaný název; týmová složka má vždy předponu týmu.
  var displayName:String{cloudTeam==true ? LF("%@ · %@",cloudOwnerName ?? L("Tým"),name):name}
  /// Přejmenovat, nastavit a smazat týmovou složku smí jen vlastník nebo správce týmu.
@@ -130,6 +132,10 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  // Nová složka dostane kopii výchozích šablon.
  var defaults=TemplateDefaults.shared
  let saveStatus=NSTextField(labelWithString:"")
+ // Politika kontextu z prohlížeče; uloží se spolu se složkou.
+ var contextPolicy=ContextPolicy()
+ let contextToggle=NSButton(checkboxWithTitle:"",target:nil,action:nil)
+ private(set) var contextButton:AppButton!;private(set) var contextCaption:NSTextField!
  let mode=NSPopUpButton()
  func show(present:Bool=true,reload:Bool=true){
   if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
@@ -162,6 +168,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   templateButton=styledButton(L("Šablona Markdownu…"),symbol:"doc.text",frame:NSRect(x:662,y:225,width:210,height:34),target:self,action:#selector(editTemplate));view.addSubview(templateButton)
   askBeforeDelete.title=L("Ptát se před smazáním v cloudu");askBeforeDelete.frame=NSRect(x:272,y:104,width:600,height:22);askBeforeDelete.target=self;askBeforeDelete.action=#selector(toggleAskBeforeDelete);askBeforeDelete.isHidden=true;view.addSubview(askBeforeDelete)
   fileLabel=sectionLabel(L("Společný soubor"),NSRect(x:272,y:196,width:600,height:18));view.addSubview(fileLabel);inputShell(file,frame:NSRect(x:272,y:154,width:600,height:36),in:view)
+  contextToggle.title=L("Přikládat kontext z prohlížeče");contextToggle.frame=NSRect(x:272,y:120,width:380,height:22);contextToggle.target=self;contextToggle.action=#selector(toggleContext);view.addSubview(contextToggle)
+  contextCaption=designLabel("",NSRect(x:292,y:96,width:580,height:18),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
+  contextButton=styledButton(L("Co přikládat…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
   view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
   saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
@@ -191,7 +200,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
-  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate
+  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;contextPolicy=topic.contextPolicy ?? ContextPolicy()
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
  }
@@ -239,11 +248,12 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let managed=editingManaged;if editingID != nil{detail.isEnabled=managed};mode.isEnabled=managed;file.isEnabled=combined && managed;templateButton?.isEnabled=managed;pencil?.isHidden=name.isEditable || !managed
   if let current,current.cloudTeam==true{syncCaption.stringValue=managed ? LF("Složka týmu %@. Relace se nahrávají do cloudu a stahují sem.",current.cloudOwnerName ?? L("Tým")):L("Týmovou složku nastavuje vlastník nebo správce týmu. Tady vybereš jen místní adresář.")}
   askBeforeDelete.isHidden = !(cloud && current?.confirmLocalDeletes==false) || combined;askBeforeDelete.state = .off
+  updateContext()
   syncCaption.frame.origin.x=syncButton.isHidden ? 272:536;syncCaption.frame.size.width=syncButton.isHidden ? 600:336
   syncButton.needsDisplay=true
  }
  @objc func addTopic(){
-  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
+  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;contextPolicy=ContextPolicy();table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
   name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();beginNameEdit()
  }
  @objc func syncSelected(){
@@ -291,6 +301,54 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let alert=NSAlert();alert.messageText=LP(count,"Šablona se použije na %ld relaci ve složce %@.","Šablona se použije na všechny %ld relace ve složce %@.","Šablona se použije na všech %ld relací ve složce %@.",count,original.name)
   alert.addButton(withTitle:L("Použít"));alert.addButton(withTitle:L("Zrušit"))
   return alert.runModal() == .alertFirstButtonReturn
+ }
+ /// Cloudové složky mají kontext vypnutý, dokud nebude upload (F6).
+ func updateContext(){
+  guard let contextButton else{return}
+  let cloud=editingCloud
+  // Bez společného souboru je řádek hned pod režimem ukládání.
+  let top:CGFloat=mode.indexOfSelectedItem==1 ? 126:178
+  contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-24;contextButton.frame.origin.y=top-6
+  contextToggle.state=(!cloud && contextPolicy.enabled) ? .on:.off;contextToggle.isEnabled = !cloud && editingManaged
+  contextButton.isEnabled = !cloud && contextPolicy.enabled && editingManaged
+  contextCaption.stringValue=cloud ? L("Pro cloudové složky připravujeme."):(contextPolicy.enabled ? contextPolicySummary(contextPolicy):L("Snímky z prohlížeče se uloží bez kontextu."))
+  contextToggle.toolTip=cloud ? L("Kontext z prohlížeče se zatím ukládá jen do lokálních složek."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
+ }
+ @objc func toggleContext(){contextPolicy.enabled=contextToggle.state == .on;updateContext()}
+ /// Dialog s tím, co se přikládá a co se skrývá; zamčené položky rozšíření skryje vždy.
+ @objc func editContext(){
+  let policy=contextPolicy,width:CGFloat=420
+  let view=NSView(frame:NSRect(x:0,y:0,width:width,height:322))
+  func box(_ title:String,_ on:Bool,_ y:CGFloat,indent:CGFloat=0,locked:Bool=false)->NSButton{
+   let button=NSButton(checkboxWithTitle:title,target:nil,action:nil);button.state=on ? .on:.off;button.frame=NSRect(x:indent,y:y,width:width-indent-24,height:20);button.isEnabled = !locked;view.addSubview(button)
+   if locked{let lock=NSImageView(frame:NSRect(x:width-18,y:y+2,width:16,height:16));lock.image=NSImage(systemSymbolName:"lock.fill",accessibilityDescription:L("Vždy zapnuto"));lock.contentTintColor=AppPalette.secondary;lock.toolTip=L("Rozšíření to skryje vždy.");view.addSubview(lock)}
+   return button
+  }
+  func field(_ title:String,_ values:[String],_ y:CGFloat,placeholder:String)->NSTextField{
+   view.addSubview(designLabel(title,NSRect(x:0,y:y+26,width:width,height:18),size:12,weight:.medium))
+   let input=NSTextField(string:values.joined(separator:", "));input.placeholderString=placeholder;input.frame=NSRect(x:0,y:y,width:width,height:24);view.addSubview(input);return input
+  }
+  let console=box(L("Konzole a chyby stránky"),policy.includeConsole,300)
+  let network=box(L("Network (requesty a odpovědi)"),policy.includeNetwork,276)
+  let bodies=box(L("Těla requestů a odpovědí"),policy.includeBodies,252,indent:20)
+  bodies.toolTip=L("Jen když je v rozšíření zapnuté nahrávání těl. Citlivé klíče se skryjí.")
+  let elements=box(L("Mapa prvků stránky"),policy.includeElements,228)
+  let texts=box(L("Včetně textů prvků"),policy.includeElementText,204,indent:20)
+  _ = box(L("Skrýt hodnoty cookies"),true,172,locked:true)
+  _ = box(L("Skrýt autorizační hlavičky a tokeny"),true,148,locked:true)
+  let headers=field(L("Další hlavičky ke skrytí"),policy.redactHeaders,76,placeholder:"X-Tenant-Id, X-Customer")
+  let params=field(L("Další citlivé query parametry"),policy.redactQueryParams,8,placeholder:"email, phone")
+  let link=ContextDependency(network:network,bodies:bodies,elements:elements,texts:texts);link.update()
+  for button in [network,elements]{button.target=link;button.action=#selector(ContextDependency.update)}
+  let alert=NSAlert();alert.messageText=L("Kontext z prohlížeče");alert.informativeText=L("Výchozí citlivé hlavičky a parametry se skryjí vždy. Seznamy oddělte čárkou.");alert.accessoryView=view
+  alert.addButton(withTitle:L("Použít"));alert.addButton(withTitle:L("Zrušit"))
+  if alert.runModal() == .alertFirstButtonReturn {
+   contextPolicy.includeConsole=console.state == .on;contextPolicy.includeNetwork=network.state == .on;contextPolicy.includeBodies=bodies.state == .on
+   contextPolicy.includeElements=elements.state == .on;contextPolicy.includeElementText=texts.state == .on
+   contextPolicy.redactHeaders=ContextPolicy.names([headers.stringValue]);contextPolicy.redactQueryParams=ContextPolicy.names([params.stringValue])
+   updateContext()
+  }
+  withExtendedLifetime(link){};window.makeKeyAndOrderFront(nil)
  }
  @objc func toggleAskBeforeDelete(){
   guard askBeforeDelete.state == .on,let topic=list.first(where:{$0.id==editingID}) else{return}
@@ -346,6 +404,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    return
   }
   var topic=Topic(id:editingID ?? UUID().uuidString,name:title,detail:detail.stringValue,folder:path,combined:mode.indexOfSelectedItem==1,combinedFile:filename,markdownTemplate:template,combinedTemplate:fileTemplate)
+  topic.contextPolicy=contextPolicy==ContextPolicy() ? nil:contextPolicy
   let previous=list.first{$0.id==topic.id && $0.cloudFolderID==nil}
   if let previous{topic.formerCloudFolderID=previous.formerCloudFolderID;topic.formerCloudOwnerID=previous.formerCloudOwnerID;topic.formerCloudOrigin=previous.formerCloudOrigin}
   if let previous,!confirmTemplateChange(previous,template:topic.markdownTemplate,file:topic.combinedTemplate){return}
@@ -362,4 +421,17 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   }catch{showError(error.localizedDescription)}
  }
  private func refreshCloud(){Task{@MainActor in await CloudFolders.shared.refresh(CloudLibrary.shared.connection)}}
+}
+
+/// Těla závisí na networku a texty na mapě prvků.
+final class ContextDependency:NSObject {
+ let network:NSButton,bodies:NSButton,elements:NSButton,texts:NSButton
+ init(network:NSButton,bodies:NSButton,elements:NSButton,texts:NSButton){self.network=network;self.bodies=bodies;self.elements=elements;self.texts=texts}
+ @objc func update(){bodies.isEnabled=network.state == .on;texts.isEnabled=elements.state == .on}
+}
+/// Krátký popis politiky pod přepínačem.
+func contextPolicySummary(_ policy:ContextPolicy)->String {
+ let parts=[policy.includeConsole ? L("konzole"):nil,policy.includeNetwork ? (policy.includeBodies ? L("network s těly"):L("network")):nil,policy.includeElements ? (policy.includeElementText ? L("prvky s texty"):L("prvky bez textů")):nil].compactMap{$0}
+ let what=parts.isEmpty ? L("Jen adresa stránky"):parts.joined(separator:", ").prefix(1).uppercased()+parts.joined(separator:", ").dropFirst()
+ return what+" · "+L("cookies a tokeny vždy skryté")
 }

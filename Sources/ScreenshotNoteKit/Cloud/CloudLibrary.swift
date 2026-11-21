@@ -17,6 +17,8 @@ private struct CloudJob: Codable {
  var manifestDigest: String?
  // Texty stažené relace jako základ tříčestného sloučení při doplnění.
  var base: CloudLibrary.CloudEdit.Fields? = nil
+ // Přílohy kontextu nových snímků s hashi; nahrají se po commitu relace.
+ var attachments: [CloudAttachment]? = nil
 }
 private struct UploadStatus: Decodable {
  let session_id: UUID; let state: String; let manifest_digest: String; let confirmed_indices: [Int]
@@ -26,6 +28,41 @@ private struct RemoteSession: Decodable {
  struct Image: Decodable { let index: Int; let path: String }
  let id: UUID; let title: String; let comment: String; let captions: [String]; let images: [Image]; let revision: FlexibleString?
 }
+/// Ořízne přílohu podle politiky složky (JSON přepíše na místě); false = přílohu vynechat.
+func restrictContextFile(_ url:URL,har:Bool,policy:ContextPolicy)->Bool {
+ if har && !policy.includeNetwork{return false}
+ guard let data=try? Data(contentsOf:url),var object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else{return false}
+ // Soubor se přepíše jen při skutečné změně, jinak zůstanou bajty i hash.
+ var changed=false
+ if har {
+  guard !policy.includeBodies,var log=object["log"] as? [String:Any],let entries=log["entries"] as? [[String:Any]] else{return true}
+  log["entries"]=entries.map{entry->[String:Any] in
+   var entry=entry
+   if var request=entry["request"] as? [String:Any],request.removeValue(forKey:"postData") != nil{entry["request"]=request;changed=true}
+   if var response=entry["response"] as? [String:Any],var content=response["content"] as? [String:Any],content.removeValue(forKey:"text") != nil{response["content"]=content;entry["response"]=response;changed=true}
+   return entry
+  }
+  object["log"]=log
+ } else {
+  if !policy.includeConsole,(object["console"] as? [Any])?.isEmpty==false{object["console"]=[];changed=true}
+  if !policy.includeNetwork,var summary=object["summary"] as? [String:Any],(summary["failedRequests"] as? [Any])?.isEmpty==false{summary["failedRequests"]=[];object["summary"]=summary;changed=true}
+  if !policy.includeElements,(object["elements"] as? [Any])?.isEmpty==false{object["elements"]=[];changed=true}
+  else if policy.includeElements,!policy.includeElementText,let elements=object["elements"] as? [[String:Any]],elements.contains(where:{$0["name"] != nil || $0["text"] != nil}){
+   object["elements"]=elements.map{var e=$0;e.removeValue(forKey:"name");e.removeValue(forKey:"text");return e};changed=true
+  }
+ }
+ guard changed else{return true}
+ guard let output=try? JSONSerialization.data(withJSONObject:object) else{return false}
+ return (try? output.write(to:url,options:.atomic)) != nil
+}
+/// Příloha kontextu snímku v cloudu (`.context.json` nebo `.har`), soubor `<index>.<kind>` ve složce jobu.
+struct CloudAttachment: Codable, Equatable {
+ static let limit=16*1024*1024
+ let index: Int; let kind: String; let bytes: Int; let sha256: String
+ var filename: String { "\(index)."+(kind=="har" ? "har":"context.json") }
+}
+/// Odebrání příloh snímků už nahrané relace (Odebrat kontext u znovuotevřené relace).
+private struct AttachmentRemoval: Codable { let endpoint: String; let ownerID: UUID; let sessionID: UUID; var indices: [Int] }
 private struct CommittedUpload:Codable{let owner:UUID;let origin:String;let id:UUID;let folder:UUID?;let digest:String}
 
 final class CloudLibrary {
@@ -70,7 +107,7 @@ final class CloudLibrary {
   lastError = L("Tento Mac už nemá přístup do cloudu (odvoláno nebo vypršelo). Připoj ho znovu; data ve frontě zůstávají.")
   didChange?()
  }
- var pendingCount: Int { jobs().count + edits().count }
+ var pendingCount: Int { jobs().count + edits().count + removals().count }
  var legacyPendingCount: Int { entries().filter { readJob($0) == nil }.count }
  private func readJob(_ directory: URL, strict: Bool = true) -> CloudJob? {
   guard let handle = try? FileHandle(forReadingFrom:directory.appendingPathComponent("job.json")) else { return nil }
@@ -171,7 +208,11 @@ final class CloudLibrary {
   guard base != nil || draft.topic?.cloudFolderID != nil else { throw CloudFailure(L("Do cloudu lze ukládat jen do cloudové složky. Vyber cloudovou složku; poznámka zůstává uložená lokálně."),code:"folder_required") }
   if base == nil && isCommitted(id,folder:draft.topic?.cloudFolderID){return id}
   if let base { guard draft.images.count > base.count else { throw CloudFailure(L("Přidej do cloudové relace alespoň jeden nový snímek.")) } }
-  let captions = draft.images.map { draft.imageNotes?[$0] ?? "" }
+  // Selektor a texty prvků jdou do cloudu jen se zapnutým kontextem složky.
+  let policy = draft.topic?.effectiveContextPolicy, withContext = policy != nil
+  // Selektor a texty prvků jen tehdy, když je cílová složka povoluje.
+  let pageData = policy.map{$0.includeElements && $0.includeElementText} ?? false
+  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   let heading = title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot", config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),
@@ -179,7 +220,7 @@ final class CloudLibrary {
   let staging = queue.appendingPathComponent("." + id.uuidString, isDirectory: true)
   try? fm.removeItem(at: staging)
   try fm.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]); defer { try? fm.removeItem(at: staging) }
-  var images: [CloudManifest.Image] = []; var bytes = 0
+  var images: [CloudManifest.Image] = []; var bytes = 0; var attachments: [CloudAttachment] = []
   for (index, filename) in draft.images.enumerated() {
    guard URL(fileURLWithPath: filename).lastPathComponent == filename, !filename.contains("/") else { throw CloudFailure.invalid }
    let data: Data
@@ -195,6 +236,21 @@ final class CloudLibrary {
    guard bytes <= 100000000 else { throw CloudFailure(L("Relace překračuje limit 100 MB pro jeden cloudový přenos.")) }
    try data.write(to: staging.appendingPathComponent("\(index + 1).png"), options: .atomic)
    images.append(.init(index:index + 1,bytes:data.count,sha256:sessionFingerprint(data)))
+   // Původní snímky už přílohy na serveru mají; nové je přibalí podle politiky složky.
+   if withContext, index >= (base?.count ?? 0) {
+    for (kind, source) in zip(["context","har"], contextSidecars(root.appendingPathComponent(filename))) where fm.fileExists(atPath: source.path) {
+     let staged = staging.appendingPathComponent("\(index + 1)."+(kind=="har" ? "har":"context.json"))
+     // Příloha nad limit cloudu se vynechá; snímek se uloží bez ní.
+     guard let raw = try? boundedData(source, max: CloudAttachment.limit) else { continue }
+     try raw.write(to: staged, options: .atomic)
+     // Ořez z editoru posune capture stejně jako lokální export, jinak by mapa po stažení neseděla.
+     if kind == "context" { adjustContextCapture(staged, annotations: annotationSidecar(root.appendingPathComponent(filename))) }
+     // Kontext pořízený pro jinou složku se ořízne podle politiky cílové cloudové složky.
+     if let policy, !restrictContextFile(staged, har: kind == "har", policy: policy) { try? fm.removeItem(at: staged); continue }
+     guard let side = try? boundedData(staged, max: CloudAttachment.limit) else { try? fm.removeItem(at: staged); continue }
+     attachments.append(CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side)))
+    }
+   }
   }
   if let folder=draft.topic?.cloudFolderID {
    // Osobní nebo týmová složka aktivního účtu; owner relace odvodí server z folder_id.
@@ -203,7 +259,7 @@ final class CloudLibrary {
   }
   // Doplnění nese revizi stažené relace, aby nepřepsalo úpravy z webu.
   let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID,base_images:base?.count,revision:base != nil && CloudManifest.validRevision(revision) ? revision:nil)
-  let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest,base:base != nil && original?.captions.count==base?.count ? original:nil)
+  let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest,base:base != nil && original?.captions.count==base?.count ? original:nil,attachments:attachments.isEmpty ? nil:attachments)
   let final=queue.appendingPathComponent(id.uuidString.lowercased(),isDirectory:true)
   if fm.fileExists(atPath:final.path) {
    guard let existing=readJob(final),existing.ownerID==owner,existing.endpoint==c.endpoint,existing.manifest==manifest else{
@@ -212,7 +268,51 @@ final class CloudLibrary {
    return id
   }
   try JSONEncoder().encode(job).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
-  try fm.moveItem(at:staging,to:final); didChange?();return id
+  try fm.moveItem(at:staging,to:final)
+  // Mazání příloh až po úspěšném zařazení doplnění.
+  if base != nil { try enqueueAttachmentRemoval(draft, sessionID:id) }
+  didChange?();return id
+ }
+ private var removalsDirectory:URL{queue.appendingPathComponent(".attachment-removals",isDirectory:true)}
+ /// Snímky znovuotevřené relace s odebraným kontextem; přílohy se na serveru smažou.
+ static func removedAttachmentIndices(_ draft:Draft)->[Int] {
+  guard let removed=draft.removedContexts,!removed.isEmpty,let imported=draft.previous?.imported else{return []}
+  return draft.images.enumerated().compactMap{imported[$0.element].map(removed.contains) == true ? $0.offset+1:nil}
+ }
+ func enqueueAttachmentRemoval(_ draft:Draft,sessionID:UUID)throws {
+  let indices=Self.removedAttachmentIndices(draft);guard !indices.isEmpty,let c=connection,let owner=c.ownerID else{return}
+  let file=removalsDirectory.appendingPathComponent(sessionID.uuidString.lowercased()+".json")
+  let pending=(try? Data(contentsOf:file)).flatMap{try? JSONDecoder().decode(AttachmentRemoval.self,from:$0)}.flatMap{$0.endpoint==c.endpoint && $0.ownerID==owner ? $0:nil}
+  let all=Array(Set((pending?.indices ?? [])+indices)).sorted()
+  try fm.createDirectory(at:removalsDirectory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+  try JSONEncoder().encode(AttachmentRemoval(endpoint:c.endpoint,ownerID:owner,sessionID:sessionID,indices:all)).write(to:file,options:.atomic);didChange?()
+ }
+ private func removals()->[(URL,AttachmentRemoval)] {
+  guard let c=connection else{return []}
+  return ((try? fm.contentsOfDirectory(at:removalsDirectory,includingPropertiesForKeys:nil)) ?? []).filter{$0.pathExtension=="json"}.compactMap{file in
+   (try? Data(contentsOf:file)).flatMap{try? JSONDecoder().decode(AttachmentRemoval.self,from:$0)}.flatMap{$0.endpoint==c.endpoint && $0.ownerID==c.ownerID ? (file,$0):nil}
+  }
+ }
+ /// Mazání příloh čeká na nahrání doplnění stejné relace; chybějící relace (404) frontu uzavře.
+ @MainActor private func sendRemovals(endpoint:CloudEndpoint,connection c:CloudConnection)async throws {
+  for (file,item) in removals() {
+   if jobs().contains(where:{$0.1.sessionID==item.sessionID}){continue}
+   let key="removal:"+item.sessionID.uuidString.lowercased();if deferred(key){continue}
+   do {
+    for index in item.indices where (1...30).contains(index) {
+     for kind in ["context","har"] {
+      do{_ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(item.sessionID.uuidString.lowercased())/attachments/\(index)/\(kind)",method:"DELETE",token:c.token)}
+      catch let failure as CloudFailure where failure.status==404{}
+      // Bez oprávnění nebo v koši se mazání neopakuje; přílohy zůstanou na serveru.
+      catch let failure as CloudFailure where [400,403,409].contains(failure.status){lastError=failure.message;break}
+     }
+    }
+    try? fm.removeItem(at:file);clearFailure(key)
+   } catch {
+    let (stop,parkIt)=noteFailure(error,key:key);if stop{throw error}
+    if parkIt{try? fm.removeItem(at:file);lastError=(error as? CloudFailure)?.message ?? error.localizedDescription}
+   }
+  }
  }
  /// Rozpracované doplnění relace, které ještě není potvrzené serverem.
  func hasPending(_ id:UUID)->Bool{jobs().contains{$0.1.sessionID==id} || edits().contains{$0.1.sessionID==id}}
@@ -251,6 +351,8 @@ final class CloudLibrary {
   let fields=Self.editFields(draft)
   func valid(_ s:String,_ points:Int,_ bytes:Int)->Bool{!s.contains("\0") && s.unicodeScalars.count<=points && s.utf8.count<=bytes}
   guard valid(fields.title,500,2000),valid(fields.comment,100000,100000),fields.captions.allSatisfy({valid($0,20000,20000)}),fields.captions.reduce(0,{$0+$1.utf8.count})<=300000 else{throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná."))}
+  // Mazání příloh až po ověření textu, aby neplatné uložení nic nesmazalo.
+  try enqueueAttachmentRemoval(draft,sessionID:sessionID)
   let file=editsDirectory.appendingPathComponent(sessionID.uuidString.lowercased()+".json")
   // Dřívější čekající úprava si drží původní základ pro sloučení.
   let pending=readEdit(file).flatMap{$0.endpoint==c.endpoint && $0.ownerID==owner ? $0:nil}
@@ -448,6 +550,7 @@ final class CloudLibrary {
     }
    }
    try await sendEdits(endpoint:endpoint,token:c.token)
+   try await sendRemovals(endpoint:endpoint,connection:c)
    if let parked = lastError { throw CloudFailure(parked) }
    if let failure = drainFailure {
     // Úlohy s chybou čekají každá na svůj odstup; další průchod začne nejdřív u té nejbližší.
@@ -504,6 +607,18 @@ final class CloudLibrary {
   let receipt=committedFile(job.sessionID,c)
   try fm.createDirectory(at:receipt.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(CommittedUpload(owner:owner,origin:c.endpoint,id:job.sessionID,folder:job.manifest.folder_id,digest:state.manifest_digest)).write(to:receipt,options:.atomic)
+  // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
+  for item in job.attachments ?? [] {
+   let file = directory.appendingPathComponent(item.filename)
+   guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= CloudAttachment.limit, sessionFingerprint(data) == item.sha256 else { continue }
+   do {
+    _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
+     headers:["Content-Type":"application/json","x-bytes":String(item.bytes),"x-sha256":item.sha256])
+   } catch let failure as CloudFailure where [400,402,403,404,413,415].contains(failure.status) || failure.code=="session_trashed" {
+    // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu, uživatel dostane hlášku.
+    lastError=LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message)
+   }
+  }
   try fm.removeItem(at:directory)
  }
  private func park(_ directory:URL,_ job:CloudJob,reason:String)throws {
@@ -543,15 +658,21 @@ final class CloudLibrary {
    try data.write(to:staging.appendingPathComponent("\(image.index).png"),options:.atomic)
    images.append(.init(index:image.index,bytes:data.count,sha256:sessionFingerprint(data)))
   }
+  var attachments:[CloudAttachment]=[]
   for image in added {
    let index=images.count+1
    try fm.copyItem(at:directory.appendingPathComponent("\(image.index).png"),to:staging.appendingPathComponent("\(index).png"))
    images.append(.init(index:index,bytes:image.bytes,sha256:image.sha256))
+   // Přílohy jdou s novým indexem snímku.
+   for item in (job.attachments ?? []) where item.index==image.index {
+    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256)
+    try fm.copyItem(at:directory.appendingPathComponent(item.filename),to:staging.appendingPathComponent(moved.filename));attachments.append(moved)
+   }
   }
   let revision=remote.revision.map(\.value).flatMap{CloudManifest.validRevision($0) ? $0:nil}
   let manifest=CloudManifest(title:merged.title,comment:merged.comment,configuration:job.manifest.configuration,template:job.manifest.template,captions:merged.captions+addedCaptions,images:images,folder_id:job.manifest.folder_id,base_images:remote.images.count,revision:revision)
   guard manifest.valid else { throw CloudFailure(L("Relace by po doplnění překročila cloudový limit 30 snímků.")) }
-  try JSONEncoder().encode(CloudJob(schemaVersion:1,endpoint:job.endpoint,ownerID:job.ownerID,sessionID:job.sessionID,manifest:manifest,base:theirs)).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
+  try JSONEncoder().encode(CloudJob(schemaVersion:1,endpoint:job.endpoint,ownerID:job.ownerID,sessionID:job.sessionID,manifest:manifest,base:theirs,attachments:attachments.isEmpty ? nil:attachments)).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
   _ = try fm.replaceItemAt(directory,withItemAt:staging)
  }
  // Odložené a osiřelé položky fronty: vždy viditelné s možností Zkusit znovu / Uložit lokálně / Zahodit.

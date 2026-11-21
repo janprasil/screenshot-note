@@ -35,7 +35,7 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                  newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
  func request(_ endpoint: CloudEndpoint, _ path: String, method: String = "GET", token: String? = nil,
-              body: Data? = nil, file: URL? = nil, limit:Int=524288) async throws -> Data {
+              body: Data? = nil, file: URL? = nil, limit:Int=524288, headers:[String:String]=[:]) async throws -> Data {
   guard path.hasPrefix("/api/v1/"), !path.contains("#"), !path.contains(".."), (1...Self.imageLimit).contains(limit) else { throw CloudFailure.invalid }
   let bulk = file != nil || limit >= Self.imageLimit
   var req = URLRequest(url: endpoint.path(path)); req.httpMethod = method; req.timeoutInterval = bulk ? 70 : limit > 524288 ? 30 : 15
@@ -45,6 +45,8 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
    let bytes = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
    req.setValue(String(bytes), forHTTPHeaderField: "Content-Length"); req.setValue("image/png", forHTTPHeaderField: "Content-Type")
   } else if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+  // Přílohy kontextu přepíšou typ obsahu a přidají délku a hash.
+  for (name, value) in headers { req.setValue(value, forHTTPHeaderField: name) }
   let (stream, response) = try await (bulk ? transferSession : session).bytes(for: req)
   guard let http = response as? HTTPURLResponse else { throw CloudFailure.invalid }
   var data = Data()

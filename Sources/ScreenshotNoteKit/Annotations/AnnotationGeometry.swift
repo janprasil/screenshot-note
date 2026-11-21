@@ -81,7 +81,7 @@ extension DrawingView {
   let r=mark.bounds.insetBy(dx:-4/scale,dy:-4/scale)
   return [NSPoint(x:r.minX,y:r.minY),NSPoint(x:r.maxX,y:r.minY),NSPoint(x:r.maxX,y:r.maxY),NSPoint(x:r.minX,y:r.maxY)].map{displayPoint(mark.rotatedPoint($0))}
  }
- func resizeCornerIndices(_ mark:Mark)->[Int]{mark.tool == .text ? [1]:[0,1,2,3]}
+ func resizeCornerIndices(_ mark:Mark)->[Int]{mark.tool == .element ? []:(mark.tool == .text ? [1]:[0,1,2,3])}
  func rotationHandle(_ mark:Mark)->NSPoint{
   let p=displayPoint(mark.rotatedPoint(NSPoint(x:mark.bounds.midX,y:mark.bounds.maxY+28/scale)))
   return NSPoint(x:max(9,min(bounds.maxX-9,p.x)),y:max(9,min(bounds.maxY-9,p.y)))
@@ -89,14 +89,14 @@ extension DrawingView {
  func drawSelectionHandles(){
   guard let i=selected,marks.indices.contains(i) else{return}
   let mark=marks[i],corners=selectionCorners(mark);let path=NSBezierPath();path.move(to:corners[0]);for p in corners.dropFirst(){path.line(to:p)};path.close();path.lineWidth=1.25;path.setLineDash([5,3],count:2,phase:0);AppPalette.accent.setStroke();path.stroke()
-  guard editingIndex == nil else{return}
+  guard editingIndex == nil,mark.tool != .element else{return}
   for corner in resizeCornerIndices(mark){let p=corners[corner];let rect=NSRect(x:p.x-4,y:p.y-4,width:8,height:8);AppPalette.paper.setFill();NSBezierPath(roundedRect:rect,xRadius:2,yRadius:2).fill();let outline=NSBezierPath(roundedRect:rect,xRadius:2,yRadius:2);outline.lineWidth=1.25;AppPalette.accent.setStroke();outline.stroke()}
   let handle=rotationHandle(mark);let line=NSBezierPath();line.move(to:NSPoint(x:(corners[2].x+corners[3].x)/2,y:(corners[2].y+corners[3].y)/2));line.line(to:handle);line.lineWidth=1;line.stroke()
   let circle=NSBezierPath(ovalIn:NSRect(x:handle.x-8,y:handle.y-8,width:16,height:16));AppPalette.paper.setFill();circle.fill();AppPalette.accent.setStroke();circle.lineWidth=1;circle.stroke()
   drawAdaptiveSymbol(NSImage(systemSymbolName:"arrow.clockwise",accessibilityDescription:nil),in:NSRect(x:handle.x-5,y:handle.y-5,width:10,height:10),color:AppPalette.accent)
  }
  func installTransformCursors(){
-  guard tool == .select,editingIndex == nil,let i=selected,marks.indices.contains(i) else{return}
+  guard tool == .select,editingIndex == nil,let i=selected,marks.indices.contains(i),marks[i].tool != .element else{return}
   let mark=marks[i]
   let corners=selectionCorners(mark)
   for corner in resizeCornerIndices(mark){
@@ -115,7 +115,7 @@ extension DrawingView {
   return nil
  }
  func beginTransform(with event:NSEvent)->Bool{
-  guard let i=selected,marks.indices.contains(i),editingIndex == nil else{return false}
+  guard let i=selected,marks.indices.contains(i),editingIndex == nil,marks[i].tool != .element else{return false}
   let p=convert(event.locationInWindow,from:nil),mark=marks[i]
   guard let kind=transformHandle(at:p,for:mark) else{return false}
   snapshot();transformDrag=AnnotationTransformDrag(index:i,original:mark,start:imagePoint(p),kind:kind)

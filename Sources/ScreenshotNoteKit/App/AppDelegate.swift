@@ -218,10 +218,15 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    else {let copy=try workingCopy();draft=copy.0;root=copy.1}
    let file=root.appendingPathComponent(UUID().uuidString+".png")
    let process=Process();process.executableURL=URL(fileURLWithPath:"/usr/sbin/screencapture")
-   let mode=full ? (fromOpenComposer ? ["-D",String((pointerDisplay ?? 0)+1)]:["-m"]):["-i"]
-   process.arguments=["-x"]+mode+[file.path]
+   let display=full ? DisplayCaptureTarget.current(main:!fromOpenComposer):nil
+   process.arguments=["-x"]+(display?.arguments ?? ["-i"])+[file.path]
    // Kontext z prohlížeče v popředí se žádá souběžně se snímkem; bez rozšíření je nil hned.
-   let context=PendingCaptureContext.start()
+   var browser:BrowserWindow?
+   let folder=draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
+   let context=PendingCaptureContext.start(topic:folder,target:{browser=browserCaptureWindow();return browser?.target})
+   // Výřez je známý jen u celoobrazovkového snímku se zapnutou mapou; výběr oblasti mapu elementů nemá.
+   let window=display != nil && context != nil && folder?.effectiveContextPolicy?.includeElements==true ? browser?.bounds:nil
+   let probe=window.flatMap{bounds in browser.flatMap{WebAreaProbe(pid:$0.pid,window:bounds)}}
    capturing=true
    hiddenWindows=NSApp.orderedWindows.filter{$0.isVisible}
    for window in hiddenWindows {window.orderOut(nil)}
@@ -236,7 +241,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     // Na kontext se po snímku čeká nejvýš 1 s, pak se pokračuje bez něj.
     let deliver={(files:CaptureContextFiles?) in
     self.capturing=false
-    let attached=files.map{(try? $0.write(besides:file)) != nil} ?? false
+    let geometry=files == nil || window == nil ? nil:display?.geometry(image:file,window:window,webAreas:probe?.result ?? [])
+    let attached=files.map{(try? $0.attaching(geometry).write(besides:file)) != nil} ?? false
+    if attached,geometry != nil,ElementDebug.enabled{DispatchQueue.global(qos:.utility).async{if let debug=ElementDebug.render(image:file,elements:mapElements(contextFile:contextSidecars(file)[0])){NSLog("Browser bridge element map: %@",debug.path)}}}
     if let active=active {
      guard active.appendCapturedImage(file.lastPathComponent,context:attached) else{removeAnnotatedImage(file);restoreWindows();restoreComposerSize();return}
      active.snapshotFields();self.autosave(active.draft,root:root)

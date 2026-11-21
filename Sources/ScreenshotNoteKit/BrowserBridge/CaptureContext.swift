@@ -11,15 +11,21 @@ func contextSidecars(_ image:URL)->[URL]{[image.appendingPathExtension("context.
 /// Soubory kontextu v assets/: `<název>.context.json` a `<název>.har` vedle `<název>.png`.
 func assetContextFiles(_ assets:URL,_ image:String)->[URL]{let base=(image as NSString).deletingPathExtension;return [assets.appendingPathComponent(base+".context.json"),assets.appendingPathComponent(base+".har")]}
 
+/// Okno prohlížeče v popředí: proces, bounds a cíl pro capture.request.
+struct BrowserWindow {
+ let pid:pid_t,target:[String:Any]
+ var bounds:CGRect?{guard let b=target["windowBounds"] as? [String:CGFloat],let x=b["x"],let y=b["y"],let width=b["width"],let height=b["height"] else{return nil};return CGRect(x:x,y:y,width:width,height:height)}
+}
 /// Cíl pro capture.request, když je v popředí Chromium prohlížeč; jinak nil.
-func browserCaptureTarget()->[String:Any]? {
+func browserCaptureTarget()->[String:Any]?{browserCaptureWindow()?.target}
+func browserCaptureWindow()->BrowserWindow? {
  let own=ProcessInfo.processInfo.processIdentifier
  let windows=(CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]]) ?? []
  var app=NSWorkspace.shared.frontmostApplication
  // Při otevřeném komposeru je v popředí appka sama; rozhoduje nejvyšší cizí okno.
  if app?.processIdentifier==own,let pid=windows.lazy.filter({windowNumber($0,kCGWindowLayer)==0}).compactMap({windowNumber($0,kCGWindowOwnerPID)}).first(where:{$0 != Int(own)}){app=NSRunningApplication(processIdentifier:pid_t(pid))}
  guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{return nil}
- return captureTarget(windows:windows,pid:app.processIdentifier)
+ return captureTarget(windows:windows,pid:app.processIdentifier).map{BrowserWindow(pid:app.processIdentifier,target:$0)}
 }
 private func windowNumber(_ window:[String:Any],_ key:CFString)->Int?{(window[key as String] as? NSNumber)?.intValue}
 /// Nejvyšší běžné okno procesu (vrstva 0) v bodech s počátkem vlevo nahoře.
@@ -50,8 +56,17 @@ struct CaptureContextFiles {
  init?(bundle:Data){
   guard bundle.count<=maxContextBytes,var object=(try? JSONSerialization.jsonObject(with:bundle)) as? [String:Any],object["format"] as? String=="screenshot-note-context",(object["version"] as? NSNumber)?.intValue==1 else{return nil}
   let har=object.removeValue(forKey:"har") as? [String:Any]
+  // Geometrii výřezu doplňuje jen Mac, ne rozšíření.
+  object.removeValue(forKey:"capture")
   guard let context=try? JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]) else{return nil}
   self.context=context;self.har=har.flatMap{try? JSONSerialization.data(withJSONObject:$0,options:[.withoutEscapingSlashes])}
+ }
+ private init(context:Data,har:Data?){self.context=context;self.har=har}
+ /// Kontext s geometrií výřezu pod klíčem `capture`. Velký objekt se znovu neparsuje, klíč se vloží na začátek.
+ func attaching(_ capture:CaptureGeometry?)->CaptureContextFiles{
+  // Prázdný objekt by po vložení skončil čárkou.
+  guard let capture,context.first==UInt8(ascii:"{"),let body=context.dropFirst().first(where:{!" \n\r\t".utf8.contains($0)}),body != UInt8(ascii:"}"),let extra=try? JSONSerialization.data(withJSONObject:["capture":capture.json],options:[.sortedKeys]) else{return self}
+  return CaptureContextFiles(context:extra.dropLast()+Data(",".utf8)+context.dropFirst(),har:har)
  }
  /// Zapíše soubory vedle obrázku v pracovní složce, čitelné jen pro vlastníka.
  func write(besides image:URL)throws{
@@ -63,19 +78,64 @@ struct CaptureContextFiles {
  }
 }
 
+/// Politika kontextu lokální složky. Rozšíření z ní smí redakci jen přidat; cookies a autorizační hlavičky skryje vždy.
+struct ContextPolicy:Codable,Equatable {
+ var enabled=true,includeConsole=true,includeNetwork=true,includeElements=true,includeElementText=true,includeBodies=false
+ var redactHeaders:[String]=[],redactQueryParams:[String]=[]
+ init(){}
+ // Chybějící nebo poškozené pole dostane výchozí hodnotu, aby nespadl celý seznam složek.
+ init(from decoder:Decoder)throws{
+  // Jiný tvar než objekt (starší nebo novější verze) znamená výchozí politiku.
+  guard let c=try? decoder.container(keyedBy:CodingKeys.self) else{return}
+  let d=ContextPolicy()
+  func flag(_ key:CodingKeys,_ fallback:Bool)->Bool{((try? c.decodeIfPresent(Bool.self,forKey:key)) ?? nil) ?? fallback}
+  func list(_ key:CodingKeys)->[String]{Self.names(((try? c.decodeIfPresent([String].self,forKey:key)) ?? nil) ?? [])}
+  enabled=flag(.enabled,d.enabled);includeConsole=flag(.includeConsole,d.includeConsole);includeNetwork=flag(.includeNetwork,d.includeNetwork)
+  includeElements=flag(.includeElements,d.includeElements);includeElementText=flag(.includeElementText,d.includeElementText);includeBodies=flag(.includeBodies,d.includeBodies)
+  redactHeaders=list(.redactHeaders);redactQueryParams=list(.redactQueryParams)
+ }
+ /// Jména ze seznamu oddělená čárkou nebo řádkem; bez prázdných a duplicit, limity jako v rozšíření.
+ static func names(_ values:[String])->[String]{
+  var result:[String]=[]
+  for value in values.flatMap({$0.components(separatedBy:CharacterSet(charactersIn:",;").union(.newlines))}) {
+   let name=value.trimmingCharacters(in:.whitespaces)
+   if !name.isEmpty,name.count<=200,!name.unicodeScalars.contains(where:{CharacterSet.controlCharacters.contains($0)}),!result.contains(where:{$0.caseInsensitiveCompare(name) == .orderedSame}){result.append(name)}
+   if result.count==200{break}
+  }
+  return result
+ }
+ /// `CapturePolicy` pro capture.request podle PROTOCOL.md.
+ var protocolJSON:[String:Any]{
+  ["includeConsole":includeConsole,"includeNetwork":includeNetwork,"includeBodies":includeNetwork && includeBodies,"includeElements":includeElements,"includeElementText":includeElements && includeElementText,
+   "redactCookies":true,"redactAuthHeaders":true,"redactHeaders":redactHeaders,"redactQueryParams":redactQueryParams]
+ }
+}
+/// Politika kontextu cloudových složek uložená v UserDefaults tohoto Macu; bez záznamu je kontext vypnutý.
+enum CloudContextPolicies {
+ static let key="CloudContextPolicies"
+ static var defaults=UserDefaults.standard
+ private static func all()->[String:ContextPolicy]{defaults.data(forKey:key).flatMap{try? JSONDecoder().decode([String:ContextPolicy].self,from:$0)} ?? [:]}
+ static func policy(_ folder:UUID)->ContextPolicy{all()[folder.uuidString.lowercased()] ?? {var off=ContextPolicy();off.enabled=false;return off}()}
+ static func set(_ policy:ContextPolicy,for folder:UUID){var value=all();value[folder.uuidString.lowercased()]=policy;defaults.set(try? JSONEncoder().encode(value),forKey:key)}
+}
+extension Topic {
+ /// Cloudová složka má politiku jen na tomto Macu (výchozí vypnuto); snímek draftu ji nese v `contextPolicy`.
+ var effectiveContextPolicy:ContextPolicy?{let policy=contextPolicy ?? cloudFolderID.map{CloudContextPolicies.policy($0)} ?? ContextPolicy();return policy.enabled ? policy:nil}
+ /// Aktuální nastavení složky ze seznamu; složka, která už neexistuje nebo se přesunula do cloudu, kontext nepřikládá.
+ func currentContextPolicy(in folders:[Topic])->ContextPolicy?{folders.first{$0.id==id}?.effectiveContextPolicy}
+}
+
 /// Kontext vyžádaný souběžně se screencapture. Bez spojení s rozšířením se nečeká vůbec.
 final class PendingCaptureContext:@unchecked Sendable {
- // Výchozí politika rozšíření; F3 ji napojí na nastavení.
- static var policy:[String:Any]?{nil}
  private let lock=NSLock();private var done=false;private var files:CaptureContextFiles?
  private var waiters:[(CaptureContextFiles?)->Void]=[]
- static func start(bridge:BrowserBridge = .shared)->PendingCaptureContext?{
-  guard bridge.isRunning,!bridge.clients.isEmpty,let target=browserCaptureTarget() else{return nil}
-  return PendingCaptureContext(bridge:bridge,target:target)
+ /// Složka s vypnutým kontextem request vůbec nepošle.
+ static func start(topic:Topic?,bridge:BrowserBridge = .shared,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
+  guard let policy=topic?.effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
+  return PendingCaptureContext(bridge:bridge,target:target,policy:policy.protocolJSON)
  }
  /// Deadline pokrývá i interaktivní výběr výřezu; po snímku se čeká jen `wait(upTo:)`.
- init(bridge:BrowserBridge,target:[String:Any]?,timeout:TimeInterval=30){
-  let policy=Self.policy
+ init(bridge:BrowserBridge,target:[String:Any]?,policy:[String:Any]?=nil,timeout:TimeInterval=30){
   // Víc prohlížečů odpovídá souběžně; platí jen bundle z cílového okna.
   let bounds=target?["windowBounds"] as? [String:CGFloat]
   Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout,accept:{bundleMatches($0,bounds:bounds)});self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
@@ -87,6 +147,7 @@ final class PendingCaptureContext:@unchecked Sendable {
  }
  /// Volá se na hlavním vlákně; výsledek předá hned, nebo nejpozději po `limit` sekundách nil.
  func wait(upTo limit:TimeInterval,_ completion:@escaping (CaptureContextFiles?)->Void){
+  dispatchPrecondition(condition:.onQueue(.main))
   var called=false
   let once:(CaptureContextFiles?)->Void={if !called{called=true;completion($0)}}
   lock.lock()
@@ -139,6 +200,11 @@ struct ContextSummary {
   return parts.isEmpty ? L("bez chyb"):parts.joined(separator:", ")
  }
 }
+/// Krátký titulek odznaku v komposeru.
+func contextBadgeTitle(_ summary:ContextSummary)->String {
+ let parts=[summary.errors>0 ? LP(summary.errors,"%ld chyba","%ld chyby","%ld chyb",summary.errors):nil,summary.failedCount>0 ? LP(summary.failedCount,"%ld selhaný","%ld selhané","%ld selhaných",summary.failedCount):nil].compactMap{$0}
+ return parts.isEmpty ? L("Kontext"):parts.joined(separator:" · ")
+}
 /// Odkazy na exportované soubory kontextu.
 func contextLinks(_ base:String,har:Bool)->String{((har ? ["[HAR](<assets/\(base).har>)"]:[])+["["+L("konzole")+"](<assets/\(base).context.json>)"]).joined(separator:" · ")}
 /// Sbalitelný callout pod obrázkem podle PROTOCOL.md.
@@ -170,12 +236,12 @@ func importAssetContext(assets:URL,image:String,to destination:URL)throws->Bool 
  return true
 }
 /// {screenshots} s callouty pod obrázky a {context} podle souborů kontextu v assets/.
-func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL)->(screenshots:String,context:String) {
+func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL,without excluded:Set<String> = [])->(screenshots:String,context:String) {
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
  let blocks=zip(names,captions).enumerated().map{(offset,pair)->String in
   var text=imageMarkdown(pair.0,offset+1)+(pair.1.isEmpty ? "":"\n\n"+pair.1)
   let files=assetContextFiles(assets,pair.0)
-  if let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
+  if !excluded.contains(pair.0),let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=fm.fileExists(atPath:files[1].path)
    text+="\n\n"+contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
   }

@@ -11,7 +11,7 @@ import AppKit
   if let viewport{geometry["visualViewport"]=viewport}
   return ["format":"screenshot-note-context","version":1,"page":["url":"https://example.test/","geometry":geometry],"elements":elements]
  }
- func element(_ x:Double,_ y:Double,_ width:Double,_ height:Double,depth:Int=1)->[String:Any]{["selector":"#e\(Int(x))","tag":"div","rect":rect(x,y,width,height),"depth":depth]}
+ func element(_ x:Double,_ y:Double,_ width:Double,_ height:Double,depth:Int=1)->[String:Any]{["selector":"#e\(x)","tag":"div","rect":rect(x,y,width,height),"depth":depth]}
 
  // Ne-Retina, zoom 1: obsah 700 bodů u spodního okraje okna 800 bodů.
  let plain=CaptureGeometry(rect:CGRect(x:0,y:0,width:1440,height:900),backingScale:1,imageScale:1,window:CGRect(x:100,y:50,width:1000,height:800))
@@ -40,13 +40,26 @@ import AppKit
  try check(near(mapped.first?.rect,CGRect(x:0,y:0,width:100,height:200)),"partial window: \(mapped)")
 
  // Přesná pozice z Accessibility má přednost před výpočtem z okna.
- var accessible=retina;accessible.webArea=CGRect(x:200,y:300,width:1000,height:700)
+ // Postranní panel jiné velikosti se přeskočí, platí oblast velikosti viewportu.
+ var accessible=retina;accessible.webAreas=[CGRect(x:1000,y:100,width:300,height:700),CGRect(x:200,y:300,width:1000,height:700)]
  mapped=mapElements(context(ratio:2,inner:(1000,700),elements:[element(0,0,10,10)]),capture:accessible)
  try check(near(mapped.first?.rect,CGRect(x:400,y:600,width:20,height:20)),"web area: \(mapped)")
+ // DevTools ukotvené po straně: bez přesné oblasti se mapa nevytvoří.
+ try check(mapElements(context(ratio:2,inner:(700,700),elements:[element(0,0,10,10)]),capture:retina).isEmpty,"side DevTools mapped")
+ // Okno na ne-Retina displeji, snímek Retina displeje: zoom podle displeje okna.
+ var mixed=retina;mixed.browserScale=1
+ mapped=mapElements(context(ratio:1,inner:(1000,700),elements:[element(10,20,100,30)]),capture:mixed)
+ try check(near(mapped.first?.rect,CGRect(x:220,y:340,width:200,height:60)),"mixed DPI: \(mapped)")
+ try check(CaptureGeometry.dominant(CGRect(x:1400,y:0,width:800,height:600),displays:[(CGRect(x:0,y:0,width:1440,height:900),2),(CGRect(x:1440,y:0,width:1920,height:1080),1)])==1,"dominant display")
+ try check(CaptureGeometry(json:mixed.json)==mixed && CaptureGeometry(json:accessible.json)==accessible,"geometry JSON round trip")
+ // Extrémní čísla z rozšíření se odmítnou.
+ try check(mapElements(context(ratio:1,inner:(1000,700),elements:[element(-1e300,0,1e300,10)]),capture:plain).isEmpty,"huge rect mapped")
  // Bez okna se použije výpočet z geometrie stránky podle PROTOCOL.md.
  var bare=plain;bare.window=nil
  mapped=mapElements(context(ratio:1,inner:(1000,700),screen:(100,50,800),elements:[element(10,20,100,30)]),capture:bare)
  try check(near(mapped.first?.rect,CGRect(x:110,y:170,width:100,height:30)),"protocol fallback: \(mapped)")
+ mapped=mapElements(context(ratio:1.25,inner:(800,560),screen:(80,40,640),elements:[element(10,20,100,30)]),capture:bare)
+ try check(near(mapped.first?.rect,CGRect(x:112.5,y:175,width:125,height:37.5)),"protocol fallback zoom: \(mapped)")
  // Pinch zoom posune a zvětší prvky podle visualViewport.
  mapped=mapElements(context(ratio:1,inner:(1000,700),viewport:["scale":2,"offsetLeft":10,"offsetTop":20],elements:[element(10,20,100,30)]),capture:plain)
  try check(near(mapped.first?.rect,CGRect(x:100,y:150,width:200,height:60)),"pinch zoom: \(mapped)")
@@ -54,8 +67,8 @@ import AppKit
  try check(mapElements(context(ratio:0,inner:(1000,700),elements:[element(10,20,100,30)]),capture:plain).isEmpty,"zero ratio maps elements")
 
  // Geometrie displeje: obrázek jiné velikosti než displej se odmítne.
- try check(CaptureGeometry.display(bounds:CGRect(x:0,y:0,width:1440,height:900),backingScale:2,pixelSize:CGSize(width:2880,height:1800),window:nil,webArea:nil)?.imageScale==2,"display geometry")
- try check(CaptureGeometry.display(bounds:CGRect(x:0,y:0,width:1440,height:900),backingScale:2,pixelSize:CGSize(width:3840,height:2160),window:nil,webArea:nil)==nil,"mismatched display accepted")
+ try check(CaptureGeometry.display(bounds:CGRect(x:0,y:0,width:1440,height:900),backingScale:2,pixelSize:CGSize(width:2880,height:1800),window:nil)?.imageScale==2,"display geometry")
+ try check(CaptureGeometry.display(bounds:CGRect(x:0,y:0,width:1440,height:900),backingScale:2,pixelSize:CGSize(width:3840,height:2160),window:nil)==nil,"mismatched display accepted")
 
  // Geometrie se uloží do kontextu; podvržený klíč capture z rozšíření se zahodí.
  var bundle=context(ratio:2,inner:(1000,700),elements:[element(10,20,100,30)]);bundle["capture"]=["rect":rect(0,0,1,1),"backingScale":1,"imageScale":1];bundle["har"]=["log":[:]]

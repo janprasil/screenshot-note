@@ -64,7 +64,8 @@ struct CaptureContextFiles {
  private init(context:Data,har:Data?){self.context=context;self.har=har}
  /// Kontext s geometrií výřezu pod klíčem `capture`. Velký objekt se znovu neparsuje, klíč se vloží na začátek.
  func attaching(_ capture:CaptureGeometry?)->CaptureContextFiles{
-  guard let capture,context.first==UInt8(ascii:"{"),context.count>2,let extra=try? JSONSerialization.data(withJSONObject:["capture":capture.json],options:[.sortedKeys]) else{return self}
+  // Prázdný objekt by po vložení skončil čárkou.
+  guard let capture,context.first==UInt8(ascii:"{"),let body=context.dropFirst().first(where:{!" \n\r\t".utf8.contains($0)}),body != UInt8(ascii:"}"),let extra=try? JSONSerialization.data(withJSONObject:["capture":capture.json],options:[.sortedKeys]) else{return self}
   return CaptureContextFiles(context:extra.dropLast()+Data(",".utf8)+context.dropFirst(),har:har)
  }
  /// Zapíše soubory vedle obrázku v pracovní složce, čitelné jen pro vlastníka.

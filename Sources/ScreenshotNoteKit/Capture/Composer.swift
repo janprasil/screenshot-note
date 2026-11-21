@@ -225,7 +225,7 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  func switchToNewSession(){
   snapshotFields();if let target=draft.previous{selectionText[target.cacheKey]=(draft.title ?? "",draft.comment)}
-  draft.previous=nil
+  draft.previous=nil;draft.removedContexts=nil
   let text=selectionText["new"] ?? (draft.title ?? "",draft.comment);draft.title=text.0;draft.comment=text.1;titleField.stringValue=text.0;comment.markdownText=text.1
   sessionPicker.selectItem(at:0);reloadThumbnails()
  }
@@ -250,7 +250,7 @@ final class Composer:NSObject,NSWindowDelegate {
     if try importAssetContext(assets:assets,image:image,to:target){contexts[name]=name+".context.json"}
    }
   }catch{for name in importedNames{removeAnnotatedImage(root.appendingPathComponent(name))};showError(error.localizedDescription);restorePreviousSelection();return}
-  draft.images=importedNames+fresh;draft.imageNotes=notes;draft.contexts=contexts.isEmpty ? nil:contexts;var target=chosen.target;target.imported=imported;draft.previous=target
+  draft.images=importedNames+fresh;draft.imageNotes=notes;draft.contexts=contexts.isEmpty ? nil:contexts;var target=chosen.target;target.imported=imported;draft.previous=target;draft.removedContexts=nil
   let addedComment=draft.comment
   let text=selectionText[target.cacheKey] ?? (chosen.title,chosen.comment+(addedComment.isEmpty || addedComment==chosen.comment ? "":"\n\n"+addedComment))
   draft.title=text.0;draft.comment=text.1;titleField.stringValue=text.0;comment.markdownText=text.1
@@ -342,6 +342,8 @@ final class Composer:NSObject,NSWindowDelegate {
  /// Smaže soubory kontextu v pracovní složce; u znovuotevřené relace je finish smaže i z assets/.
  func removeImageContext(_ image:String){dropImageContext(image);reloadThumbnails()}
  func dropImageContext(_ image:String){
+  // U obrázku z uložené relace si draft pamatuje původní název, aby export smazal i soubory v assets/.
+  if let original=draft.previous?.imported[image],draft.removedContexts?.contains(original) != true{draft.removedContexts=(draft.removedContexts ?? [])+[original]}
   draft.contexts?.removeValue(forKey:image);if draft.contexts?.isEmpty==true{draft.contexts=nil};contextSummaries[image]=nil
   for url in contextSidecars(root.appendingPathComponent(image)){try? fm.removeItem(at:url)}
  }

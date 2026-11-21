@@ -140,6 +140,24 @@ import AppKit
  found=try previousSessions(for:topic)
  let third=root.appendingPathComponent("third");try fm.createDirectory(at:third,withIntermediateDirectories:true)
  try check(try workingDraft(from:found[0],topic:topic,root:third).contexts==nil,"reopen brings removed context back")
+ // Bez explicitního odebrání kontext v assets/ zůstane; odebrání platí i pro anotovaný obrázek a je neuloženou prací.
+ var annotated=topic;annotated.id="annotated";annotated.folder=root.appendingPathComponent("annotated").path
+ try shot("k.png",9,context:true)
+ try finishSession(Draft(images:["k.png"],comment:"",title:"Anot",topic:annotated,contexts:["k.png":"k.png.context.json"]),root:capture)
+ let annotatedAssets=URL(fileURLWithPath:annotated.folder).appendingPathComponent("assets"),annotatedName=readableSessionName("Anot",created:Date())+"-1.png"
+ let kept=root.appendingPathComponent("kept");try fm.createDirectory(at:kept,withIntermediateDirectories:true)
+ var reuse=try workingDraft(from:previousSessions(for:annotated)[0],topic:annotated,root:kept)
+ reuse.contexts=nil;for url in contextSidecars(kept.appendingPathComponent(reuse.images[0])){try? fm.removeItem(at:url)}
+ try finishSession(reuse,root:kept)
+ try check(assetContextFiles(annotatedAssets,annotatedName).allSatisfy{fm.fileExists(atPath:$0.path)},"context deleted without an explicit removal")
+ let painted=root.appendingPathComponent("painted");try fm.createDirectory(at:painted,withIntermediateDirectories:true)
+ let reopenedPainted=try workingDraft(from:previousSessions(for:annotated)[0],topic:annotated,root:painted)
+ let paintEditor=Composer(draft:reopenedPainted,root:painted),unchanged=draftSignature(reopenedPainted,root:painted)
+ paintEditor.dropImageContext(reopenedPainted.images[0])
+ try check(draftSignature(paintEditor.draft,root:painted) != unchanged && paintEditor.draft.removedContexts==[annotatedName],"context removal is not unsaved work")
+ try Data([10]).write(to:painted.appendingPathComponent(reopenedPainted.images[0]))
+ try finishSession(paintEditor.draft,root:painted)
+ try check(!assetContextFiles(annotatedAssets,annotatedName).contains{fm.fileExists(atPath:$0.path)},"annotated image keeps removed context")
 
  // Cloudová složka: kontext se zahodí, nic se nenahraje ani neexportuje.
  let cloud=root.appendingPathComponent("cloud");try shot("e.png",5,context:true)

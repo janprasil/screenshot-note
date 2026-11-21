@@ -7,11 +7,14 @@ struct Draft: Codable { var images: [String]; var comment: String; var title: St
  var cloudBase:CloudLibrary.CloudEdit.Fields? = nil
  // Obrázek → soubor kontextu z prohlížeče v pracovní složce (`<obrázek>.context.json`, vedle něj `.har`).
  var contexts:[String:String]? = nil
+ // Názvy v assets/ znovuotevřené relace, jejichž kontext uživatel odebral; smažou se po uložení.
+ var removedContexts:[String]? = nil
 }
 /// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
 func draftSignature(_ draft:Draft,root:URL)->String {
  var parts=[draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",draft.comment]
- for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image)}
+ for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image);if draft.contexts?[image] != nil{parts.append("context")}}
+ if let removed=draft.removedContexts,!removed.isEmpty{parts.append(removed.sorted().joined(separator:"/"))}
  return sessionFingerprint(Data(parts.joined(separator:"\u{0}").utf8))
 }
 let recoveryRoot = draftRoot.deletingLastPathComponent().appendingPathComponent("Draft Recovery", isDirectory: true)
@@ -38,6 +41,7 @@ func readDraft(_ root: URL) throws -> Draft {
  var draft = try JSONDecoder().decode(Draft.self, from:Data(contentsOf:file))
  // Kontext bez obrázku nebo bez souboru se zahodí, snímek zůstane.
  draft.contexts=draft.contexts?.filter{draft.images.contains($0.key) && $0.value==$0.key+".context.json" && fm.fileExists(atPath:root.appendingPathComponent($0.value).path)}
+ draft.removedContexts=draft.removedContexts?.filter{!$0.isEmpty && !$0.contains("/") && $0.hasSuffix(".png")}
  guard draft.images.allSatisfy({ !$0.contains("/") && fm.fileExists(atPath:root.appendingPathComponent($0).path) }) else {
   throw NSError(domain:"ScreenshotNote", code:1, userInfo:[NSLocalizedDescriptionKey:L("Rozpracovaný záznam má chybějící snímky.")])
  }
@@ -76,6 +80,10 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
  var copied:[URL] = []; var imageNames:[String] = []
  // Kontext odebraný u znovupoužitého obrázku; z assets/ se smaže až po zápisu Markdownu.
  var removedContext:[String:[URL]]=[:]
+ let importedOriginals=Set(previous?.imported.values.map{$0} ?? [])
+ for original in draft.removedContexts ?? [] where importedOriginals.contains(original) && !original.contains("/") {
+  let stale=assetContextFiles(assets,original).filter{fm.fileExists(atPath:$0.path)};if !stale.isEmpty{removedContext[original]=stale}
+ }
  do {
   // Kontext z prohlížeče jde jen do lokálních složek; u cloudových se zahodí (upload přijde později).
   let keepContext=draft.topic?.cloudFolderID == nil
@@ -85,7 +93,6 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   }
   for (index, image) in draft.images.enumerated() {
    if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){
-    if draft.contexts?[image]==nil{let stale=assetContextFiles(assets,originalName).filter{fm.fileExists(atPath:$0.path)};if !stale.isEmpty{removedContext[originalName]=stale}}
     try copyContext(image,as:originalName);imageNames.append(originalName);continue
    }
    // Název musí být volný pro obrázek i pro oba soubory kontextu.

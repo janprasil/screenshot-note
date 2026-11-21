@@ -274,3 +274,10 @@ Každý PR: z aktuálního main, nezávislé review agentem, zelené CI (build +
   privátní DTO, reference). Mezikrok PR 3 (jeden executable target přes `path: "Sources"` s `exclude`) SwiftPM přijal.
 - `#file` v `fatalError` (`Design.swift:20` …) obsahuje u SwiftPM absolutní cestu zdroje (dřív relativní). U release z CI
   je to cesta runneru, žádná citlivá data. `-file-prefix-map` mapuje jen debug info, proto neaplikováno.
+- Implementace: #17 přesun zdrojů (`git mv`), #18 SwiftPM, #19 testy mimo binárku, poslední PR rozdělení souborů + dokumentace.
+- Odchylky od plánu: PR 5 a 7 sloučené do jednoho PR; od #19 se merguje po zeleném `build` s admin bypassem a CodeQL
+  běží jednou nad main na konci (Janovo rozhodnutí 2026-11-21 kvůli 20min CodeQL na každém PR).
+- Review stacku: smoke test produkční binárky v build.sh, `withExtendedLifetime` pro delegáta, řádkové bufferování
+  testového hostu, `-gnone`, `BridgeWire` bez `-enable-testing`, retry dry-run DMG. `BrowserBridge.broadcast` zůstává
+  v knihovně (přesun by uvolnil `private` u tří členů produkční třídy). Testovací bundle má dál stejné bundle id.
+- Krok 6 (rozdělení třídy `CloudFolders` na extension) neproveden; zůstává doporučením.

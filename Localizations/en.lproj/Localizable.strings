@@ -485,3 +485,6 @@
 "Týmovou složku uvidí a doplňují všichni členové týmu." = "All team members can see and add to a team folder.";
 "Osobní cloud" = "Personal cloud";
 "Tým %@" = "Team %@";
+"Propojení s prohlížečem" = "Browser connection";
+"Rozšíření pro Chrome přikládá ke snímku kontext stránky." = "The Chrome extension attaches page context to captures.";
+"Nenašel jsem Chrome, Edge, Brave, Arc ani Chromium. Propojení se zapíše, až prohlížeč nainstaluješ a znovu spustíš appku." = "Chrome, Edge, Brave, Arc or Chromium was not found. The connection is registered after you install a browser and restart the app.";

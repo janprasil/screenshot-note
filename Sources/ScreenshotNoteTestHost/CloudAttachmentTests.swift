@@ -60,6 +60,11 @@ import AppKit
  let bigItems=try JSONDecoder().decode([CloudAttachment].self,from:JSONSerialization.data(withJSONObject:try job(big).1["attachments"] ?? []))
  try check(bigItems.map(\.kind)==["context"],"oversized attachment is skipped, the session still queues")
  try har.write(to:sides[1])
+ // Vlastní redakce cílové složky, kterou kontext nepokrývá: přílohy se vynechají, relace se uloží.
+ var strict=ContextPolicy();strict.redactHeaders=["X-Tenant"];CloudContextPolicies.set(strict,for:folder)
+ let strictJob=try lib.enqueue(Draft(images:["b.png"],comment:"",title:"Strict",topic:topic),root:root,folders:[topic])
+ try check(try job(strictJob).1["attachments"]==nil,"context without the folder's custom redaction is not uploaded")
+ CloudContextPolicies.set(ContextPolicy(),for:folder)
 
  // Stažení: neplatné záznamy se zahodí, relace bez příloh má stejný otisk jako dřív.
  let path="/api/v1/sessions/"+on.uuidString.lowercased()
@@ -101,4 +106,11 @@ func cloudAttachmentPolicyTests() throws {
  try check(!h.contains("pw") && !h.contains("body") && h.contains("\"size\""),"HAR bodies are stripped")
  policy.includeNetwork=false
  try check(!restrictContextFile(har,har:true,policy:policy),"HAR is skipped without network")
+ // Vlastní hlavičky a parametry cílové složky musí být v politice pořízení (bez ohledu na velikost písmen).
+ let bundle=dir.appendingPathComponent("p.json")
+ try Data(#"{"format":"screenshot-note-context","version":1,"policy":{"redactHeaders":["x-tenant"],"redactQueryParams":["token","email"]}}"#.utf8).write(to:bundle)
+ var custom=ContextPolicy();try check(contextRedactionCovers(bundle,policy:custom),"no custom lists always pass")
+ custom.redactHeaders=["X-Tenant"];custom.redactQueryParams=["Email"];try check(contextRedactionCovers(bundle,policy:custom),"covered lists pass")
+ custom.redactQueryParams=["phone"];try check(!contextRedactionCovers(bundle,policy:custom),"missing query param blocks the context")
+ try check(!contextRedactionCovers(context,policy:custom),"bundle without policy is blocked when custom lists exist")
 }

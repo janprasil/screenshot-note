@@ -55,6 +55,15 @@ func restrictContextFile(_ url:URL,har:Bool,policy:ContextPolicy)->Bool {
  guard let output=try? JSONSerialization.data(withJSONObject:object) else{return false}
  return (try? output.write(to:url,options:.atomic)) != nil
 }
+/// Vlastní hlavičky a query parametry cílové složky už musí být v politice, se kterou rozšíření kontext pořídilo.
+func contextRedactionCovers(_ bundle:URL,policy:ContextPolicy)->Bool {
+ let wanted={(names:[String])in Set(names.map{$0.lowercased()})}
+ if policy.redactHeaders.isEmpty && policy.redactQueryParams.isEmpty{return true}
+ guard let data=try? Data(contentsOf:bundle),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
+       let used=object["policy"] as? [String:Any] else{return false}
+ let headers=wanted(used["redactHeaders"] as? [String] ?? []),params=wanted(used["redactQueryParams"] as? [String] ?? [])
+ return wanted(policy.redactHeaders).isSubset(of:headers) && wanted(policy.redactQueryParams).isSubset(of:params)
+}
 /// Příloha kontextu snímku v cloudu (`.context.json` nebo `.har`), soubor `<index>.<kind>` ve složce jobu.
 struct CloudAttachment: Codable, Equatable {
  static let limit=16*1024*1024
@@ -237,8 +246,10 @@ final class CloudLibrary {
    try data.write(to: staging.appendingPathComponent("\(index + 1).png"), options: .atomic)
    images.append(.init(index:index + 1,bytes:data.count,sha256:sessionFingerprint(data)))
    // Původní snímky už přílohy na serveru mají; nové je přibalí podle politiky složky.
-   if withContext, index >= (base?.count ?? 0) {
-    for (kind, source) in zip(["context","har"], contextSidecars(root.appendingPathComponent(filename))) where fm.fileExists(atPath: source.path) {
+   // Kontext pořízený bez vlastní redakce cílové složky se neposílá vůbec (ani HAR).
+   let sides = contextSidecars(root.appendingPathComponent(filename))
+   if withContext, index >= (base?.count ?? 0), policy.map({ contextRedactionCovers(sides[0], policy: $0) }) ?? true {
+    for (kind, source) in zip(["context","har"], sides) where fm.fileExists(atPath: source.path) {
      let staged = staging.appendingPathComponent("\(index + 1)."+(kind=="har" ? "har":"context.json"))
      // Příloha nad limit cloudu se vynechá; snímek se uloží bez ní.
      guard let raw = try? boundedData(source, max: CloudAttachment.limit) else { continue }

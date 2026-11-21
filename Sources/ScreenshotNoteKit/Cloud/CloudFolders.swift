@@ -1045,7 +1045,8 @@ final class CloudFolders {
     saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision;index.put(saved);sections.append((saved,order));continue
    }
    let data:[Data]
-   do{data=try await images(note,topic:topic,endpoint:endpoint,token:token)}
+   let contexts:[Int:[String:Data]]
+   do{data=try await images(note,topic:topic,endpoint:endpoint,token:token);contexts=try await contextAttachments(note,topic:topic,endpoint:endpoint,token:token)}
    catch {
     guard isCurrent(topic,token:token),record?.note != nil || record==nil else{throw error}
     failure=failure ?? error;if let saved=record{sections.append((saved,order))};continue
@@ -1065,8 +1066,11 @@ final class CloudFolders {
     }
     files["assets/"+names[i]]=sessionFingerprint(bytes)
    }
+   // Přílohy kontextu i ve společném souboru; index relace nese jejich hashe.
+   let sides=try writeContextAttachments(contexts,names:names,assets:assets,previous:record?.files ?? [:])
+   files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har")}.merging(sides){a,_ in a}
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
-   next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7)))};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
+   next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
    if let saved=record{next.start=saved.start;next.length=saved.length;next.hash=saved.hash;next.heading=saved.heading;next.footer=saved.footer}
    // Obsahově shodná relace (jen nové porovnání) se nebere jako změna.

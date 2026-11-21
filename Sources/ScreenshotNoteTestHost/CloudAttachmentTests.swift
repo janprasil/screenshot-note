@@ -51,6 +51,7 @@ import AppKit
  let removal=queue.appendingPathComponent(".attachment-removals").appendingPathComponent(ext.uuidString.lowercased()+".json")
  let removed=try JSONSerialization.jsonObject(with:Data(contentsOf:removal)) as? [String:Any]
  try check(removed?["indices"] as? [Int]==[1],"attachment removal is queued for the session")
+ try check(lib.pendingCount==4,"queued removal keeps the sync loop running")
  try fm.removeItem(at:contextSidecars(root.appendingPathComponent("a.png"))[0])
 
  // Limit 16 MiB: větší příloha se do fronty nedostane.

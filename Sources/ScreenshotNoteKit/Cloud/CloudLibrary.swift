@@ -80,7 +80,7 @@ final class CloudLibrary {
   lastError = L("Tento Mac už nemá přístup do cloudu (odvoláno nebo vypršelo). Připoj ho znovu; data ve frontě zůstávají.")
   didChange?()
  }
- var pendingCount: Int { jobs().count + edits().count }
+ var pendingCount: Int { jobs().count + edits().count + removals().count }
  var legacyPendingCount: Int { entries().filter { readJob($0) == nil }.count }
  private func readJob(_ directory: URL, strict: Bool = true) -> CloudJob? {
   guard let handle = try? FileHandle(forReadingFrom:directory.appendingPathComponent("job.json")) else { return nil }
@@ -210,9 +210,12 @@ final class CloudLibrary {
    // Původní snímky už přílohy na serveru mají; nové je přibalí podle politiky složky.
    if withContext, index >= (base?.count ?? 0) {
     for (kind, source) in zip(["context","har"], contextSidecars(root.appendingPathComponent(filename))) where fm.fileExists(atPath: source.path) {
-     let side = try boundedData(source, max: CloudAttachment.limit)
-     let item = CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side))
-     try side.write(to: staging.appendingPathComponent(item.filename), options: .atomic); attachments.append(item)
+     let staged = staging.appendingPathComponent("\(index + 1)."+(kind=="har" ? "har":"context.json"))
+     try boundedData(source, max: CloudAttachment.limit).write(to: staged, options: .atomic)
+     // Ořez z editoru posune capture stejně jako lokální export, jinak by mapa po stažení neseděla.
+     if kind == "context" { adjustContextCapture(staged, annotations: annotationSidecar(root.appendingPathComponent(filename))) }
+     let side = try boundedData(staged, max: CloudAttachment.limit)
+     attachments.append(CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side)))
     }
    }
   }
@@ -249,11 +252,15 @@ final class CloudLibrary {
   try fm.createDirectory(at:removalsDirectory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(AttachmentRemoval(endpoint:c.endpoint,ownerID:owner,sessionID:sessionID,indices:all)).write(to:file,options:.atomic);didChange?()
  }
+ private func removals()->[(URL,AttachmentRemoval)] {
+  guard let c=connection else{return []}
+  return ((try? fm.contentsOfDirectory(at:removalsDirectory,includingPropertiesForKeys:nil)) ?? []).filter{$0.pathExtension=="json"}.compactMap{file in
+   (try? Data(contentsOf:file)).flatMap{try? JSONDecoder().decode(AttachmentRemoval.self,from:$0)}.flatMap{$0.endpoint==c.endpoint && $0.ownerID==c.ownerID ? (file,$0):nil}
+  }
+ }
  /// Mazání příloh čeká na nahrání doplnění stejné relace; chybějící relace (404) frontu uzavře.
  @MainActor private func sendRemovals(endpoint:CloudEndpoint,connection c:CloudConnection)async throws {
-  let files=((try? fm.contentsOfDirectory(at:removalsDirectory,includingPropertiesForKeys:nil)) ?? []).filter{$0.pathExtension=="json"}
-  for file in files {
-   guard let item=(try? Data(contentsOf:file)).flatMap({try? JSONDecoder().decode(AttachmentRemoval.self,from:$0)}),item.endpoint==c.endpoint,item.ownerID==c.ownerID else{continue}
+  for (file,item) in removals() {
    if jobs().contains(where:{$0.1.sessionID==item.sessionID}){continue}
    let key="removal:"+item.sessionID.uuidString.lowercased();if deferred(key){continue}
    do {
@@ -608,15 +615,21 @@ final class CloudLibrary {
    try data.write(to:staging.appendingPathComponent("\(image.index).png"),options:.atomic)
    images.append(.init(index:image.index,bytes:data.count,sha256:sessionFingerprint(data)))
   }
+  var attachments:[CloudAttachment]=[]
   for image in added {
    let index=images.count+1
    try fm.copyItem(at:directory.appendingPathComponent("\(image.index).png"),to:staging.appendingPathComponent("\(index).png"))
    images.append(.init(index:index,bytes:image.bytes,sha256:image.sha256))
+   // Přílohy jdou s novým indexem snímku.
+   for item in (job.attachments ?? []) where item.index==image.index {
+    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256)
+    try fm.copyItem(at:directory.appendingPathComponent(item.filename),to:staging.appendingPathComponent(moved.filename));attachments.append(moved)
+   }
   }
   let revision=remote.revision.map(\.value).flatMap{CloudManifest.validRevision($0) ? $0:nil}
   let manifest=CloudManifest(title:merged.title,comment:merged.comment,configuration:job.manifest.configuration,template:job.manifest.template,captions:merged.captions+addedCaptions,images:images,folder_id:job.manifest.folder_id,base_images:remote.images.count,revision:revision)
   guard manifest.valid else { throw CloudFailure(L("Relace by po doplnění překročila cloudový limit 30 snímků.")) }
-  try JSONEncoder().encode(CloudJob(schemaVersion:1,endpoint:job.endpoint,ownerID:job.ownerID,sessionID:job.sessionID,manifest:manifest,base:theirs)).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
+  try JSONEncoder().encode(CloudJob(schemaVersion:1,endpoint:job.endpoint,ownerID:job.ownerID,sessionID:job.sessionID,manifest:manifest,base:theirs,attachments:attachments.isEmpty ? nil:attachments)).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
   _ = try fm.replaceItemAt(directory,withItemAt:staging)
  }
  // Odložené a osiřelé položky fronty: vždy viditelné s možností Zkusit znovu / Uložit lokálně / Zahodit.

@@ -28,6 +28,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   refreshCloudFolders()
   // Starší místní poznámky jednou přijdou o skryté značky.
   for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
+  NativeHostRegistration.applyStoredSetting()
   settings=SettingsController(hotkeys:hotkeys)
   item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength);item.button?.image=NSImage(systemSymbolName:"camera.viewfinder",accessibilityDescription:"Screenshot Note")
   let menu=NSMenu();menu.delegate=self
@@ -342,6 +343,12 @@ if CommandLine.arguments.contains("--folder-sync-self-test") {
 if CommandLine.arguments.contains("--folder-transfer-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
  Task{@MainActor in do{try await folderTransferTests();exit(0)}catch{fputs("Folder transfer test failed: \(error)\n",stderr);exit(1)}}
+ dispatchMain()
+}
+
+if CommandLine.arguments.contains("--bridge-self-test") {
+ _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
+ Task{do{try await browserBridgeTests();exit(0)}catch{fputs("Browser bridge test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 

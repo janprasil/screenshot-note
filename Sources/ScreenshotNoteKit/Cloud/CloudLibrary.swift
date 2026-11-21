@@ -229,7 +229,6 @@ final class CloudLibrary {
   // Doplnění nese revizi stažené relace, aby nepřepsalo úpravy z webu.
   let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID,base_images:base?.count,revision:base != nil && CloudManifest.validRevision(revision) ? revision:nil)
   let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest,base:base != nil && original?.captions.count==base?.count ? original:nil,attachments:attachments.isEmpty ? nil:attachments)
-  if base != nil { try enqueueAttachmentRemoval(draft, sessionID:id) }
   let final=queue.appendingPathComponent(id.uuidString.lowercased(),isDirectory:true)
   if fm.fileExists(atPath:final.path) {
    guard let existing=readJob(final),existing.ownerID==owner,existing.endpoint==c.endpoint,existing.manifest==manifest else{
@@ -238,7 +237,10 @@ final class CloudLibrary {
    return id
   }
   try JSONEncoder().encode(job).write(to:staging.appendingPathComponent("job.json"),options:.atomic)
-  try fm.moveItem(at:staging,to:final); didChange?();return id
+  try fm.moveItem(at:staging,to:final)
+  // Mazání příloh až po úspěšném zařazení doplnění.
+  if base != nil { try enqueueAttachmentRemoval(draft, sessionID:id) }
+  didChange?();return id
  }
  private var removalsDirectory:URL{queue.appendingPathComponent(".attachment-removals",isDirectory:true)}
  /// Snímky znovuotevřené relace s odebraným kontextem; přílohy se na serveru smažou.
@@ -315,10 +317,11 @@ final class CloudLibrary {
    let url=root.appendingPathComponent(filename),raw=try boundedData(url,max:52428800)
    guard sessionFingerprint(raw)==shas[index] || (try? cloudImage(url)).map(sessionFingerprint)==shas[index] else{throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit."))}
   }
-  try enqueueAttachmentRemoval(draft,sessionID:sessionID)
   let fields=Self.editFields(draft)
   func valid(_ s:String,_ points:Int,_ bytes:Int)->Bool{!s.contains("\0") && s.unicodeScalars.count<=points && s.utf8.count<=bytes}
   guard valid(fields.title,500,2000),valid(fields.comment,100000,100000),fields.captions.allSatisfy({valid($0,20000,20000)}),fields.captions.reduce(0,{$0+$1.utf8.count})<=300000 else{throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná."))}
+  // Mazání příloh až po ověření textu, aby neplatné uložení nic nesmazalo.
+  try enqueueAttachmentRemoval(draft,sessionID:sessionID)
   let file=editsDirectory.appendingPathComponent(sessionID.uuidString.lowercased()+".json")
   // Dřívější čekající úprava si drží původní základ pro sloučení.
   let pending=readEdit(file).flatMap{$0.endpoint==c.endpoint && $0.ownerID==owner ? $0:nil}

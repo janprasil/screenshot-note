@@ -1176,8 +1176,11 @@ final class CloudFolders {
   for image in note.images {
    for item in image.attachments ?? [] {
     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
-    // Chybějící nebo poškozená příloha neblokuje stažení relace; snímek zůstane bez kontextu.
-    guard let data=try? await request(endpoint,item.path,token,CloudAttachment.limit+1),data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{continue}
+    // Chybějící nebo poškozená příloha neblokuje stažení relace; dočasná chyba ho zopakuje později.
+    let data:Data
+    do{data=try await request(endpoint,item.path,token,CloudAttachment.limit+1)}
+    catch let failure as CloudFailure where failure.status==404{continue}
+    guard data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{continue}
     result[image.index,default:[:]][item.kind]=data
    }
   }

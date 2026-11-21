@@ -113,6 +113,9 @@ final class WebAreaProbe:@unchecked Sendable {
 /// Element z mapy v pixelech obrázku. `index` je pořadí v `elements` bundlu.
 struct MappedElement:Equatable {let index:Int,selector:String,depth:Int,rect:CGRect;var tag="",name="",text=""}
 
+/// Nejvyšší lišta prohlížeče nad obsahem v bodech (karty, adresa, záložky, infobar).
+let maxBrowserChrome:CGFloat=160
+
 /// Obsah stránky na obrazovce (globální body) a zoom stránky; nil, když se poloha nedá spolehlivě určit.
 func pageContentFrame(_ geometry:[String:Any],capture:CaptureGeometry)->(frame:CGRect,zoom:CGFloat)?{
  guard let ratio=number(geometry["devicePixelRatio"]),ratio>0,let innerWidth=number(geometry["innerWidth"]),let innerHeight=number(geometry["innerHeight"]),innerWidth>0,innerHeight>0 else{return nil}
@@ -123,7 +126,8 @@ func pageContentFrame(_ geometry:[String:Any],capture:CaptureGeometry)->(frame:C
  if let web=capture.webAreas.first(where:{abs($0.width-size.width)<=2 && abs($0.height-size.height)<=2}){return (CGRect(origin:web.origin,size:size),zoom)}
  if let window=capture.window {
   // Obsah leží u spodního okraje přes celou šířku okna; DevTools po straně nebo jiný panel výpočet rozbijí.
-  guard abs(size.width-window.width)<=2,size.height<=window.height+2 else{return nil}
+  // Víc než lišta karet, adresy a záložek nad obsahem znamená DevTools dole; poloha by ujela, mapa se vynechá.
+  guard abs(size.width-window.width)<=2,size.height<=window.height+2,window.height-size.height<=maxBrowserChrome else{return nil}
   return (CGRect(x:window.minX,y:window.maxY-size.height,width:size.width,height:size.height),zoom)
  }
  // Bez okna podle PROTOCOL.md; screenX, screenY a outerHeight jsou v CSS pixelech jako zbytek geometrie.

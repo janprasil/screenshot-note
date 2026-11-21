@@ -34,4 +34,5 @@ jobs:
       - run: python3 tests/build-config.py
       - run: python3 tests/release.py
       # Loopback REST kontrakt proti testovacímu hostu z build.sh.
-      - run: python3 tests/cloud-rest.py "$(sed -n 's/^Testy: //p' build.log)"
+      - run: |
+          python3 tests/cloud-rest.py "$(sed -n 's/^Testy: //p' build.log)"

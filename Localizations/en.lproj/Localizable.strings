@@ -509,3 +509,4 @@
 "konzole" = "console";
 "Kontext" = "Context";
 "… a další selhané requesty: %ld" = "… more failed requests: %ld";
+"Kontext z prohlížeče se nepodařilo uložit." = "Could not save the browser context.";

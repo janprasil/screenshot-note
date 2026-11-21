@@ -179,7 +179,7 @@ final class CloudFolders {
    add(markdown)
    // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
    let flat=record.flat==true || SessionIndex.key(parent)==key
-   for image in record.images{add((flat ? assets:parent.appendingPathComponent("assets")).appendingPathComponent(image))}
+   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}}
    if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
   }
   for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}

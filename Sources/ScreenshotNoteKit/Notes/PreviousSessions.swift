@@ -222,6 +222,9 @@ func checkedPreviousFile(_ target:PreviousSessionTarget)throws->String{
 }
 
 /// Read edited user content using the literals surrounding the template's placeholders.
+// {context} bere jen řádky souhrnu kontextu, aby nespolkl obrázky ani text vedle sebe.
+private let contextSummaryLine="- Screenshot [0-9]+: [^\\n]*\\]\\(<assets/[^>\\n]+\\.context\\.json>\\)"
+private let contextSummaryPattern="((?:"+contextSummaryLine+"(?:\\n"+contextSummaryLine+")*)?)"
 func extractTemplateValues(_ template:String,from body:String)->[String:String]?{
  // Šablona s {comments} se zkusí i ve tvaru bez komentářů (oříznutý konec).
  if template.contains("{comments}") {
@@ -235,7 +238,7 @@ private func extractTemplateValues(_ template:String,from body:String,comments:B
  let template=template.replacingOccurrences(of:"\u{0}",with:"{comments}")
  let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context)\\}")
  let source=template as NSString;let matches=expression.matches(in:template,range:NSRange(location:0,length:source.length));var pattern="\\A",offset=0;var keys:[String]=[]
- for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+"(.*?)";keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
+ for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+(source.substring(with:match.range)=="{context}" ? contextSummaryPattern:"(.*?)");keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
  pattern+=NSRegularExpression.escapedPattern(for:source.substring(from:offset));if !template.hasSuffix("\n"){pattern+="\\n"};pattern+="\\z"
  guard let regex=try? NSRegularExpression(pattern:pattern,options:[.dotMatchesLineSeparators]),let match=regex.firstMatch(in:body,range:NSRange(location:0,length:(body as NSString).length)) else{return nil}
  var values:[String:String]=[:];let ns=body as NSString

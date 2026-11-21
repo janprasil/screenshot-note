@@ -31,7 +31,7 @@ final class BrowserBridge:@unchecked Sendable {
   func disconnect(){writeLock.lock();if !closed{shutdown(fd,SHUT_RDWR)};writeLock.unlock()}
   func close(){writeLock.lock();if !closed{closed=true;Darwin.close(fd)};writeLock.unlock()}
  }
- private final class Pending {var waiting:Set<Int>;let finish:(Data?)->Void;init(_ waiting:Set<Int>,_ finish:@escaping (Data?)->Void){self.waiting=waiting;self.finish=finish}}
+ private final class Pending {var waiting:Set<Int>;let accept:((Data)->Bool)?;let finish:(Data?)->Void;init(_ waiting:Set<Int>,_ accept:((Data)->Bool)?,_ finish:@escaping (Data?)->Void){self.waiting=waiting;self.accept=accept;self.finish=finish}}
 
  var isRunning:Bool{lock.lock();defer{lock.unlock()};return listener != nil}
  var clients:[BrowserClientInfo]{lock.lock();defer{lock.unlock()};return connections.values.map(\.info).sorted{$0.id<$1.id}}
@@ -84,7 +84,8 @@ final class BrowserBridge:@unchecked Sendable {
    if fd<0{
     if errno==EINTR{continue}
     // Při vyčerpání fd zůstane spojení ve frontě, zdroj na chvíli uspíme.
-    if errno != EAGAIN && errno != EWOULDBLOCK,let source=listener{NSLog("Browser bridge accept: %s",strerror(errno));source.suspend();queue.asyncAfter(deadline:.now()+1){source.resume()}}
+    lock.lock();let source=listener;lock.unlock()
+    if errno != EAGAIN && errno != EWOULDBLOCK,let source{NSLog("Browser bridge accept: %s",strerror(errno));source.suspend();queue.asyncAfter(deadline:.now()+1){source.resume()}}
     return
    }
    _=fcntl(fd,F_SETFL,fcntl(fd,F_GETFL) & ~O_NONBLOCK)
@@ -110,7 +111,9 @@ final class BrowserBridge:@unchecked Sendable {
    case .end:break loop
    }
   }
-  lock.lock();connections[connection.info.id]=nil;lock.unlock()
+  // Odpojený klient už neodpoví; jeho čekající requesty se hned uzavřou.
+  lock.lock();connections[connection.info.id]=nil;let waiting=pending.filter{$0.value.waiting.contains(connection.info.id)}.map(\.key);lock.unlock()
+  for id in waiting{fail(id,client:connection.info.id)}
   connection.close()
  }
 
@@ -133,7 +136,9 @@ final class BrowserBridge:@unchecked Sendable {
   case "pong":if let id{resolve(id,Data())}
   case "capture.result":
    guard let id else{return}
-   if let bundle=message["bundle"] as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:bundle){resolve(id,data)}else{fail(id,client:connection.info.id)}
+   // Odpověď, kterou volající nepřijme (jiné okno), se počítá jako odmítnutí tohoto klienta.
+   lock.lock();let accept=pending[id]?.accept;lock.unlock()
+   if let bundle=message["bundle"] as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:bundle),accept?(data) ?? true{resolve(id,data)}else{fail(id,client:connection.info.id)}
   case "capture.error":
    NSLog("Browser bridge: capture error %@",message["code"] as? String ?? "?")
    if let id{fail(id,client:connection.info.id)}
@@ -155,14 +160,14 @@ final class BrowserBridge:@unchecked Sendable {
   item.finish(nil)
  }
 
- private func ask(_ message:[String:Any],timeout:TimeInterval)async->Data?{
+ private func ask(_ message:[String:Any],timeout:TimeInterval,accept:((Data)->Bool)?=nil)async->Data?{
   let id=UUID().uuidString;var message=message;message["id"]=id
   guard let payload=try? JSONSerialization.data(withJSONObject:message) else{return nil}
   return await withCheckedContinuation{(continuation:CheckedContinuation<Data?,Never>) in
    lock.lock()
-   let targets=connections.values.filter{$0.info.helloAt != nil}
+   let targets=connections.values.filter{$0.info.helloAt != nil && $0.info.protocolVersion==BridgeWire.protocolVersion}
    guard !targets.isEmpty else{lock.unlock();continuation.resume(returning:nil);return}
-   pending[id]=Pending(Set(targets.map(\.info.id))){continuation.resume(returning:$0)}
+   pending[id]=Pending(Set(targets.map(\.info.id)),accept){continuation.resume(returning:$0)}
    lock.unlock()
    // Deadline běží od začátku a zápisy jdou mimo volající vlákno.
    queue.asyncAfter(deadline:.now()+timeout){[weak self] in self?.resolve(id,nil)}
@@ -173,12 +178,12 @@ final class BrowserBridge:@unchecked Sendable {
  /// True, když aspoň jeden prohlížeč odpoví na ping.
  func ping(timeout:TimeInterval=1)async->Bool{await ask(["type":"ping"],timeout:timeout) != nil}
 
- /// Vyžádá kontext od připojených prohlížečů. Vrací JSON bundlu z první odpovědi, nebo nil.
- func request(policy:[String:Any]?=nil,target:[String:Any]?=nil,timeout:TimeInterval=1)async->Data?{
+ /// Vyžádá kontext od připojených prohlížečů. Vrací JSON bundlu z první přijaté odpovědi, nebo nil.
+ func request(policy:[String:Any]?=nil,target:[String:Any]?=nil,timeout:TimeInterval=1,accept:((Data)->Bool)?=nil)async->Data?{
   var message:[String:Any]=["type":"capture.request"]
   if let policy{message["policy"]=policy}
   if let target{message["target"]=target}
-  return await ask(message,timeout:timeout)
+  return await ask(message,timeout:timeout,accept:accept)
  }
 
  // Jen pro self-test.

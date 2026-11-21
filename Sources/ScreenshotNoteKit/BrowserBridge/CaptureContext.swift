@@ -33,6 +33,17 @@ func captureTarget(windows:[[String:Any]],pid:pid_t)->[String:Any]? {
  return nil
 }
 
+/// Bundle pochází z okna s danými bounds (tolerance 8 bodů, zoom stránky přepočte měřítko geometrie).
+func bundleMatches(_ data:Data,bounds:[String:CGFloat]?)->Bool {
+ guard let bounds else{return true}
+ guard let x=bounds["x"],let y=bounds["y"],let width=bounds["width"],let height=bounds["height"],width>0,
+  let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],let geometry=(object["page"] as? [String:Any])?["geometry"] as? [String:Any] else{return false}
+ func value(_ key:String)->CGFloat?{(geometry[key] as? NSNumber).map{CGFloat($0.doubleValue)}}
+ guard let left=value("screenX"),let top=value("screenY"),let outerWidth=value("outerWidth"),let outerHeight=value("outerHeight"),outerWidth>0 else{return false}
+ let scale=width/outerWidth
+ guard (0.2...5).contains(scale) else{return false}
+ return abs(left*scale-x)<=8 && abs(top*scale-y)<=8 && abs(outerHeight*scale-height)<=8
+}
 /// Bundle rozdělený na kontext bez HAR a samotný HAR.
 struct CaptureContextFiles {
  let context:Data;let har:Data?
@@ -46,7 +57,8 @@ struct CaptureContextFiles {
  func write(besides image:URL)throws{
   let sides=contextSidecars(image)
   do{
-   for (data,url) in zip([context,har],sides){guard let data else{continue};try data.write(to:url,options:.atomic);try fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)}
+   // Soubor vzniká rovnou s 0600, ne až po zápisu.
+   for (data,url) in zip([context,har],sides){guard let data else{continue};try? fm.removeItem(at:url);guard fm.createFile(atPath:url.path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure(L("Kontext z prohlížeče se nepodařilo uložit."))}}
   }catch{for url in sides{try? fm.removeItem(at:url)};throw error}
  }
 }
@@ -64,7 +76,9 @@ final class PendingCaptureContext:@unchecked Sendable {
  /// Deadline pokrývá i interaktivní výběr výřezu; po snímku se čeká jen `wait(upTo:)`.
  init(bridge:BrowserBridge,target:[String:Any]?,timeout:TimeInterval=30){
   let policy=Self.policy
-  Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout);self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
+  // Víc prohlížečů odpovídá souběžně; platí jen bundle z cílového okna.
+  let bounds=target?["windowBounds"] as? [String:CGFloat]
+  Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout,accept:{bundleMatches($0,bounds:bounds)});self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
  }
  private func finish(_ result:CaptureContextFiles?){
   lock.lock();guard !done else{lock.unlock();return}
@@ -85,7 +99,8 @@ final class PendingCaptureContext:@unchecked Sendable {
 /// Text ze stránky jako jednořádkový kód; nevytvoří odkaz ani formátování.
 func inlineCode(_ text:String,limit:Int=200)->String {
  var plain=text.components(separatedBy:CharacterSet.controlCharacters.union(.newlines)).joined(separator:" ").replacingOccurrences(of:"`",with:"'").trimmingCharacters(in:.whitespaces)
- if plain.count>limit{plain=String(plain.prefix(limit))+"…"}
+ // Limit platí i pro skalární hodnoty, aby kombinující znaky nenafoukly řádek.
+ if plain.count>limit || plain.unicodeScalars.count>limit*4{var scalars=String.UnicodeScalarView();scalars.append(contentsOf:plain.unicodeScalars.prefix(limit*4));plain=String(String(scalars).prefix(limit))+"…"}
  return "`"+(plain.isEmpty ? "?":plain)+"`"
 }
 /// Souhrn kontextu pro callout a {context}. `summary` z rozšíření popisuje vždy celá data.

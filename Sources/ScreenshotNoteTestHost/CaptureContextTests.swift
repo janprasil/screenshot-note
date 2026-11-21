@@ -26,6 +26,11 @@ import AppKit
  let empty=await withCheckedContinuation{(c:CheckedContinuation<Bool,Never>) in PendingCaptureContext(bridge:stopped,target:nil).wait(upTo:1){c.resume(returning:$0==nil)}}
  try check(empty,"failed request must deliver no context")
 
+ // Odpověď jiného okna se nepřijme; zoom stránky měřítko geometrie mění.
+ func geometry(_ x:Double,_ y:Double,_ w:Double,_ h:Double)->Data{try! JSONSerialization.data(withJSONObject:["page":["geometry":["screenX":x,"screenY":y,"outerWidth":w,"outerHeight":h]]])}
+ let frame:[String:CGFloat]=["x":10,"y":20,"width":1200,"height":800]
+ try check(bundleMatches(geometry(12,25,1200,800),bounds:frame) && bundleMatches(geometry(8,16,960,640),bounds:frame) && bundleMatches(Data("{}".utf8),bounds:nil),"matching window rejected")
+ try check(!bundleMatches(geometry(400,20,1200,800),bounds:frame) && !bundleMatches(geometry(10,20,1200,500),bounds:frame) && !bundleMatches(Data("{}".utf8),bounds:frame),"other window accepted")
  // Bundle se rozdělí na kontext bez HAR a HAR; cizí formát se odmítne.
  let bundle:[String:Any]=["format":"screenshot-note-context","version":1,"capturedAt":"2026-11-21T10:00:00Z","extensionVersion":"0.1.0",
   "page":["url":"https://app.example.com/orders?id=1","title":"Orders"],"policy":["includeBodies":false],
@@ -60,6 +65,13 @@ import AppKit
  let record=SessionIndex.shared.records(file:markdown).first
  try check(record?.files["assets/\(stem)-1.context.json"]==fileHash(exported[0]) && record?.files["assets/\(stem)-1.har"]==fileHash(exported[1]) && record?.notes[stem+"-1.png"]=="Chyba při uložení","index hashes of context files")
 
+ // {context} za textem nespolkne obrázky ani komentář; prázdný souhrn také projde.
+ let tail="{screenshots}\n\n# Popis\n\n{text}\n\n{context}\n"
+ for names in [[stem+"-1.png",stem+"-2.png"],[stem+"-2.png"]] {
+  let parts=screenshotsWithContext(names,names.map{_ in "Pozn"},assets:assets)
+  let parsed=parsedSession(tail,renderSessionTemplate(tail,title:"T",screenshots:parts.screenshots,text:"Komentář\n\nDruhý odstavec",context:parts.context))
+  try check(parsed?.2==names && parsed?.1=="Komentář\n\nDruhý odstavec" && names.allSatisfy{parsed?.3[$0]=="Pozn"},"{context} template parsing: \(String(describing:parsed))")
+ }
  // Kolize: zbylý soubor kontextu blokuje název stejně jako PNG.
  let other=root.appendingPathComponent("other"),otherAssets=other.appendingPathComponent("assets");try fm.createDirectory(at:otherAssets,withIntermediateDirectories:true)
  try Data("stale".utf8).write(to:otherAssets.appendingPathComponent(stem+"-1.har"))

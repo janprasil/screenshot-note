@@ -86,7 +86,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
  }
  do {
   // Kontext z prohlížeče jde jen do lokálních složek; u cloudových se zahodí (upload přijde později).
-  let keepContext=draft.topic?.cloudFolderID == nil
+  let keepContext=draft.topic?.effectiveContextPolicy != nil
   func copyContext(_ image:String,as filename:String)throws{
    guard keepContext,draft.contexts?[image] != nil else{return}
    for (source,target) in zip(contextSidecars(root.appendingPathComponent(image)),assetContextFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
@@ -140,7 +140,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    index.put(record);tagCombinedFile(markdown)
   } else {try Data(content.utf8).write(to:markdown,options:.withoutOverwriting);index.put(record);writeSessionTag(markdown,record.id)}
  } catch { for file in copied { try? fm.removeItem(at:file) }; throw error }
- for file in removedContext.values.joined(){try? fm.removeItem(at:file)}
+ for file in removedContext.values.joined(){do{try fm.removeItem(at:file)}catch{NSLog("Screenshot Note: removed browser context could not be deleted: %@",error.localizedDescription)}}
  clearDraft(draft,root:root)
 }
 
@@ -151,7 +151,10 @@ func clearDraft(_ draft:Draft,root:URL){
 }
 
 
-func finishSession(_ draft:Draft,root:URL)throws {
+func finishSession(_ draft:Draft,root:URL,folders:[Topic]?=nil)throws {
+ var draft=draft
+ // Kontext podle aktuálního nastavení složky, ne podle kopie v konceptu.
+ if let saved=draft.topic{draft.topic?.contextPolicy=saved.currentContextPolicy(in:folders ?? Topics.all) ?? {var off=ContextPolicy();off.enabled=false;return off}()}
  let topic=draft.topic ?? Topics.defaultTopic
  let folder=draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? topic.destination
  try Topics.validateDestination(topic,folder:folder)

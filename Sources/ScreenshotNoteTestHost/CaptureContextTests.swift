@@ -36,6 +36,8 @@ import AppKit
  try check(legacyTopic.contextPolicy==nil && legacyTopic.effectiveContextPolicy==ContextPolicy(),"old topic without a context policy")
  let damaged=try JSONDecoder().decode(Topic.self,from:Data(#"{"id":"b","name":"B","detail":"","folder":"/tmp/b","combined":false,"combinedFile":"N.md","contextPolicy":{"enabled":"yes","includeConsole":false,"redactHeaders":[" X-A ","x-a","",7],"future":1}}"#.utf8))
  try check(damaged.contextPolicy?.enabled==true && damaged.contextPolicy?.includeConsole==false && damaged.contextPolicy?.includeNetwork==true && damaged.contextPolicy?.redactHeaders==[] && damaged.contextPolicy?.redactQueryParams==[],"damaged context policy fields: \(String(describing:damaged.contextPolicy))")
+ let reshaped=try JSONDecoder().decode([Topic].self,from:Data(#"[{"id":"c","name":"C","detail":"","folder":"/tmp/c","combined":false,"combinedFile":"N.md","contextPolicy":"off"},{"id":"d","name":"D","detail":"","folder":"/tmp/d","combined":false,"combinedFile":"N.md","contextPolicy":[]}]"#.utf8))
+ try check(reshaped.count==2 && reshaped.allSatisfy{$0.contextPolicy==ContextPolicy()},"context policy of another shape breaks the folder list")
  try check(ContextPolicy.names([" X-A , x-a;\nX-B,,"])==["X-A","X-B"] && ContextPolicy.names([String(repeating:"h",count:201)]).isEmpty && ContextPolicy.names([(0..<300).map{"h\($0)"}.joined(separator:",")]).count==200,"policy name lists")
  let wire=custom.protocolJSON
  try check(wire["includeConsole"] as? Bool==false && wire["includeNetwork"] as? Bool==true && wire["includeBodies"] as? Bool==true && wire["includeElements"] as? Bool==true && wire["includeElementText"] as? Bool==false,"policy flags for the protocol")
@@ -74,7 +76,7 @@ import AppKit
  let folder=root.appendingPathComponent("local")
  var topic=Topic(id:"ctx",name:"Ctx",detail:"",folder:folder.path,combined:false,combinedFile:"N.md");topic.markdownTemplate=template
  let draft=Draft(images:["a.png","b.png"],comment:"Popis",title:"Bug",topic:topic,imageNotes:["a.png":"Chyba při uložení"],contexts:["a.png":"a.png.context.json"])
- try finishSession(draft,root:capture)
+ try finishSession(draft,root:capture,folders:[topic])
  let stem=readableSessionName("Bug",created:Date()),assets=folder.appendingPathComponent("assets")
  let markdown=folder.appendingPathComponent(stem+".md"),text=try String(contentsOf:markdown,encoding:.utf8)
  let exported=assetContextFiles(assets,stem+"-1.png")
@@ -98,7 +100,7 @@ import AppKit
  try Data("stale".utf8).write(to:otherAssets.appendingPathComponent(stem+"-1.har"))
  var second=topic;second.id="other";second.folder=other.path
  try shot("c.png",3,context:true)
- try finishSession(Draft(images:["c.png"],comment:"",title:"Bug",topic:second,contexts:["c.png":"c.png.context.json"]),root:capture)
+ try finishSession(Draft(images:["c.png"],comment:"",title:"Bug",topic:second,contexts:["c.png":"c.png.context.json"]),root:capture,folders:[second])
  try check(fm.fileExists(atPath:otherAssets.appendingPathComponent(stem+"-1 2.png").path) && assetContextFiles(otherAssets,stem+"-1 2.png").allSatisfy{fm.fileExists(atPath:$0.path)} && !fm.fileExists(atPath:otherAssets.appendingPathComponent(stem+"-1.png").path),"collision with a leftover context file")
  try check(String(data:try Data(contentsOf:otherAssets.appendingPathComponent(stem+"-1.har")),encoding:.utf8)=="stale","leftover file overwritten")
 
@@ -111,7 +113,7 @@ import AppKit
  try check(reopened.contexts==[first:first+".context.json"] && contextSidecars(reopen.appendingPathComponent(first)).allSatisfy{fm.fileExists(atPath:$0.path)},"reopened draft lost the context")
  try Data([4]).write(to:reopen.appendingPathComponent("d.png"));reopened.images.append("d.png");reopened.comment="Doplněno"
  let before=try fm.contentsOfDirectory(atPath:assets.path).count
- try finishSession(reopened,root:reopen)
+ try finishSession(reopened,root:reopen,folders:[topic])
  let updated=try String(contentsOf:markdown,encoding:.utf8)
  try check(updated.contains("> - [HAR](<assets/\(stem)-1.har>)") && updated.components(separatedBy:"[!bug]-").count==2 && updated.contains("Doplněno"),"reopen and save keeps the callout:\n\(updated)")
  try check(try fm.contentsOfDirectory(atPath:assets.path).count==before+1,"reopen duplicated context files")
@@ -133,7 +135,7 @@ import AppKit
  let editor=Composer(draft:reopenedAgain,root:again);editor.dropImageContext(firstAgain)
  try check(editor.draft.contexts?[firstAgain]==nil && editor.draft.images.contains(firstAgain) && !contextSidecars(again.appendingPathComponent(firstAgain)).contains{fm.fileExists(atPath:$0.path)},"remove context from a reopened image")
  try check(exported.allSatisfy{fm.fileExists(atPath:$0.path)},"asset context removed before saving")
- try finishSession(editor.draft,root:again)
+ try finishSession(editor.draft,root:again,folders:[topic])
  let without=try String(contentsOf:markdown,encoding:.utf8),cleared=SessionIndex.shared.records(file:markdown).first
  try check(!exported.contains{fm.fileExists(atPath:$0.path)} && !without.contains("[!bug]-") && !without.contains("Screenshot 1: ") && fm.fileExists(atPath:assets.appendingPathComponent(stem+"-1.png").path),"removed context stays in assets:\n\(without)")
  try check(cleared?.files["assets/\(stem)-1.context.json"]==nil && cleared?.files["assets/\(stem)-1.har"]==nil && cleared?.files["assets/\(stem)-1.png"] != nil,"index keeps hashes of removed context")
@@ -143,12 +145,12 @@ import AppKit
  // Bez explicitního odebrání kontext v assets/ zůstane; odebrání platí i pro anotovaný obrázek a je neuloženou prací.
  var annotated=topic;annotated.id="annotated";annotated.folder=root.appendingPathComponent("annotated").path
  try shot("k.png",9,context:true)
- try finishSession(Draft(images:["k.png"],comment:"",title:"Anot",topic:annotated,contexts:["k.png":"k.png.context.json"]),root:capture)
+ try finishSession(Draft(images:["k.png"],comment:"",title:"Anot",topic:annotated,contexts:["k.png":"k.png.context.json"]),root:capture,folders:[annotated])
  let annotatedAssets=URL(fileURLWithPath:annotated.folder).appendingPathComponent("assets"),annotatedName=readableSessionName("Anot",created:Date())+"-1.png"
  let kept=root.appendingPathComponent("kept");try fm.createDirectory(at:kept,withIntermediateDirectories:true)
  var reuse=try workingDraft(from:previousSessions(for:annotated)[0],topic:annotated,root:kept)
  reuse.contexts=nil;for url in contextSidecars(kept.appendingPathComponent(reuse.images[0])){try? fm.removeItem(at:url)}
- try finishSession(reuse,root:kept)
+ try finishSession(reuse,root:kept,folders:[annotated])
  try check(assetContextFiles(annotatedAssets,annotatedName).allSatisfy{fm.fileExists(atPath:$0.path)},"context deleted without an explicit removal")
  let painted=root.appendingPathComponent("painted");try fm.createDirectory(at:painted,withIntermediateDirectories:true)
  let reopenedPainted=try workingDraft(from:previousSessions(for:annotated)[0],topic:annotated,root:painted)
@@ -156,9 +158,17 @@ import AppKit
  paintEditor.dropImageContext(reopenedPainted.images[0])
  try check(draftSignature(paintEditor.draft,root:painted) != unchanged && paintEditor.draft.removedContexts==[annotatedName],"context removal is not unsaved work")
  try Data([10]).write(to:painted.appendingPathComponent(reopenedPainted.images[0]))
- try finishSession(paintEditor.draft,root:painted)
+ try finishSession(paintEditor.draft,root:painted,folders:[annotated])
  try check(!assetContextFiles(annotatedAssets,annotatedName).contains{fm.fileExists(atPath:$0.path)},"annotated image keeps removed context")
 
+ // Složka s vypnutým kontextem nebo už neexistující složka kontext neexportuje.
+ for (index,folders) in [[Topic](),[disabled]].enumerated() {
+  let gone=root.appendingPathComponent("gone-\(index)");try shot("m\(index).png",UInt8(20+index),context:true)
+  var target=local;target.folder=gone.path
+  try finishSession(Draft(images:["m\(index).png"],comment:"",title:"Pryč",topic:target,contexts:["m\(index).png":"m\(index).png.context.json"]),root:capture,folders:folders.map{var value=$0;value.folder=gone.path;return value})
+  let names=try fm.contentsOfDirectory(atPath:gone.appendingPathComponent("assets").path)
+  try check(names.count==1 && names[0].hasSuffix(".png"),"context exported for a folder without context: \(names)")
+ }
  // Cloudová složka: kontext se zahodí, nic se nenahraje ani neexportuje.
  let cloud=root.appendingPathComponent("cloud");try shot("e.png",5,context:true)
  var cloudTopic=topic;cloudTopic.id="cloud";cloudTopic.folder=cloud.path;cloudTopic.cloudFolderID=UUID()

@@ -70,7 +70,9 @@ struct ContextPolicy:Codable,Equatable {
  init(){}
  // Chybějící nebo poškozené pole dostane výchozí hodnotu, aby nespadl celý seznam složek.
  init(from decoder:Decoder)throws{
-  let c=try decoder.container(keyedBy:CodingKeys.self),d=ContextPolicy()
+  // Jiný tvar než objekt (starší nebo novější verze) znamená výchozí politiku.
+  guard let c=try? decoder.container(keyedBy:CodingKeys.self) else{return}
+  let d=ContextPolicy()
   func flag(_ key:CodingKeys,_ fallback:Bool)->Bool{((try? c.decodeIfPresent(Bool.self,forKey:key)) ?? nil) ?? fallback}
   func list(_ key:CodingKeys)->[String]{Self.names(((try? c.decodeIfPresent([String].self,forKey:key)) ?? nil) ?? [])}
   enabled=flag(.enabled,d.enabled);includeConsole=flag(.includeConsole,d.includeConsole);includeNetwork=flag(.includeNetwork,d.includeNetwork)
@@ -97,6 +99,8 @@ extension Topic {
  /// Cloudové složky kontext zatím nepřikládají (upload je F6); lokální podle své politiky.
  var contextAvailable:Bool{cloudFolderID == nil}
  var effectiveContextPolicy:ContextPolicy?{let policy=contextPolicy ?? ContextPolicy();return contextAvailable && policy.enabled ? policy:nil}
+ /// Aktuální nastavení složky ze seznamu; složka, která už neexistuje nebo se přesunula do cloudu, kontext nepřikládá.
+ func currentContextPolicy(in folders:[Topic])->ContextPolicy?{folders.first{$0.id==id}?.effectiveContextPolicy}
 }
 
 /// Kontext vyžádaný souběžně se screencapture. Bez spojení s rozšířením se nečeká vůbec.
@@ -105,7 +109,7 @@ final class PendingCaptureContext:@unchecked Sendable {
  private var waiters:[(CaptureContextFiles?)->Void]=[]
  /// Složka s vypnutým kontextem request vůbec nepošle.
  static func start(topic:Topic?,bridge:BrowserBridge = .shared,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
-  guard let policy=(topic ?? Topics.initialTopic).effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
+  guard let policy=topic?.effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
   return PendingCaptureContext(bridge:bridge,target:target,policy:policy.protocolJSON)
  }
  /// Deadline pokrývá i interaktivní výběr výřezu; po snímku se čeká jen `wait(upTo:)`.
@@ -121,6 +125,7 @@ final class PendingCaptureContext:@unchecked Sendable {
  }
  /// Volá se na hlavním vlákně; výsledek předá hned, nebo nejpozději po `limit` sekundách nil.
  func wait(upTo limit:TimeInterval,_ completion:@escaping (CaptureContextFiles?)->Void){
+  dispatchPrecondition(condition:.onQueue(.main))
   var called=false
   let once:(CaptureContextFiles?)->Void={if !called{called=true;completion($0)}}
   lock.lock()

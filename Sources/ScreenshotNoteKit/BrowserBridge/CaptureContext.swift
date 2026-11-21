@@ -28,10 +28,24 @@ func browserCaptureWindow()->BrowserWindow? {
  return captureTarget(windows:windows,pid:app.processIdentifier).map{BrowserWindow(pid:app.processIdentifier,target:$0)}
 }
 private func windowNumber(_ window:[String:Any],_ key:CFString)->Int?{(window[key as String] as? NSNumber)?.intValue}
+/// Displeje v souřadnicích oken (počátek vlevo nahoře hlavního displeje).
+func displayBounds()->[CGRect]{
+ var count:UInt32=0;guard CGGetActiveDisplayList(0,nil,&count) == .success,count>0 else{return []}
+ var ids=[CGDirectDisplayID](repeating:0,count:Int(count));guard CGGetActiveDisplayList(count,&ids,&count) == .success else{return []}
+ return ids.prefix(Int(count)).map{CGDisplayBounds($0)}
+}
 /// Nejvyšší běžné okno procesu (vrstva 0) v bodech s počátkem vlevo nahoře.
-func captureTarget(windows:[[String:Any]],pid:pid_t)->[String:Any]? {
- for window in windows where windowNumber(window,kCGWindowLayer)==0 && windowNumber(window,kCGWindowOwnerPID)==Int(pid) {
-  guard let raw=window[kCGWindowBounds as String] as? NSDictionary,let rect=CGRect(dictionaryRepresentation:raw as CFDictionary),rect.width>=100,rect.height>=100 else{continue}
+func captureTarget(windows:[[String:Any]],pid:pid_t,screens:[CGRect]=displayBounds())->[String:Any]? {
+ let own=windows.filter{windowNumber($0,kCGWindowLayer)==0 && windowNumber($0,kCGWindowOwnerPID)==Int(pid)}
+ func bounds(_ window:[String:Any])->CGRect?{(window[kCGWindowBounds as String] as? NSDictionary).flatMap{CGRect(dictionaryRepresentation:$0 as CFDictionary)}}
+ for window in own {
+  guard var rect=bounds(window),rect.width>=100,rect.height>=100 else{continue}
+  // Celá obrazovka: Chrome okno rozdělí na pruhy, které dohromady pokryjí displej; cílem je celý displej.
+  if let screen=screens.first(where:{$0.contains(CGPoint(x:rect.midX,y:rect.midY))}) {
+   let parts=own.compactMap(bounds).filter{screen.insetBy(dx:-1,dy:-1).contains($0)}
+   let union=parts.reduce(CGRect.null){$0.union($1)}
+   if rect.width>=screen.width-1,parts.count>1,abs(union.minY-screen.minY)<=1,abs(union.maxY-screen.maxY)<=1,abs(union.width-screen.width)<=1{rect=screen}
+  }
   var target:[String:Any]=["windowBounds":["x":rect.minX,"y":rect.minY,"width":rect.width,"height":rect.height]]
   if let title=window[kCGWindowName as String] as? String,!title.isEmpty{target["windowTitle"]=title}
   return target

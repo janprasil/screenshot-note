@@ -87,6 +87,11 @@ import AppKit
  let plain=RemoteNote(id:on,title:"T",comment:"",template:"",captions:[""],images:[RemoteNote.Image(index:1,path:path+"/images/1")])
  try check(try JSONEncoder.sorted.encode(CloudFolders.normalizedAttachments(plain,path:path))==JSONEncoder.sorted.encode(plain),"old sessions keep their fingerprint")
 
+ // MD stažené relace má pod snímkem s kontextem callout s odkazy do assets/, ostatní beze změny.
+ let shown=RemoteNote(id:on,title:"T",comment:"",template:"{screenshots}",captions:[""],images:[RemoteNote.Image(index:1,path:path+"/images/1")])
+ let withContext=cloudSessionBody(shown,images:["S-1.png"],contexts:[1:["context":bundle,"har":har]])
+ try check(withContext.contains("[!bug]-") && withContext.contains("<assets/S-1.context.json>") && withContext.contains("<assets/S-1.har>"),"downloaded context gets the callout in Markdown")
+ try check(cloudSessionBody(shown,images:["S-1.png"])==cloudSessionBody(shown,images:["S-1.png"],contexts:[2:["context":bundle]]),"sessions without context keep their Markdown")
  // Zápis do assets/: příloha vedle obrázku, odebraná na serveru zmizí jen pokud přišla z cloudu.
  let assets=root.appendingPathComponent("assets");try fm.createDirectory(at:assets,withIntermediateDirectories:true)
  let files=try CloudFolders.shared.writeContextAttachments([2:["context":bundle,"har":har]],names:["S-1.png","S-2.png"],assets:assets)

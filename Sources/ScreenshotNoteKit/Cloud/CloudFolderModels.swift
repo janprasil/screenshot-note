@@ -57,12 +57,31 @@ struct FlexibleString:Decodable {
 }
 
 /// Markdown cloudové relace bez skrytých značek; obrázky podle zadaných názvů v assets/.
-func cloudSessionBody(_ note:RemoteNote,images names:[String])->String {
- let screenshots=screenshotsMarkdown(names,note.captions.map(escapeServerMarkdown))
+func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[String:Data]]=[:])->String {
+ // Stažený kontext dostane stejný callout s odkazy do assets/ jako lokální export.
+ var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
+ let screenshots=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->String in
+  var text=imageMarkdown(pair.0,offset+1)+(pair.1.isEmpty ? "":"\n\n"+pair.1)
+  if let side=contexts[offset+1],let data=side["context"],let summary=ContextSummary(data) {
+   let base=(pair.0 as NSString).deletingPathExtension,har=side["har"] != nil
+   text+="\n\n"+contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
+  }
+  return text
+ }.joined(separator:"\n\n")
  let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at)}
-  return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""))
+  return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""),context:sessionContextMarkdown(items))
 }
 
+/// Kontext uložený v assets/ podle čísla snímku (pro společný soubor, kde se skládá z disku).
+func diskContexts(_ names:[String],assets:URL)->[Int:[String:Data]] {
+ var result:[Int:[String:Data]]=[:]
+ for (offset,name) in names.enumerated() {
+  let files=assetContextFiles(assets,name)
+  guard let context=try? boundedData(files[0],max:maxContextBytes) else{continue}
+  result[offset+1]=["context":context].merging((try? boundedData(files[1],max:maxContextBytes)).map{["har":$0]} ?? [:]){a,_ in a}
+ }
+ return result
+}
 /// Tělo a metadata starého staženého souboru se značkami.
 func legacyCloudBody(_ text:String)->(String,SessionMetadata)? {
  let expression=try! NSRegularExpression(pattern:"\\A<!-- screenshot-note:begin [^ \\n]+ -->\\n([\\s\\S]*)<!-- screenshot-note:v1 ([A-Za-z0-9+/=]+) -->\\n?")

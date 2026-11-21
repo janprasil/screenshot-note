@@ -1,3 +1,4 @@
+import BridgeWire
 import Foundation
 
 // Native Messaging host: Chrome (stdio) ↔ appka (Unix socket). Běží i bez appky.

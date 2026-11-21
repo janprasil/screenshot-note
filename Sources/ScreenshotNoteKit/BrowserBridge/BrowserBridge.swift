@@ -1,3 +1,4 @@
+import BridgeWire
 import Foundation
 
 // Socket server pro screenshot-note-bridge. Každý připojený prohlížeč je jeden klient.

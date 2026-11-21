@@ -5,6 +5,13 @@ import AppKit
 /// Data prvku uložená v anotaci; číslo určuje pořadí v exportu.
 struct ElementInfo:Codable,Equatable {var number:Int;var selector:String;var tag:String;var name:String;var text:String}
 /// Prvek mapy v souřadnicích editoru (pixely obrázku, počátek vlevo dole).
+/// Rozpracovaný výběr: anotace, aktuální prvek, prvek pod prvním klikem a zda je popis potvrzený.
+struct ActiveElement {var mark:Int;var target:Int;var origin:Int;var confirmed=false}
+/// Nejvyšší číslo anotace Element, které už popisek obsahuje (relace otevřená znovu).
+func highestElementNumber(in caption:String)->Int{
+ let expression=try! NSRegularExpression(pattern:"^- \\*\\*\\[(\\d{1,6})\\] Element\\*\\*",options:[.anchorsMatchLines]),ns=caption as NSString
+ return expression.matches(in:caption,range:NSRange(location:0,length:ns.length)).compactMap{Int(ns.substring(with:$0.range(at:1)))}.max() ?? 0
+}
 struct ElementTarget:Equatable {var index:Int;var selector:String;var tag:String;var name:String;var text:String;var depth:Int;var rect:NSRect}
 
 func elementTargets(_ mapped:[MappedElement],imageHeight:CGFloat)->[ElementTarget]{
@@ -48,24 +55,25 @@ private func codeSpan(_ value:String)->String{
  return fence+pad+value+pad+fence
 }
 /// Řádky `- **[1] Element** `selector` „name“: popis` seřazené podle čísla; prvky mimo ořez vynechá.
-func elementMarkdownLines(_ marks:[Mark],crop:NSRect?)->String{
+func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->String{
  marks.compactMap{mark->(Int,String)? in
   guard mark.tool == .element,let info=mark.element else{return nil}
   if let crop,mark.bounds.intersection(crop).isNull{return nil}
   // Selektor nesmí vypadat jako odkaz na obrázek, jinak by ho znovuotevření relace bralo jako snímek.
-  var selector=flattened(info.selector,limit:300);if !imageLinks(selector).isEmpty{selector=flattened(info.tag,limit:40)}
+  var selector=flattened(info.selector,limit:300);if !imageLinks(selector).isEmpty{selector=flattened(info.tag,limit:40);if !imageLinks(selector).isEmpty{selector=""}}
   let label=flattened(info.name.isEmpty ? info.text:info.name,limit:80),note=flattened(mark.text,limit:2000)
   var line="- **[\(info.number)] Element**"
-  if !selector.isEmpty{line+=" "+codeSpan(selector)}
-  if !label.isEmpty{line+=" „"+escapedMarkdown(label)+"“"}
+  if pageData,!selector.isEmpty{line+=" "+codeSpan(selector)}
+  if pageData,!label.isEmpty{line+=" „"+escapedMarkdown(label)+"“"}
   if !note.isEmpty{line+=": "+note}
   return (info.number,line)
  }.sorted{$0.0<$1.0}.map{$0.1}.joined(separator:"\n")
 }
 /// Popisek obrázku doplněný o řádky anotací Element z pracovní kopie anotací.
-func captionWithElements(_ note:String,image:URL)->String{
+/// Bez `pageData` vynechá selektor a text stránky.
+func captionWithElements(_ note:String,image:URL,pageData:Bool=true)->String{
  guard let data=try? Data(contentsOf:annotationSidecar(image)),let document=try? JSONDecoder().decode(ElementSidecar.self,from:data) else{return note}
- return [note,elementMarkdownLines(document.marks,crop:document.crop)].filter{!$0.isEmpty}.joined(separator:"\n\n")
+ return [note,elementMarkdownLines(document.marks,crop:document.crop,pageData:pageData)].filter{!$0.isEmpty}.joined(separator:"\n\n")
 }
 /// Po ořezu v editoru přepíše `capture` v exportovaném kontextu na oříznutou část.
 func adjustContextCapture(_ contextFile:URL,annotations:URL){
@@ -75,39 +83,44 @@ func adjustContextCapture(_ contextFile:URL,annotations:URL){
  guard abs(document.crop.minX-full.minX)>0.5 || abs(document.crop.minY-full.minY)>0.5 || abs(document.crop.width-full.width)>0.5 || abs(document.crop.height-full.height)>0.5,
   full.insetBy(dx:-0.5,dy:-0.5).contains(document.crop) else{return}
  object["capture"]=croppedCapture(capture,crop:document.crop).json
- guard let output=try? JSONSerialization.data(withJSONObject:object) else{return}
- try? output.write(to:contextFile,options:.atomic);try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:contextFile.path)
+ // Nový soubor vzniká rovnou jen pro vlastníka a pak nahradí původní.
+ let temporary=contextFile.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).tmp")
+ guard let output=try? JSONSerialization.data(withJSONObject:object),fm.createFile(atPath:temporary.path,contents:output,attributes:[.posixPermissions:0o600]) else{return}
+ // replaceItemAt převezme práva původního souboru, proto se nastaví znovu.
+ if (try? fm.replaceItemAt(contextFile,withItemAt:temporary)) == nil{try? fm.removeItem(at:temporary);return}
+ try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:contextFile.path)
 }
 
 // MARK: Editor
 
 extension DrawingView:NSTextFieldDelegate {
  var visibleElements:[ElementTarget]{clippedTargets(elementMap,to:viewport)}
- var nextElementNumber:Int{(marks.compactMap{$0.element?.number}.max() ?? 0)+1}
+ var nextElementNumber:Int{max(marks.compactMap{$0.element?.number}.max() ?? 0,firstElementNumber-1)+1}
  func elementMark(_ target:ElementTarget,number:Int)->Mark{
   var mark=Mark(tool:.element,points:[target.rect.origin,NSPoint(x:target.rect.maxX,y:target.rect.maxY)],color:color,width:max(2,min(thickness,6)),text:"",bold:false,italic:false,underline:false,fontSize:fontSize)
   mark.element=ElementInfo(number:number,selector:target.selector,tag:target.tag,name:target.name,text:target.text);return mark
  }
  func renumberElements(){
   let order=marks.indices.filter{marks[$0].element != nil}.sorted{marks[$0].element!.number<marks[$1].element!.number}
-  for (number,index) in order.enumerated(){marks[index].element?.number=number+1}
+  for (number,index) in order.enumerated(){marks[index].element?.number=firstElementNumber+number}
  }
- /// Klik vybere nejmenší prvek; klik do právě vybraného nebo s ⌥ posune výběr na rodiče.
+ /// Klik vybere nejmenší prvek; opakovaný klik na stejný prvek nebo s ⌥ posune výběr na rodiče.
  func elementClick(_ point:NSPoint,parent:Bool){
-  let visible=visibleElements
-  if let active=activeElement,marks.indices.contains(active.mark),marks[active.mark].tool == .element,let current=visible.first(where:{$0.index==active.target}),current.rect.contains(point){
-   if let up=parentElement(of:current,in:visible){snapshot();let number=marks[active.mark].element?.number ?? nextElementNumber,note=marks[active.mark].text;marks[active.mark]=elementMark(up,number:number);marks[active.mark].text=note;activeElement=(active.mark,up.index)}
+  let visible=visibleElements,smallest=smallestElement(at:point,in:visible)
+  if let active=activeElement,marks.indices.contains(active.mark),marks[active.mark].tool == .element,let current=visible.first(where:{$0.index==active.target}),current.rect.contains(point),smallest?.index==active.origin || parent{
+   if let up=parentElement(of:current,in:visible){snapshot();let number=marks[active.mark].element?.number ?? nextElementNumber,note=marks[active.mark].text;marks[active.mark]=elementMark(up,number:number);marks[active.mark].text=note;activeElement?.target=up.index;activeElement?.confirmed=false}
    choose(active.mark);startElementNote(active.mark);return
   }
-  guard var target=smallestElement(at:point,in:visible) else{activeElement=nil;choose(nil);return}
+  guard var target=smallest else{activeElement=nil;choose(nil);return}
+  let origin=target.index
   if parent,let up=parentElement(of:target,in:visible){target=up}
-  snapshot();marks.append(elementMark(target,number:nextElementNumber));activeElement=(marks.count-1,target.index)
+  snapshot();marks.append(elementMark(target,number:nextElementNumber));activeElement=ActiveElement(mark:marks.count-1,target:target.index,origin:origin)
   choose(marks.count-1);startElementNote(marks.count-1)
  }
  /// Esc zruší rozpracovaný výběr; bez něj ukončí nástroj.
  func cancelActiveElement(){
   dropElementField()
-  if let active=activeElement,marks.indices.contains(active.mark),marks[active.mark].tool == .element{snapshot();marks.remove(at:active.mark);renumberElements();choose(nil)}
+  if let active=activeElement,!active.confirmed,marks.indices.contains(active.mark),marks[active.mark].tool == .element{snapshot();marks.remove(at:active.mark);renumberElements();choose(nil)}
   else if activeElement == nil{tool = .select}
   activeElement=nil;hoverElement=nil;needsDisplay=true;changed?()
  }
@@ -127,16 +140,24 @@ extension DrawingView:NSTextFieldDelegate {
   guard let field=elementField else{return}
   closingElementNote=true;field.removeFromSuperview();elementField=nil;elementFieldIndex=nil;closingElementNote=false;window?.makeFirstResponder(self)
  }
+ /// Enter potvrdí popis; výběr zůstává aktivní pro opakovaný klik na rodiče.
+ func confirmElementNote(){commitElementNote();activeElement?.confirmed=true}
+ /// Plocha anotace Element pro výběr: okraj a odznak, aby šlo vybrat i anotace pod ní.
+ func elementHit(_ mark:Mark,at point:NSPoint,tolerance:CGFloat)->Bool{
+  let rect=mark.bounds,size=max(24,mark.width*6),band=max(tolerance,mark.width)
+  if hypot(point.x-rect.minX,point.y-rect.maxY)<=size/2+tolerance{return true}
+  return rect.insetBy(dx:-band,dy:-band).contains(point) && !rect.insetBy(dx:band,dy:band).contains(point)
+ }
  func commitElementNote(){
   guard !closingElementNote,let field=elementField,let i=elementFieldIndex else{return}
   let value=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
   dropElementField()
-  if marks.indices.contains(i),marks[i].tool == .element,marks[i].text != value{marks[i].text=value;changed?()}
+  if marks.indices.contains(i),marks[i].tool == .element,marks[i].text != value{snapshot();marks[i].text=value;changed?()}
   needsDisplay=true
  }
  func control(_ control:NSControl,textView:NSTextView,doCommandBy selector:Selector)->Bool{
   guard control === elementField else{return false}
-  if selector==#selector(NSResponder.insertNewline(_:)){commitElementNote();activeElement=nil;return true}
+  if selector==#selector(NSResponder.insertNewline(_:)){confirmElementNote();return true}
   if selector==#selector(NSResponder.cancelOperation(_:)){cancelActiveElement();return true}
   return false
  }

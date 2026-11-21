@@ -13,7 +13,7 @@ struct Draft: Codable { var images: [String]; var comment: String; var title: St
 /// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
 func draftSignature(_ draft:Draft,root:URL)->String {
  var parts=[draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",draft.comment]
- for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image);if draft.contexts?[image] != nil{parts.append("context")}}
+ for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image);if let hash=fileHash(annotationSidecar(root.appendingPathComponent(image))){parts.append(hash)};if draft.contexts?[image] != nil{parts.append("context")}}
  if let removed=draft.removedContexts,!removed.isEmpty{parts.append(removed.sorted().joined(separator:"/"))}
  return sessionFingerprint(Data(parts.joined(separator:"\u{0}").utf8))
 }
@@ -104,7 +104,8 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    try copyContext(image,as:filename);imageNames.append(filename)
   }
   // Anotace Element se vypíšou pod popisek obrázku a zůstanou v něm i pro přerenderování.
-  let captions=draft.images.map{captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0))}
+  // Bez kontextu (odebraný nebo vypnutý politikou) jdou ven jen čísla a popisy, ne data stránky.
+  let captions=draft.images.map{captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:keepContext && draft.contexts?[$0] != nil)}
   let rendered=screenshotsWithContext(imageNames,captions,assets:assets,without:Set(removedContext.keys))
   let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate

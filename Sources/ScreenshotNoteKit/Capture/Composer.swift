@@ -351,7 +351,7 @@ final class Composer:NSObject,NSWindowDelegate {
  @objc func edit(_ sender:NSButton){
   guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images[sender.tag]
   childEditorOpen=true;defer{childEditorOpen=false};let editor=AnnotationEditor()
-  if editor.run(url:root.appendingPathComponent(name)){reloadThumbnails()};window.makeKeyAndOrderFront(nil)
+  if editor.run(url:root.appendingPathComponent(name),caption:draft.imageNotes?[name] ?? ""){reloadThumbnails()};window.makeKeyAndOrderFront(nil)
  }
 
  @objc func editImageNote(_ sender:NSButton){

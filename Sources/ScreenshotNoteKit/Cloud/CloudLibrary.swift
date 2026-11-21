@@ -171,7 +171,8 @@ final class CloudLibrary {
   guard base != nil || draft.topic?.cloudFolderID != nil else { throw CloudFailure(L("Do cloudu lze ukládat jen do cloudové složky. Vyber cloudovou složku; poznámka zůstává uložená lokálně."),code:"folder_required") }
   if base == nil && isCommitted(id,folder:draft.topic?.cloudFolderID){return id}
   if let base { guard draft.images.count > base.count else { throw CloudFailure(L("Přidej do cloudové relace alespoň jeden nový snímek.")) } }
-  let captions = draft.images.map { draft.imageNotes?[$0] ?? "" }
+  // Cloud zatím nenese kontext stránky, proto jen čísla a popisy anotací Element.
+  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:false) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   let heading = title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot", config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),

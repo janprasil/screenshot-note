@@ -40,7 +40,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  var bold=false;var italic=false;var underline=false;var fontSize:CGFloat=28
  var changed:(()->Void)?;var dragStart:NSPoint?;var dragOriginal:[NSPoint]?;var cropStart:NSPoint?;var cropPreview:NSRect?
  var history:[([Mark],NSRect)]=[];var inline:NSTextView?;var editingIndex:Int?;var closingText=false;var transformDrag:AnnotationTransformDrag?
- var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:(mark:Int,target:Int)?;var elementField:NSTextField?;var elementFieldIndex:Int?;var closingElementNote=false;var trackingArea:NSTrackingArea?
+ var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:ActiveElement?;var firstElementNumber=1;var elementField:NSTextField?;var elementFieldIndex:Int?;var closingElementNote=false;var trackingArea:NSTrackingArea?
  override var acceptsFirstResponder:Bool{true}
  override var mouseDownCanMoveWindow:Bool{false}
  var toolCursor:NSCursor{tool == .text ? .iBeam:(tool == .select ? .arrow:(tool == .element ? .pointingHand:.crosshair))}
@@ -84,7 +84,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  }
  func hit(_ p:NSPoint)->Int?{let tolerance=max(6/scale,3);return marks.indices.reversed().first{index in let mark=marks[index],r=mark.bounds;let p=mark.unrotatedPoint(p);if mark.tool == .text{return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p)}
    if mark.tool == .ellipse {let rx=max(1,r.width/2),ry=max(1,r.height/2);let value=pow((p.x-r.midX)/rx,2)+pow((p.y-r.midY)/ry,2);return abs(sqrt(value)-1)<=max(tolerance,mark.width)/min(rx,ry)}
-   if mark.tool == .element {return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p)}
+   if mark.tool == .element {return elementHit(mark,at:p,tolerance:tolerance)}
    if mark.tool == .rectangle {return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p) && !r.insetBy(dx:tolerance,dy:tolerance).contains(p)}
    for j in 1..<mark.points.count{let a=mark.points[j-1],b=mark.points[j],dx=b.x-a.x,dy=b.y-a.y;let t=max(0,min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/max(0.001,dx*dx+dy*dy)));if hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<=max(tolerance,mark.width){return true}};return false
   }}
@@ -183,7 +183,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  var onValuePickerPresented:((NSWindow,[NSButton])->Void)?
  let colors=ModalColorWell();var width:NSButton!;var size:NSButton!;var textControls:[NSView]=[];var styleButtons:[NSButton]=[]
  func icon(_ symbol:String,_ help:String,_ action:Selector,_ frame:NSRect)->NSButton{let b=AnnotationToolButton(image:NSImage(systemSymbolName:symbol,accessibilityDescription:help) ?? NSImage(),target:self,action:action);b.frame=frame;b.toolTip=help;b.bezelStyle = .texturedRounded;b.autoresizingMask=[.minYMargin];window.contentView!.addSubview(b);return b}
- func run(url:URL)->Bool{
+ /// `caption` je popisek obrázku; čísla nových anotací Element navážou na řádky v něm.
+ func run(url:URL,caption:String="")->Bool{
   workingURL=url
   do{baseData=try Data(contentsOf:url)}catch{return false}
   var document:AnnotationDocument?
@@ -206,7 +207,7 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   size=icon("textformat.size",L("Velikost textu"),#selector(sizeMenu),NSRect(x:460+shift,y:h-48,width:36,height:34));textControls.append(size)
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
-  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32,height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32,height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
   let cancel=styledButton(L("Zrušit"),role:.quiet,frame:NSRect(x:20,y:18,width:100,height:34),target:self,action:#selector(cancel));cancel.keyEquivalent="\u{1b}";window.contentView!.addSubview(cancel)
   let apply=styledButton(L("Použít úpravy"),symbol:"checkmark",role:.primary,frame:NSRect(x:w-190,y:18,width:170,height:34),target:self,action:#selector(apply));apply.autoresizingMask=[.minXMargin];apply.keyEquivalent="\r";window.contentView!.addSubview(apply)
   recordInitialState()
@@ -252,12 +253,21 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  }
  @objc func undoMark(){canvas.undoChange()};@objc func deleteMark(){canvas.delete(nil)}
 
+ /// Esc a Enter při výběru elementu patří editoru elementu, ne tlačítkům okna.
+ func elementKey(_ code:UInt16)->Bool{
+  guard canvas != nil,canvas.tool == .element,let event=NSApp.currentEvent,event.type == .keyDown,event.keyCode==code else{return false}
+  if code==53,canvas.activeElement != nil || canvas.elementField != nil{canvas.cancelActiveElement();return true}
+  if code==36 || code==76,canvas.elementField != nil{canvas.confirmElementNote();return true}
+  return false
+ }
  @objc func apply(){
+  if elementKey(36) || elementKey(76){return}
   window.makeFirstResponder(nil);canvas.finishText()
   do{try saveWorkingImage()}catch{showError(error.localizedDescription);return}
   colors.deactivate();NSColorPanel.shared.orderOut(nil);accepted=true;NSApp.stopModal()
  }
  @objc func cancel(){
+  if elementKey(53){return}
   canvas.finishText()
   switch requestedCloseChoice(confirm:{AnnotationCloseDialog().run()}){
   case .save:apply()

@@ -34,6 +34,19 @@ import AppKit
  try check(canvas.marks.count==1 && canvas.activeElement==nil && canvas.elementField==nil,"escape cancels pending element")
  canvas.cancelActiveElement()
  try check(canvas.tool == .select,"escape without selection leaves the tool")
+ // Po Enteru zůstane výběr pro rodiče, Esc už potvrzenou anotaci nesmaže; klik na jiné dítě vybere nový prvek.
+ canvas.tool = .element;canvas.marks=[];canvas.elementClick(NSPoint(x:300,y:300),parent:false);canvas.confirmElementNote()
+ canvas.elementClick(NSPoint(x:300,y:300),parent:false)
+ try check(canvas.marks.count==1 && canvas.marks[0].element?.selector=="#e0","click after Enter climbs to the parent")
+ canvas.confirmElementNote();canvas.elementClick(NSPoint(x:160,y:160),parent:false)
+ try check(canvas.marks.count==2 && canvas.marks[1].element?.selector=="#e3","click on another child inside the active parent selects it")
+ canvas.confirmElementNote();canvas.cancelActiveElement()
+ try check(canvas.marks.count==2,"escape keeps a confirmed element")
+ try check(canvas.hit(NSPoint(x:500,y:400))==nil && canvas.hit(NSPoint(x:999,y:400)).map{canvas.marks[$0].tool == .element}==true,"element hit only on the border")
+ // Znovu otevřená relace: čísla navážou na řádky v popisku.
+ try check(highestElementNumber(in:"Popis\n\n- **[1] Element** `a`\n- **[12] Element**: x\n text - **[99] Element**")==12,"highest element number in caption")
+ canvas.marks=[];canvas.firstElementNumber=13;canvas.elementClick(NSPoint(x:160,y:160),parent:false)
+ try check(canvas.marks.first?.element?.number==13,"numbering continues after reopened caption");canvas.firstElementNumber=1;canvas.marks=[];canvas.activeElement=nil;canvas.commitElementNote()
 
  // Ořez: prvky se oříznou nebo vynechají a výřez snímku se posune.
  let clipped=clippedTargets(targets,to:NSRect(x:120,y:0,width:880,height:800))
@@ -69,13 +82,19 @@ import AppKit
   mark.element=ElementInfo(number:number,selector:selector,tag:tag,name:name,text:text);return mark
  }
  let marks=[exported(2,button.rect,selector:"a`b",text:"Hello\n  world"),exported(1,button.rect,selector:"button[data-testid=\"save\"]",name:"Uložit",note:"Klik nic\nneudělá"),
-  exported(3,NSRect(x:900,y:700,width:50,height:50),selector:"#out"),exported(4,button.rect,selector:"img[alt=\"![x](assets/evil.png)\"]",tag:"img",name:"![y](assets/z.png)"),
+  exported(3,NSRect(x:900,y:700,width:50,height:50),selector:"#out"),exported(5,button.rect,selector:"![[assets/a.png]]",tag:"![[assets/b.png]]"),exported(4,button.rect,selector:"img[alt=\"![x](assets/evil.png)\"]",tag:"img",name:"![y](assets/z.png)"),
   Mark(tool:.rectangle,points:[.zero,NSPoint(x:5,y:5)],color:.red,width:2,text:"",bold:false,italic:false,underline:false,fontSize:14)]
  let lines=elementMarkdownLines(marks,crop:NSRect(x:0,y:0,width:500,height:500))
- let expected="- **[1] Element** `button[data-testid=\"save\"]` „Uložit“: Klik nic neudělá\n- **[2] Element** ``a`b`` „Hello world“\n- **[4] Element** `img` „\\!\\[y\\]\\(assets/z.png\\)“"
+ let expected="- **[1] Element** `button[data-testid=\"save\"]` „Uložit“: Klik nic neudělá\n- **[2] Element** ``a`b`` „Hello world“\n- **[4] Element** `img` „\\!\\[y\\]\\(assets/z.png\\)“\n- **[5] Element**"
  try check(lines==expected,"element lines:\n\(lines)")
  try check(imageLinks(lines).isEmpty,"page text cannot create image links")
  try JSONEncoder().encode(AnnotationDocument(base:Data(),marks:marks,crop:NSRect(x:0,y:0,width:500,height:500))).write(to:annotationSidecar(image))
  try check(captionWithElements("Popisek",image:image)=="Popisek\n\n"+expected && captionWithElements("",image:image)==expected,"caption with elements")
  try check(captionWithElements("Jen text",image:folder.appendingPathComponent("missing.png"))=="Jen text","caption without annotations")
+ try check(captionWithElements("",image:image,pageData:false)=="- **[1] Element**: Klik nic neudělá\n- **[2] Element**\n- **[4] Element**\n- **[5] Element**","cloud caption without page data")
+ // Úprava popisu existujícího elementu jde vrátit.
+ let undoCanvas=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
+ undoCanvas.marks=[exported(1,button.rect,selector:"#b",note:"Původní")];undoCanvas.startElementNote(0);undoCanvas.elementField?.stringValue="Nový";undoCanvas.commitElementNote()
+ try check(undoCanvas.marks[0].text=="Nový","note edited");undoCanvas.undoChange()
+ try check(undoCanvas.marks[0].text=="Původní","undo restores the element note")
 }

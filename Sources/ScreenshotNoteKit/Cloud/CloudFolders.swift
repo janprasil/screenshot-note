@@ -936,6 +936,8 @@ final class CloudFolders {
    if saved != record{index.put(saved)};return
   }
   let data=try await images(note,topic:topic,endpoint:endpoint,token:token),shas=data.map(sessionFingerprint)
+  let contexts=try await contextAttachments(note,topic:topic,endpoint:endpoint,token:token)
+  func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har")}
   guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
   try Topics.validateDestination(topic,folder:base,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
   let assets=base.appendingPathComponent("assets");try fm.createDirectory(at:assets,withIntermediateDirectories:true)
@@ -951,8 +953,9 @@ final class CloudFolders {
    var files:[String:Data]=[markdown:Data(body.utf8)];for (name,bytes) in zip(names,data){files["assets/"+name]=bytes}
    try fm.createDirectory(at:directory.appendingPathComponent("assets"),withIntermediateDirectories:true)
    for (name,bytes) in files{try bytes.write(to:directory.appendingPathComponent(name),options:.atomic)}
-   for name in saved.files.keys where files[name]==nil{try? fm.removeItem(at:directory.appendingPathComponent(name))}
-   var next=finished(URL(fileURLWithPath:saved.file),body,names,files.mapValues(sessionFingerprint));next.flat=nil;next.inode=itemIdentity(directory)
+   let sides=try writeContextAttachments(contexts,names:names,assets:directory.appendingPathComponent("assets"),previous:saved.files)
+   for name in saved.files.keys where files[name]==nil && sides[name]==nil{try? fm.removeItem(at:directory.appendingPathComponent(name))}
+   var next=finished(URL(fileURLWithPath:saved.file),body,names,files.mapValues(sessionFingerprint).merging(sides){a,_ in a});next.flat=nil;next.inode=itemIdentity(directory)
    index.put(next);writeSessionTag(directory,lower);writeSessionTag(directory.appendingPathComponent(markdown),lower);return
   }
   if let saved=record,exists(saved) {
@@ -963,13 +966,14 @@ final class CloudFolders {
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
    if unmodified,saved.shas==shas,saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
-    var same=saved;same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;index.put(same);return
+    var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
     let body=cloudSessionBody(note,images:names);var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
     for (name,bytes) in zip(names,data){let url=assets.appendingPathComponent(name);if fileHash(url) != sessionFingerprint(bytes){try bytes.write(to:url,options:.atomic)};files["assets/"+name]=sessionFingerprint(bytes)}
     try Data(body.utf8).write(to:markdown,options:.atomic)
+    files.merge(try writeContextAttachments(contexts,names:names,assets:assets,previous:saved.files)){a,_ in a}
     index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower);return
    }
    // Upravená místní kopie zůstává; cloudová verze jde vedle jako <název>_cloud.md.
@@ -991,6 +995,7 @@ final class CloudFolders {
   var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
   for (name,bytes) in zip(names,data){try bytes.write(to:assets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
   try Data(body.utf8).write(to:markdown,options:.withoutOverwriting)
+  files.merge(try writeContextAttachments(contexts,names:names,assets:assets)){a,_ in a}
   index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower)
  }
  private func uniqueStem(_ name:String,base:URL)->String {
@@ -1139,6 +1144,7 @@ final class CloudFolders {
   let data=try await request(endpoint,path,token,CloudTransport.jsonLimit)
   var note=try JSONDecoder().decode(FolderEnvelope<RemoteNote>.self,from:data).data
   if note.comments?.isEmpty==true{note.comments=nil}
+  note=Self.normalizedAttachments(note,path:path)
   let stamp=(try? JSONDecoder().decode(FolderEnvelope<RemoteNoteStamp>.self,from:data))?.data
   guard note.id==id,(1...30).contains(note.images.count),note.captions.count==note.images.count,
         note.images.enumerated().allSatisfy({$0.element.index==$0.offset+1 && $0.element.path==path+"/images/\($0.offset+1)"}) else{throw CloudFailure.invalid}
@@ -1147,6 +1153,46 @@ final class CloudFolders {
  private func isCurrent(_ topic:Topic,token:String)->Bool {
   currentConnection()?.token==token && account?.0==currentConnection()?.ownerID && account?.1==topic.cloudOrigin &&
    records.contains(where:{matches($0,topic) && $0.folder==topic.folder && $0.unavailable != true && $0.remoteDeleted != true})
+ }
+ /// Platné přílohy kontextu; neznámé nebo nesedící záznamy se zahodí, prázdný seznam je nil.
+ static func normalizedAttachments(_ source:RemoteNote,path:String)->RemoteNote {
+  var note=source
+  note.images=note.images.map{image in
+   var copy=image
+   let valid=(image.attachments ?? []).filter{["context","har"].contains($0.kind) && (1...CloudAttachment.limit).contains($0.bytes) && $0.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
+    && $0.path==path+"/attachments/\(image.index)/\($0.kind)"}
+   copy.attachments=valid.isEmpty ? nil:Array(Dictionary(valid.map{($0.kind,$0)},uniquingKeysWith:{a,_ in a}).values).sorted{$0.kind<$1.kind}
+   return copy
+  }
+  return note
+ }
+ /// Stáhne přílohy kontextu a ověří velikost a hash; výsledek je index snímku → druh → data.
+ @MainActor private func contextAttachments(_ note:RemoteNote,topic:Topic,endpoint:CloudEndpoint,token:String)async throws->[Int:[String:Data]] {
+  var result:[Int:[String:Data]]=[:]
+  for image in note.images {
+   for item in image.attachments ?? [] {
+    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
+    let data=try await request(endpoint,item.path,token,CloudAttachment.limit+1)
+    guard data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{throw CloudFailure.invalid}
+    result[image.index,default:[:]][item.kind]=data
+   }
+  }
+  return result
+ }
+ /// Zapíše přílohy vedle obrázků v assets/ (`<název>.context.json`, `<název>.har`) a vrátí jejich hashe pro index relace.
+ func writeContextAttachments(_ contexts:[Int:[String:Data]],names:[String],assets:URL,prefix:String="assets/",previous:[String:String]=[:])throws->[String:String] {
+  var files:[String:String]=[:]
+  for (position,name) in names.enumerated() {
+   for (kind,target) in zip(["context","har"],assetContextFiles(assets,name)) {
+    let key=prefix+target.lastPathComponent
+    if let data=contexts[position+1]?[kind] {
+     if fileHash(target) != sessionFingerprint(data){try data.write(to:target,options:.atomic);try? fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:target.path)}
+     files[key]=sessionFingerprint(data)
+    // Smazat jen přílohu staženou dřív z cloudu; místní soubor zůstává.
+    } else if previous[key] != nil,fm.fileExists(atPath:target.path){try fm.removeItem(at:target)}
+   }
+  }
+  return files
  }
  @MainActor private func images(_ note:RemoteNote,topic:Topic,endpoint:CloudEndpoint,token:String)async throws->[Data] {
   var total=0;var result:[Data]=[]

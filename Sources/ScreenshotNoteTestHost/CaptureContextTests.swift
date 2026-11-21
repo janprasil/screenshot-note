@@ -45,8 +45,16 @@ import AppKit
  var dependent=ContextPolicy();dependent.includeNetwork=false;dependent.includeBodies=true;dependent.includeElements=false
  try check(dependent.protocolJSON["includeBodies"] as? Bool==false && dependent.protocolJSON["includeElementText"] as? Bool==false && JSONSerialization.isValidJSONObject(ContextPolicy().protocolJSON),"dependent policy flags")
  var disabled=local;disabled.contextPolicy=ContextPolicy();disabled.contextPolicy?.enabled=false
- var cloudFolder=local;cloudFolder.cloudFolderID=UUID();cloudFolder.contextPolicy=custom
- try check(disabled.effectiveContextPolicy==nil && cloudFolder.effectiveContextPolicy==nil && stored.effectiveContextPolicy==custom,"disabled and cloud folders send no policy")
+ // Cloudová složka: bez místního nastavení vypnuto, zapnutí platí jen pro tento Mac, snímek draftu má přednost.
+ let suite="ScreenshotNoteTests.\(UUID().uuidString)",previousDefaults=CloudContextPolicies.defaults
+ CloudContextPolicies.defaults=UserDefaults(suiteName:suite)!;defer{CloudContextPolicies.defaults.removePersistentDomain(forName:suite);CloudContextPolicies.defaults=previousDefaults}
+ var cloudFolder=local;cloudFolder.cloudFolderID=UUID();cloudFolder.contextPolicy=nil
+ try check(disabled.effectiveContextPolicy==nil && cloudFolder.effectiveContextPolicy==nil && stored.effectiveContextPolicy==custom,"disabled and unset cloud folders send no policy")
+ CloudContextPolicies.set(custom,for:cloudFolder.cloudFolderID!)
+ var otherCloud=cloudFolder;otherCloud.cloudFolderID=UUID()
+ try check(cloudFolder.effectiveContextPolicy==custom && otherCloud.effectiveContextPolicy==nil,"cloud folder policy is stored per folder on this Mac")
+ var snapshot=cloudFolder;snapshot.contextPolicy=disabled.contextPolicy
+ try check(snapshot.effectiveContextPolicy==nil,"draft snapshot policy wins over the stored cloud policy")
  try check(contextPolicySummary(ContextPolicy())=="Konzole, network, prvky s texty · cookies a tokeny vždy skryté","policy summary: \(contextPolicySummary(ContextPolicy()))")
 
  // Odpověď jiného okna se nepřijme; zoom stránky měřítko geometrie mění.

@@ -36,8 +36,13 @@ struct CloudAuthor:Codable,Equatable{let id:UUID?;let name:String?}
 
 struct RemoteNote:Codable,Equatable {
  let id:UUID;let title:String;let comment:String;let template:String;let captions:[String]
- struct Image:Codable,Equatable{let index:Int;let path:String}
- let images:[Image]
+ struct Image:Codable,Equatable{
+  let index:Int;let path:String
+  /// Přílohy kontextu z prohlížeče; prázdný seznam je nil, aby se otisk relací bez kontextu nezměnil.
+  struct Attachment:Codable,Equatable{let kind:String;let bytes:Int;let sha256:String;let path:String}
+  var attachments:[Attachment]? = nil
+ }
+ var images:[Image]
  // Komentáře z detailu; prázdný seznam je nil, aby se otisk starších relací nezměnil.
  struct Comment:Codable,Equatable{let author_name:String?;let body:String;let created_at:String?}
  var comments:[Comment]? = nil

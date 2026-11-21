@@ -542,3 +542,8 @@
 "%ld selhaných" = "%ld failed";
 "Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší" = "Page element · click to select, click again or ⌥ for the parent, Esc to cancel";
 "Popis elementu · Enter potvrdí, Esc zruší výběr" = "Element note · Enter to confirm, Esc to cancel";
+"Nahrává se do cloudu: %@" = "Uploaded to the cloud: %@";
+"Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu." = "Console, requests and the element map are uploaded to the cloud as screenshot attachments. This setting applies to this Mac only.";
+"Nahrávat kontext z prohlížeče do cloudu?" = "Upload browser context to the cloud?";
+"Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Each Chrome screenshot uploads the page address and title, the console, the request list (HAR) and the element map with texts as configured. Cookies and authorization headers are always hidden. All folder members can see the attachments on the web and in MCP. Encryption is not available yet.";
+"Zapnout" = "Turn On";

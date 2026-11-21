@@ -110,10 +110,17 @@ struct ContextPolicy:Codable,Equatable {
    "redactCookies":true,"redactAuthHeaders":true,"redactHeaders":redactHeaders,"redactQueryParams":redactQueryParams]
  }
 }
+/// Politika kontextu cloudových složek uložená v UserDefaults tohoto Macu; bez záznamu je kontext vypnutý.
+enum CloudContextPolicies {
+ static let key="CloudContextPolicies"
+ static var defaults=UserDefaults.standard
+ private static func all()->[String:ContextPolicy]{defaults.data(forKey:key).flatMap{try? JSONDecoder().decode([String:ContextPolicy].self,from:$0)} ?? [:]}
+ static func policy(_ folder:UUID)->ContextPolicy{all()[folder.uuidString.lowercased()] ?? {var off=ContextPolicy();off.enabled=false;return off}()}
+ static func set(_ policy:ContextPolicy,for folder:UUID){var value=all();value[folder.uuidString.lowercased()]=policy;defaults.set(try? JSONEncoder().encode(value),forKey:key)}
+}
 extension Topic {
- /// Cloudové složky kontext zatím nepřikládají (upload je F6); lokální podle své politiky.
- var contextAvailable:Bool{cloudFolderID == nil}
- var effectiveContextPolicy:ContextPolicy?{let policy=contextPolicy ?? ContextPolicy();return contextAvailable && policy.enabled ? policy:nil}
+ /// Cloudová složka má politiku jen na tomto Macu (výchozí vypnuto); snímek draftu ji nese v `contextPolicy`.
+ var effectiveContextPolicy:ContextPolicy?{let policy=contextPolicy ?? cloudFolderID.map{CloudContextPolicies.policy($0)} ?? ContextPolicy();return policy.enabled ? policy:nil}
  /// Aktuální nastavení složky ze seznamu; složka, která už neexistuje nebo se přesunula do cloudu, kontext nepřikládá.
  func currentContextPolicy(in folders:[Topic])->ContextPolicy?{folders.first{$0.id==id}?.effectiveContextPolicy}
 }

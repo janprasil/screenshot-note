@@ -200,7 +200,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
-  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;contextPolicy=topic.contextPolicy ?? ContextPolicy()
+  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy()
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
  }
@@ -302,19 +302,30 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   alert.addButton(withTitle:L("Použít"));alert.addButton(withTitle:L("Zrušit"))
   return alert.runModal() == .alertFirstButtonReturn
  }
- /// Cloudové složky mají kontext vypnutý, dokud nebude upload (F6).
+ /// Cloudové složky mají kontext ve výchozím stavu vypnutý; zapnutí nahrává přílohy do cloudu.
  func updateContext(){
   guard let contextButton else{return}
   let cloud=editingCloud
   // Bez společného souboru je řádek hned pod režimem ukládání.
   let top:CGFloat=mode.indexOfSelectedItem==1 ? 126:178
   contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-24;contextButton.frame.origin.y=top-6
-  contextToggle.state=(!cloud && contextPolicy.enabled) ? .on:.off;contextToggle.isEnabled = !cloud && editingManaged
-  contextButton.isEnabled = !cloud && contextPolicy.enabled && editingManaged
-  contextCaption.stringValue=cloud ? L("Pro cloudové složky připravujeme."):(contextPolicy.enabled ? contextPolicySummary(contextPolicy):L("Snímky z prohlížeče se uloží bez kontextu."))
-  contextToggle.toolTip=cloud ? L("Kontext z prohlížeče se zatím ukládá jen do lokálních složek."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
+  contextToggle.state=contextPolicy.enabled ? .on:.off;contextToggle.isEnabled=editingManaged || cloud
+  contextButton.isEnabled=contextPolicy.enabled && (editingManaged || cloud)
+  contextCaption.stringValue=contextPolicy.enabled ? (cloud ? LF("Nahrává se do cloudu: %@",contextPolicySummary(contextPolicy)):contextPolicySummary(contextPolicy)):L("Snímky z prohlížeče se uloží bez kontextu.")
+  contextToggle.toolTip=cloud ? L("Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
  }
- @objc func toggleContext(){contextPolicy.enabled=contextToggle.state == .on;updateContext()}
+ @objc func toggleContext(){
+  if contextToggle.state == .on,editingCloud,!confirmCloudContext(){contextToggle.state = .off;return}
+  contextPolicy.enabled=contextToggle.state == .on;updateContext()
+ }
+ /// Varování před nahráním kontextu do cloudu; data čte každý člen složky.
+ func confirmCloudContext()->Bool {
+  let alert=NSAlert();alert.alertStyle = .warning
+  alert.messageText=L("Nahrávat kontext z prohlížeče do cloudu?")
+  alert.informativeText=L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.")
+  alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Zrušit"))
+  return alert.runModal() == .alertFirstButtonReturn
+ }
  /// Dialog s tím, co se přikládá a co se skrývá; zamčené položky rozšíření skryje vždy.
  @objc func editContext(){
   let policy=contextPolicy,width:CGFloat=420
@@ -383,6 +394,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let filename=(filenameFromTitle(rawFile) ?? filenameFromTitle(title) ?? "Screenshoty")+".md"
   if editingCloud {
    guard let original=list.first(where:{$0.id==editingID}) else{return}
+   // Politika kontextu cloudové složky je místní nastavení tohoto Macu.
+   if let folder=original.cloudFolderID{CloudContextPolicies.set(contextPolicy,for:folder)}
    // Člen týmu ukládá jen místní adresář; nastavení složky na server neposílá.
    if !original.canManageCloudFolder {
     do{if original.folder != path{try CloudFolders.shared.setFolder(original,path:path)}}catch{showError(error.localizedDescription);return}

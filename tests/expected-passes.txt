@@ -59,6 +59,7 @@ PASS: separate adopted session trash/restore/purge moves its images with it, cop
 PASS: separate logout → local conversion keeps settings/files/index, re-pair offer per owner/origin, reconciliation uploads only local sessions with folder_id, cloud-only downloaded, identical untouched, differing → _cloud.md
 PASS: separate trash flows: web trash, web restore, user restore via POST, modified copy kept with one notice, purge, unknown .trash entries untouched
 PASS: separate uploaded local sessions are adopted in place after transfer and re-pair, no duplicate download or _cloud copy
+PASS: server session templates are validated and author names cannot leave their code span
 PASS: server text is escaped in Markdown (no injected images, no session separator, single-line title) and unescaped on reopen
 PASS: session extension keeps original PNG bytes, requires new images in order, base_images manifest and old-job compatibility
 PASS: session index never evicts cloud or pending-deletion records and reports write failures

@@ -106,6 +106,8 @@ import AppKit
  let commented=try JSONDecoder().decode(Mark.self,from:JSONEncoder().encode(notes.marks[0]))
  try check(commented.comment=="Špatné zarovnání" && commented.number==2,"shape comment round trip")
  try check(highestElementNumber(in:"- **[1] Element**\n- **[7] Rámeček**: x")==7,"highest number includes shape comments")
+ try check(highestElementNumber(in:"- **[9] Krok**\n- **[2] Šipka**: y")==2,"user list items do not shift numbering")
+ notes.marks[0].comment="viz ![x](assets/a.png)";try check(imageLinks(elementMarkdownLines(notes.marks,crop:nil)).isEmpty,"comment cannot create an image link")
  let rendered=notes.png();try check(rendered != nil,"export with comment badges renders")
  // Úprava popisu existujícího elementu jde vrátit.
  let undoCanvas=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))

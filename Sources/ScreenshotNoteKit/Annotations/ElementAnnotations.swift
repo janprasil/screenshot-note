@@ -19,7 +19,7 @@ extension Mark {
 }
 /// Nejvyšší číslo anotace, které už popisek obsahuje (relace otevřená znovu).
 func highestElementNumber(in caption:String)->Int{
- let expression=try! NSRegularExpression(pattern:"^- \\*\\*\\[(\\d{1,6})\\] [^*\\n]{1,40}\\*\\*",options:[.anchorsMatchLines]),ns=caption as NSString
+ let expression=try! NSRegularExpression(pattern:"^- \\*\\*\\[(\\d{1,6})\\] (?:Element|Kresba|Šipka|Kruh|Rámeček|Text|Drawing|Arrow|Circle|Rectangle)\\*\\*",options:[.anchorsMatchLines]),ns=caption as NSString
  return expression.matches(in:caption,range:NSRange(location:0,length:ns.length)).compactMap{Int(ns.substring(with:$0.range(at:1)))}.max() ?? 0
 }
 struct ElementTarget:Equatable {var index:Int;var selector:String;var tag:String;var name:String;var text:String;var depth:Int;var rect:NSRect}
@@ -64,18 +64,20 @@ private func codeSpan(_ value:String)->String{
  let fence=String(repeating:"`",count:longest+1),pad=value.hasPrefix("`") || value.hasSuffix("`") ? " ":""
  return fence+pad+value+pad+fence
 }
+/// Komentář je text uživatele; obrázkový odkaz v něm se escapuje, jinak by ho znovuotevření bralo jako snímek.
+private func safeNote(_ value:String)->String{let note=flattened(value,limit:2000);return imageLinks(note).isEmpty ? note:escapedMarkdown(note)}
 /// Řádky `- **[1] Element** `selector` „name“: popis` a `- **[2] Rámeček**: komentář` seřazené podle čísla; anotace mimo ořez vynechá.
 func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->String{
  marks.compactMap{mark->(Int,String)? in
   if let crop,mark.bounds.intersection(crop).isNull{return nil}
   if mark.tool != .element,let number=mark.number {
-   let note=flattened(mark.comment ?? "",limit:2000);guard !note.isEmpty else{return nil}
+   let note=safeNote(mark.comment ?? "");guard !note.isEmpty else{return nil}
    return (number,"- **[\(number)] \(mark.noteLabel)**: "+note)
   }
   guard mark.tool == .element,let info=mark.element else{return nil}
   // Selektor nesmí vypadat jako odkaz na obrázek, jinak by ho znovuotevření relace bralo jako snímek.
   var selector=flattened(info.selector,limit:300);if !imageLinks(selector).isEmpty{selector=flattened(info.tag,limit:40);if !imageLinks(selector).isEmpty{selector=""}}
-  let label=flattened(info.name.isEmpty ? info.text:info.name,limit:80),note=flattened(mark.text,limit:2000)
+  let label=flattened(info.name.isEmpty ? info.text:info.name,limit:80),note=safeNote(mark.text)
   var line="- **[\(info.number)] Element**"
   if pageData,!selector.isEmpty{line+=" "+codeSpan(selector)}
   if pageData,!label.isEmpty{line+=" „"+escapedMarkdown(label)+"“"}
@@ -189,7 +191,7 @@ extension DrawingView:NSTextFieldDelegate {
  /// Pravé tlačítko na anotaci: komentář i u textu, kde dvojklik upravuje samotný text.
  override func menu(for event:NSEvent)->NSMenu?{
   guard tool == .select,imageRect.contains(convert(event.locationInWindow,from:nil)),let index=hit(point(event)) else{return nil}
-  choose(index);let menu=NSMenu()
+  finishText();choose(index);let menu=NSMenu()
   let edit=NSMenuItem(title:L("Komentář…"),action:#selector(editNoteFromMenu(_:)),keyEquivalent:"");edit.target=self;edit.tag=index;menu.addItem(edit)
   if marks[index].tool != .element,marks[index].number != nil{let remove=NSMenuItem(title:L("Odebrat komentář"),action:#selector(removeNoteFromMenu(_:)),keyEquivalent:"");remove.target=self;remove.tag=index;menu.addItem(remove)}
   return menu

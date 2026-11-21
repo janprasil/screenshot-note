@@ -1,12 +1,7 @@
 import AppKit
+@testable import ScreenshotNoteKit
 import CryptoKit
 
-final class CloudMemoryVault: CloudCredentialStore {
- var value: CloudConnection?
- var fail = false
- func load() throws -> CloudConnection? { value }
- func save(_ value: CloudConnection?) throws { if fail { throw CloudFailure.keychain }; self.value = value }
-}
 private func cloudFixtureConnection(owner: UUID? = UUID()) -> CloudConnection {
  let id=UUID()
  return CloudConnection(endpoint:"https://fixture.invalid",token:"sn_device_v1_" + String(repeating:"a",count:43),id:id,

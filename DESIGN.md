@@ -34,7 +34,7 @@ Panels continue to work above fullscreen apps. The interface uses brief entrance
 
 ## Verification
 
-`--self-test` verifies storage, filenames, old session updates, annotations, dark input/icon rendering and preservation of data when compacting. `--design-export DIRECTORY` generates native AppKit renders covering the main windows, selection dialogs and inline editing states in both appearances and both interface languages, using synthetic screenshots and temporary configuration data. It does not capture the user's screen.
+The test host's `--self-test` (see README Verification) verifies storage, filenames, old session updates, annotations, dark input/icon rendering and preservation of data when compacting. `--design-export DIRECTORY` generates native AppKit renders covering the main windows, selection dialogs and inline editing states in both appearances and both interface languages, using synthetic screenshots and temporary configuration data. It does not capture the user's screen.
 
 Version 4.1 adds warm violet-tinted headers, semantic icon badges in Settings and a branded About window. All static product text is localized through the native Czech/English catalogs. Header heights and label widths are adapted to each workspace, including the longer English screenshot caption.
 

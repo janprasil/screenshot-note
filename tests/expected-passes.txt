@@ -1,0 +1,79 @@
+Browser bridge self-test passed
+PASS: _cloud/_template copies are rewritten only when unchanged since the app wrote them; edited copies are kept
+PASS: {comments} rendering for 0/1/N comments in local time, default template without trailing junk, parsing with and without comments
+PASS: 12 screenshots, per-image notes, draft remapping, custom template roundtrip, literal tokens and mixed legacy/new sessions
+PASS: 401 or revoked/expired credentials switch to a re-pair state and stop requests; folder refresh honours Retry-After and backs off
+PASS: 413 account quota stops the whole queue with a long backoff, never parks, and uploads automatically once space is freed
+PASS: 413 resource_limit parks only that job at once with a too-large reason, other jobs proceed, no storage-full alert
+PASS: a failing job no longer blocks later jobs, permanent failures back off and park after 3 tries, parked items save locally / retry / discard
+PASS: a second offline edit merges onto the queued edit and reopened cloud sessions show the queued text
+PASS: account default templates sync with revision conflict reload, logout keeps last values as local defaults
+PASS: asynchronous download aborts after disconnect or a changed local mapping before publishing files
+PASS: cancel/close with unsaved work asks (keep/later/discard), unchanged drafts close directly, autosaved draft is recovered on next launch
+PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression
+PASS: centered inactive and editing text fields, frameless movable panels
+PASS: combined adopted session trash/restore/purge moves its images with it, copies a shared image, user restore from .trash, root and assets/ untouched
+PASS: combined block removal trashes the session after two scans, deleted combined file is regenerated without trashing
+PASS: combined file template header/footer, insertion before footer, precise updates and discovery
+PASS: combined logout → local conversion keeps settings/files/index, re-pair offer per owner/origin, reconciliation uploads only local sessions with folder_id, cloud-only downloaded, identical untouched, differing → _cloud.md
+PASS: combined trash flows: block removed and saved to .trash, web restore in created order, user restore via POST, purge
+PASS: combined uploaded local sessions are adopted in place after transfer and re-pair, no duplicate download or _cloud copy
+PASS: corner resizing, rotation handle, rotated hit testing, undo, saved transforms, legacy migration and dirty-close decisions
+PASS: Czech/English system-language resolution, complete translation catalogs, bilingual Markdown discovery and unchanged user content
+PASS: default regression checks opened no visible windows
+PASS: default templates stored locally when signed out and copied into new local and cloud folders
+PASS: drawing/crop mouse interaction, tool cursors, transparent inline text alignment, formatting actions (modal UI tests run only with --interactive-ui-tests)
+PASS: extension manifests carry the downloaded revision, session_changed re-fetches and 3-way merges text, same-field conflicts park instead of overwriting web edits
+PASS: flat layout: YYYY-MM-DD Title.md with ' 2' dedupe, shared assets/Title-N.png, unmodified session folders flattened, modified ones untouched
+PASS: flat separate cloud sessions (YYYY-MM-DD Title.md + shared assets/Title-N.png), updated_at skip, in-place extension and edited-copy protection
+PASS: folder delete moves only indexed notes/images when the directory holds foreign files, whole directory otherwise
+PASS: folder PUT with revision and conflict reload, combined file with readable asset names, discovery and local-edit protection
+PASS: folder transfer stays pending without confirmed uploads, stable resumable IDs, conflict/foreign target rejection and idempotent finish
+PASS: heading fallback for edited and shifted blocks in shared Markdown, precise update keeps foreign text
+PASS: image transfers use a separate URLSession with a long resource timeout
+PASS: image-dependent editor dimensions and screen limits
+PASS: legacy comment migration strips only unmodified blocks, records them once and keeps reading edited ones
+PASS: legacy folder records migrate to account = owner, team records need a /me library, {author} renders the author or nothing
+PASS: legacy GUID downloads migrate to readable names when unmodified, edited ones stay, combined assets/<uuid> renamed
+PASS: light/dark input rendering, compact/expand state preservation, adding screenshots to open session and unlimited screenshots
+PASS: link/code toolbar actions, empty and selected content, Unicode ranges, glyph layout and native drawing
+PASS: list/detail responses up to 16 MB, one failing session or folder no longer stops the others
+PASS: live Markdown headings, bold text, source and selection preserved
+PASS: local rename/move inside folder keeps session, move to .trash trashes on web at once, Finder delete after two scans, pending upload blocks
+PASS: local template change re-renders separate files and combined blocks/header/footer, edited ones get _template.md
+PASS: local/cloud destination isolation, symlinks, missing descendants, stable cloud IDs, rename persistence and account-scoped catalog
+PASS: losing the team hides its folder (not remoteDeleted), keeps files and mapping, stops download/trash propagation and moves the draft to the default folder
+PASS: member edits only own team sessions, sign-out keeps team mappings for sign-in without reconnect, kept deleted team folders get account-scoped IDs
+PASS: member keeps deletion of another member's note local with one notice, own note goes to web Trash
+PASS: missing or swapped root does nothing, mass deletion is held with one warning until confirmed
+PASS: native endpoint/token validation, RGB8 PNG normalization, persistent owner-scoped outbox, legacy preservation and Keychain failure atomicity
+PASS: object selection, properties, deletion, undo, crop dimensions and editable annotation persistence
+PASS: PATCH without a stored revision fetches it first, merged edits rebase on the server version, 400 parks the edit and Retry sends it
+PASS: previous-session discovery, precise updates in shared MD, asset reuse, stale-write rejection, session selection, compact-before-capture and multiline-editor routing
+PASS: queued jobs of another account or after disconnect stay visible as stranded items and can be saved locally
+PASS: readable names and dedupe, Markdown without metadata comment, reopen and precise update via index, reopen via xattr after index loss
+PASS: reopening saved sessions without capture, including per-image notes and updates in a shared Markdown file
+PASS: returning to the team restores mapping and session index without duplicate downloads
+PASS: Select All responder command and editing menu shortcut
+PASS: separate adopted session trash/restore/purge moves its images with it, copies a shared image, user restore from .trash, root and assets/ untouched
+PASS: separate logout → local conversion keeps settings/files/index, re-pair offer per owner/origin, reconciliation uploads only local sessions with folder_id, cloud-only downloaded, identical untouched, differing → _cloud.md
+PASS: separate trash flows: web trash, web restore, user restore via POST, modified copy kept with one notice, purge, unknown .trash entries untouched
+PASS: separate uploaded local sessions are adopted in place after transfer and re-pair, no duplicate download or _cloud copy
+PASS: server text is escaped in Markdown (no injected images, no session separator, single-line title) and unescaped on reopen
+PASS: session extension keeps original PNG bytes, requires new images in order, base_images manifest and old-job compatibility
+PASS: session index never evicts cloud or pending-deletion records and reports write failures
+PASS: session subfolders count as known only when they hold nothing but the session's Markdown and assets; unknown files are checked recursively
+PASS: stale draft: migrated path re-resolved via index, missing file and web-trashed session detected, never extended, keep-as-new and discard branches
+PASS: standard Markdown image links: rendering, both formats parsed, migration of unmodified files only, reopen and append on a migrated file
+PASS: team folder shown as „Tým · Bugy“ after personal ones, library_id listing, {author} rendered, two accounts with different paths download the same notes
+PASS: team loss racing the session list never purges local files
+PASS: text box wrapping, unchanged font size, rotated corner anchoring, persistence and undo
+PASS: text-only cloud edit goes via PATCH with revision, session_changed rebases per field, same-field conflict parks and keeps local text, changed image rejected
+PASS: thumbnail hover actions and per-image notes independent of PNG editing
+PASS: title filenames, diacritics, unsafe characters, single/multiple images and independent collisions
+PASS: titles, Markdown headings, multiple images, legacy drafts, annotations PNG dimensions
+PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels
+PASS: unmapped cloud folders map to sanitized, deduplicated subfolders
+PASS: upload into a trashed cloud folder is parked with a clear message
+PASS: web restore with an occupied image name renames the image and rewrites Markdown links and the index record
+PASS: web-deleted folder keep/restore-before-answer/delete to macOS Trash, app delete of local vs cloud folder, unsupported server keeps everything

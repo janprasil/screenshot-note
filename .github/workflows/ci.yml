@@ -22,8 +22,17 @@ jobs:
           persist-credentials: false
       # Self-testy počítají s češtinou jako jazykem systému.
       - run: defaults write -g AppleLanguages -array cs en
-      # build.sh spouští i test lokalizací a self-testy aplikace.
-      - run: ./build.sh
+      # build.sh spouští i test lokalizací, inventuru testů a self-testy z testovacího hostu.
+      - run: |
+          set -o pipefail
+          ./build.sh | tee build.log
+      # Release balí appku do DMG; tady jen ověření bez publikace.
+      - run: |
+          app="$(sed -n 's/^Vytvořeno: //p' build.log)"
+          for attempt in 1 2 3; do hdiutil create -volname "Screenshot Note" -srcfolder "$app" -ov -format UDZO dry-run.dmg && exit 0; sleep 5; done
+          exit 1
       - run: python3 tests/build-config.py
       - run: python3 tests/release.py
-      # tests/cloud-rest.py zatím chybí, fixture neumí cloudovou složku (folder_required).
+      # Loopback REST kontrakt proti testovacímu hostu z build.sh.
+      - run: |
+          python3 tests/cloud-rest.py "$(sed -n 's/^Testy: //p' build.log)"

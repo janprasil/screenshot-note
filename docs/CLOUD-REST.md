@@ -165,12 +165,12 @@ parked after one 404) and rejoin.
 ## Validation and remaining acceptance
 
 `./build.sh` compiles for macOS13+, verifies its local signature and runs default
-noninteractive regressions, including endpoint/token checks, image conversion,
+noninteractive regressions from the separate test host (`Screenshot Note Tests.app`), including endpoint/token checks, image conversion,
 owner isolation, malformed/legacy queue preservation and vault failure atomicity.
 No production Keychain entry or cloud account is used by these tests.
 
 ```sh
-python3 tests/cloud-rest.py '/path/to/Screenshot Note.app/Contents/MacOS/ScreenshotNote'
+python3 tests/cloud-rest.py '/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote'
 ```
 
 This starts an owned loopback HTTP fixture and the actual compiled native client.

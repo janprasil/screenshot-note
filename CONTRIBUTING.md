@@ -1,7 +1,7 @@
 # Contributing
 
 1. Fork the repo and create a branch from `main`.
-2. Build and run self-tests: `./build.sh` (macOS 13+, Xcode command line tools).
+2. Build and run self-tests: `./build.sh` (macOS 13+, Xcode command line tools; Swift Package Manager builds the app and a separate test host).
 3. Open a pull request. All changes go through PRs; CI (build + CodeQL) must pass.
 
 PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/)

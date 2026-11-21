@@ -61,7 +61,7 @@ Requires macOS 13 or later, Python 3 and Xcode or the Xcode Command Line Tools. 
 ./build.sh
 ```
 
-The script builds for the host architecture with a macOS 13 deployment target, signs the app locally, verifies the signature and runs the regression checks. It prints the path to the completed app. Copy that app to `~/Applications` or `/Applications` and launch it.
+The script compiles with Swift Package Manager (`Package.swift`) for the host architecture with a macOS 13 deployment target, assembles and signs the app bundle, verifies the signature and runs the regression checks. It prints the path to the completed app (`Vytvořeno:`) and to the test host (`Testy:`). Copy that app to `~/Applications` or `/Applications` and launch it.
 
 Allow Screenshot Note in System Settings → Privacy & Security → Screen Recording when prompted.
 
@@ -104,9 +104,18 @@ Recreate the previews without capturing your screen:
 
 ## Verification
 
+Tests are not part of the app binary. `./build.sh` builds the `ScreenshotNoteTestHost` target into a separate
+`Screenshot Note Tests.app` (same Info.plist, resources, bridge helper and signature) and runs it:
+
 ```sh
-/path/to/Screenshot\ Note.app/Contents/MacOS/ScreenshotNote --self-test
+"/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --self-test
+"/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --folder-transfer-self-test
+"/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --bridge-self-test
+python3 tests/cloud-rest.py "/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote"
 ```
+
+`tests/test-inventory.py` fails when test cases disappear or test code reaches the app sources.
+The web flow test takes the same test host via `SCREENSHOT_NOTE_NATIVE_TEST_BINARY` (`--folder-sync-self-test`).
 
 The checks cover filenames and collisions, export modes, persistent drafts, previous-session updates and stale-write protection, annotation rendering and crop, keyboard labels, dark appearance, compact mode and multi-image sessions.
 
@@ -114,7 +123,11 @@ The checks cover filenames and collisions, export modes, persistent drafts, prev
 
 | File | Responsibility |
 |---|---|
-| `Sources/ScreenshotNote/main.swift` | Menu bar app, capture workflow and regression checks |
+| `Package.swift` | Swift package: `BridgeWire`, `ScreenshotNoteKit`, app, bridge helper and test host |
+| `Sources/ScreenshotNote/main.swift` | Thin executable calling `ScreenshotNoteApp.main()` |
+| `Sources/ScreenshotNoteKit/App/AppDelegate.swift` | Menu bar app and capture workflow |
+| `Sources/ScreenshotNoteKit/App/Launch.swift` | Launch flags, design export and single instance |
+| `Sources/ScreenshotNoteTestHost/` | Regression checks (`main.swift`, cloud and bridge tests); never shipped |
 | `Sources/ScreenshotNoteKit/Notes/CaptureNote.swift` | Drafts, filenames and Markdown export |
 | `Sources/ScreenshotNoteKit/Cloud/CloudLibrary.swift` | Device pairing, Keychain, REST uploads, persistent outbox and share links |
 | `Sources/ScreenshotNoteKit/Settings/CloudSettings.swift` | Native cloud connection and retry controls |
@@ -205,7 +218,7 @@ Closing an editor with changed annotations or crop offers Save, Discard changes 
 The default build runs only noninteractive regression checks and asserts that no test window became visible. Modal interaction checks are separate and opt-in:
 
 ```sh
-/path/to/Screenshot\ Note.app/Contents/MacOS/ScreenshotNote --self-test --interactive-ui-tests
+"/path/to/Screenshot Note Tests.app/Contents/MacOS/ScreenshotNote" --self-test --interactive-ui-tests
 ```
 
 The opt-in checks can open windows and take focus; run them outside normal desktop work. Native design exports remain offscreen.

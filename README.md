@@ -129,10 +129,15 @@ The checks cover filenames and collisions, export modes, persistent drafts, prev
 | `Sources/ScreenshotNoteKit/App/Launch.swift` | Launch flags, design export and single instance |
 | `Sources/ScreenshotNoteTestHost/` | Regression checks (`main.swift`, cloud and bridge tests); never shipped |
 | `Sources/ScreenshotNoteKit/Notes/CaptureNote.swift` | Drafts, filenames and Markdown export |
-| `Sources/ScreenshotNoteKit/Cloud/CloudLibrary.swift` | Device pairing, Keychain, REST uploads, persistent outbox and share links |
+| `Sources/ScreenshotNoteKit/Cloud/CloudLibrary.swift` | Device pairing, REST uploads, persistent outbox and share links |
+| `Sources/ScreenshotNoteKit/Cloud/CloudEndpoint.swift`, `CloudKeychain.swift`, `CloudTransport.swift`, `CloudModels.swift` | Build origin, Keychain credentials, HTTP transport and wire models |
+| `Sources/ScreenshotNoteKit/Cloud/CloudFolders.swift`, `CloudFolderModels.swift` | Cloud folder sync and its models |
 | `Sources/ScreenshotNoteKit/Settings/CloudSettings.swift` | Native cloud connection and retry controls |
-| `Sources/ScreenshotNoteTestHost/CloudTests.swift` | Offline and loopback native cloud checks |
-| `Sources/ScreenshotNoteKit/Capture/Interface.swift` | Capture window (incl. Copy link), settings and shortcuts |
+| `Sources/ScreenshotNoteTestHost/Cloud*Tests.swift`, `TeamFolderTests.swift`, `ReviewFindingTests.swift`, `CloudTestSupport.swift` | Offline and loopback native cloud checks |
+| `Sources/ScreenshotNoteKit/Capture/Composer.swift` | Capture window (incl. Copy link) |
+| `Sources/ScreenshotNoteKit/Capture/ScreenshotPanel.swift`, `Hotkeys.swift` | Capture panels and global shortcuts |
+| `Sources/ScreenshotNoteKit/Settings/SettingsController.swift`, `ShortcutSettings.swift` | Settings and shortcut editor |
+| `Sources/ScreenshotNoteKit/UI/InterfaceSupport.swift` | Error alerts, labels and the editing menu |
 | `Sources/ScreenshotNoteKit/Capture/SessionPicker.swift` | Configuration/session selection dialogs |
 | `Sources/ScreenshotNoteKit/Capture/ImageNoteEditor.swift` | Per-image note dialog and Markdown expansion |
 | `Sources/ScreenshotNoteKit/UI/CenteredFields.swift` | Centered text fields and window close actions |

@@ -1,3 +1,10 @@
+# Restrukturalizace Mac appky (21. 11. 2026)
+
+- Zdroje v `Sources/` podle oblastí, build přes SwiftPM (`Package.swift`), `.app` dál skládá `build.sh`.
+- Testy jen v `ScreenshotNoteTestHost` (`Screenshot Note Tests.app`, cesta `Testy:` z build.sh); appka je nemá.
+- `tests/test-inventory.py` hlídá počet testů a ohlášené PASS řádky. Plán a průběh: `docs/RESTRUCTURE-PLAN.md`.
+- Webový flow test potřebuje v `SCREENSHOT_NOTE_NATIVE_TEST_BINARY` testovací host, ne appku.
+
 # Integrace stacku kolaborace s main (#11, #12) — 20. 11. 2026
 
 - `origin/main` (#12 sync robustness/parked items/extension revision, #11 CI) mergnut do

@@ -5,6 +5,8 @@ import Darwin
 struct Draft: Codable { var images: [String]; var comment: String; var title: String? = nil; var topic:Topic? = nil; var previous:PreviousSessionTarget? = nil; var imageNotes:[String:String]? = nil
  // Texty čekající cloudové úpravy, ze kterých koncept vznikl; nová úprava se na ně položí.
  var cloudBase:CloudLibrary.CloudEdit.Fields? = nil
+ // Obrázek → soubor kontextu z prohlížeče v pracovní složce (`<obrázek>.context.json`, vedle něj `.har`).
+ var contexts:[String:String]? = nil
 }
 /// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
 func draftSignature(_ draft:Draft,root:URL)->String {
@@ -33,7 +35,9 @@ var destination: URL { URL(fileURLWithPath: UserDefaults.standard.string(forKey:
 func readDraft(_ root: URL) throws -> Draft {
  let file = root.appendingPathComponent("draft.json")
  guard fm.fileExists(atPath:file.path) else { return Draft(images:[], comment:"") }
- let draft = try JSONDecoder().decode(Draft.self, from:Data(contentsOf:file))
+ var draft = try JSONDecoder().decode(Draft.self, from:Data(contentsOf:file))
+ // Kontext bez obrázku nebo bez souboru se zahodí, snímek zůstane.
+ draft.contexts=draft.contexts?.filter{draft.images.contains($0.key) && $0.value==$0.key+".context.json" && fm.fileExists(atPath:root.appendingPathComponent($0.value).path)}
  guard draft.images.allSatisfy({ !$0.contains("/") && fm.fileExists(atPath:root.appendingPathComponent($0).path) }) else {
   throw NSError(domain:"ScreenshotNote", code:1, userInfo:[NSLocalizedDescriptionKey:L("Rozpracovaný záznam má chybějící snímky.")])
  }
@@ -69,25 +73,33 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
  let readable=readableSessionName(draft.title ?? "",created:Date())
  let markdown = previous.map{URL(fileURLWithPath:$0.path)} ?? combinedFile.map{dest.appendingPathComponent($0)} ?? dest.appendingPathComponent(uniqueName(readable){fm.fileExists(atPath:dest.appendingPathComponent($0+".md").path)}+".md")
  let name = combinedFile == nil ? markdown.deletingPathExtension().lastPathComponent:readable
- var copied:[URL] = []; var links:[String] = []; var imageNames:[String] = []
+ var copied:[URL] = []; var imageNames:[String] = []
  do {
+  // Kontext z prohlížeče jde jen do lokálních složek; u cloudových se zahodí (upload přijde později).
+  let keepContext=draft.topic?.cloudFolderID == nil
+  func copyContext(_ image:String,as filename:String)throws{
+   guard keepContext,draft.contexts?[image] != nil else{return}
+   for (source,target) in zip(contextSidecars(root.appendingPathComponent(image)),assetContextFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
+  }
   for (index, image) in draft.images.enumerated() {
-   let note=draft.imageNotes?[image] ?? ""
-   if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){imageNames.append(originalName);links.append(imageMarkdown(originalName,index+1)+(note.isEmpty ? "":"\n\n"+note));continue}
-
-   let target = assets.appendingPathComponent(uniqueName(name+"-\(index+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path)}+".png")
+   if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){try copyContext(image,as:originalName);imageNames.append(originalName);continue}
+   // Název musí být volný pro obrázek i pro oba soubory kontextu.
+   let base=uniqueName(name+"-\(index+1)"){candidate in ["png","context.json","har"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}
+   let target = assets.appendingPathComponent(base+".png")
    let filename = target.lastPathComponent
    try fm.copyItem(at:root.appendingPathComponent(image), to:target); copied.append(target)
-   imageNames.append(filename);links.append(imageMarkdown(filename,index+1)+(note.isEmpty ? "":"\n\n"+note))
+   try copyContext(image,as:filename);imageNames.append(filename)
   }
+  let rendered=screenshotsWithContext(imageNames,draft.images.map{draft.imageNotes?[$0] ?? ""},assets:assets)
   let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   // Replace placeholders in a single pass so user content containing tokens stays literal.
-  let body=renderSessionTemplate(template,title:title,screenshots:links.joined(separator:"\n\n"),text:draft.comment)
+  let body=renderSessionTemplate(template,title:title,screenshots:rendered.screenshots,text:draft.comment,context:rendered.context)
   var notes:[String:String]=[:];for (filename,image) in zip(imageNames,draft.images){notes[filename]=draft.imageNotes?[image] ?? ""}
   // Markdown nenese žádné skryté značky; identitu drží index a xattr.
   let content=body,index=SessionIndex.shared,length=(content as NSString).length
-  var hashes:[String:String]=[:];for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name))}
+  var hashes:[String:String]=[:]
+  for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}}}
   var record=SessionRecord(id:previous?.session ?? UUID().uuidString,file:SessionIndex.key(markdown),start:0,length:length,hash:sessionFingerprint(Data(content.utf8)),heading:firstLine(content),title:title,comment:draft.comment,template:template,images:imageNames,notes:notes,combined:false,footer:"",files:hashes,seen:0)
   if let previous=previous {
    let original=try checkedPreviousFile(previous)
@@ -137,9 +149,10 @@ let defaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# De
 // Dřívější vestavěná šablona; uložené šablony se nemění.
 let legacyDefaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# Description\n\n{text}\n"
 /// `{author}` je jméno autora cloudové relace, jinak prázdné; vestavěné šablony ho nemají.
-func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="",author:String="")->String{
- let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments,"{author}":author]
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author)\\}")
+/// `{context}` je souhrn kontextu z prohlížeče za relaci; vestavěné šablony ho nemají.
+func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="",author:String="",context:String="")->String{
+ let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments,"{author}":author,"{context}":context]
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context)\\}")
  let source=template as NSString;var output=template
  for match in expression.matches(in:template,range:NSRange(location:0,length:source.length)).reversed(){output=(output as NSString).replacingCharacters(in:match.range,with:values[source.substring(with:match.range)]!)}
  // Bez komentářů nezůstanou na konci prázdné řádky.

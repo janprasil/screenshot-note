@@ -1,4 +1,5 @@
 Browser bridge self-test passed
+Capture context self-test passed
 PASS: _cloud/_template copies are rewritten only when unchanged since the app wrote them; edited copies are kept
 PASS: {comments} rendering for 0/1/N comments in local time, default template without trailing junk, parsing with and without comments
 PASS: 12 screenshots, per-image notes, draft remapping, custom template roundtrip, literal tokens and mixed legacy/new sessions

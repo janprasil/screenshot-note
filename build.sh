@@ -36,7 +36,7 @@ tests="$tests_app/Contents/MacOS/ScreenshotNote"
 test_log="$build_root/tests.log"
 (
  setopt pipefail
- { "$tests" --self-test && "$tests" --folder-transfer-self-test && "$tests" --bridge-self-test && "$tests" --folder-sync-self-test } | tee "$test_log"
+ { "$tests" --self-test && "$tests" --folder-transfer-self-test && "$tests" --bridge-self-test && "$tests" --context-self-test && "$tests" --folder-sync-self-test } | tee "$test_log"
 )
 # Každý dříve hlášený PASS musí v běhu zaznít znovu.
 python3 tests/test-inventory.py --log "$test_log"

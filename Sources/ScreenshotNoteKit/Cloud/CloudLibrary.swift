@@ -28,6 +28,33 @@ private struct RemoteSession: Decodable {
  struct Image: Decodable { let index: Int; let path: String }
  let id: UUID; let title: String; let comment: String; let captions: [String]; let images: [Image]; let revision: FlexibleString?
 }
+/// Ořízne přílohu podle politiky složky (JSON přepíše na místě); false = přílohu vynechat.
+func restrictContextFile(_ url:URL,har:Bool,policy:ContextPolicy)->Bool {
+ if har && !policy.includeNetwork{return false}
+ guard let data=try? Data(contentsOf:url),var object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else{return false}
+ // Soubor se přepíše jen při skutečné změně, jinak zůstanou bajty i hash.
+ var changed=false
+ if har {
+  guard !policy.includeBodies,var log=object["log"] as? [String:Any],let entries=log["entries"] as? [[String:Any]] else{return true}
+  log["entries"]=entries.map{entry->[String:Any] in
+   var entry=entry
+   if var request=entry["request"] as? [String:Any],request.removeValue(forKey:"postData") != nil{entry["request"]=request;changed=true}
+   if var response=entry["response"] as? [String:Any],var content=response["content"] as? [String:Any],content.removeValue(forKey:"text") != nil{response["content"]=content;entry["response"]=response;changed=true}
+   return entry
+  }
+  object["log"]=log
+ } else {
+  if !policy.includeConsole,(object["console"] as? [Any])?.isEmpty==false{object["console"]=[];changed=true}
+  if !policy.includeNetwork,var summary=object["summary"] as? [String:Any],(summary["failedRequests"] as? [Any])?.isEmpty==false{summary["failedRequests"]=[];object["summary"]=summary;changed=true}
+  if !policy.includeElements,(object["elements"] as? [Any])?.isEmpty==false{object["elements"]=[];changed=true}
+  else if policy.includeElements,!policy.includeElementText,let elements=object["elements"] as? [[String:Any]],elements.contains(where:{$0["name"] != nil || $0["text"] != nil}){
+   object["elements"]=elements.map{var e=$0;e.removeValue(forKey:"name");e.removeValue(forKey:"text");return e};changed=true
+  }
+ }
+ guard changed else{return true}
+ guard let output=try? JSONSerialization.data(withJSONObject:object) else{return false}
+ return (try? output.write(to:url,options:.atomic)) != nil
+}
 /// Příloha kontextu snímku v cloudu (`.context.json` nebo `.har`), soubor `<index>.<kind>` ve složce jobu.
 struct CloudAttachment: Codable, Equatable {
  static let limit=16*1024*1024
@@ -182,8 +209,10 @@ final class CloudLibrary {
   if base == nil && isCommitted(id,folder:draft.topic?.cloudFolderID){return id}
   if let base { guard draft.images.count > base.count else { throw CloudFailure(L("Přidej do cloudové relace alespoň jeden nový snímek.")) } }
   // Selektor a texty prvků jdou do cloudu jen se zapnutým kontextem složky.
-  let withContext = draft.topic?.effectiveContextPolicy != nil
-  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:withContext && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
+  let policy = draft.topic?.effectiveContextPolicy, withContext = policy != nil
+  // Selektor a texty prvků jen tehdy, když je cílová složka povoluje.
+  let pageData = policy.map{$0.includeElements && $0.includeElementText} ?? false
+  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   let heading = title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot", config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),
@@ -216,6 +245,8 @@ final class CloudLibrary {
      try raw.write(to: staged, options: .atomic)
      // Ořez z editoru posune capture stejně jako lokální export, jinak by mapa po stažení neseděla.
      if kind == "context" { adjustContextCapture(staged, annotations: annotationSidecar(root.appendingPathComponent(filename))) }
+     // Kontext pořízený pro jinou složku se ořízne podle politiky cílové cloudové složky.
+     if let policy, !restrictContextFile(staged, har: kind == "har", policy: policy) { try? fm.removeItem(at: staged); continue }
      guard let side = try? boundedData(staged, max: CloudAttachment.limit) else { try? fm.removeItem(at: staged); continue }
      attachments.append(CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side)))
     }
@@ -583,9 +614,9 @@ final class CloudLibrary {
    do {
     _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
      headers:["Content-Type":"application/json","x-bytes":String(item.bytes),"x-sha256":item.sha256])
-   } catch let failure as CloudFailure where [400,402,403,404,409,413,415].contains(failure.status) {
-    // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu.
-    NSLog("Cloud context attachment skipped: HTTP %ld %@",failure.status,failure.code ?? "")
+   } catch let failure as CloudFailure where [400,402,403,404,413,415].contains(failure.status) || failure.code=="session_trashed" {
+    // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu, uživatel dostane hlášku.
+    lastError=LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message)
    }
   }
   try fm.removeItem(at:directory)

@@ -547,3 +547,4 @@
 "Nahrávat kontext z prohlížeče do cloudu?" = "Upload browser context to the cloud?";
 "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Each Chrome screenshot uploads the page address and title, the console, the request list (HAR) and the element map with texts as configured. Cookies and authorization headers are always hidden. All folder members can see the attachments on the web and in MCP. Encryption is not available yet.";
 "Zapnout" = "Turn On";
+"Kontext snímku %ld se do cloudu nenahrál: %@" = "Context of screenshot %ld was not uploaded to the cloud: %@";

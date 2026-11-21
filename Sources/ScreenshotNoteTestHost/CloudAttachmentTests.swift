@@ -86,3 +86,19 @@ import AppKit
  try check(after.keys.sorted()==["assets/S-2.context.json"] && !fm.fileExists(atPath:assets.appendingPathComponent("S-2.har").path)
   && fm.fileExists(atPath:assets.appendingPathComponent("S-1.har").path),"removed cloud attachments are deleted, local files stay")
 }
+
+/// Politika cílové složky ořízne přílohy pořízené pro jinou složku.
+func cloudAttachmentPolicyTests() throws {
+ func check(_ condition:Bool,_ message:String)throws{if !condition{throw BrowserBridgeError(message:message)}}
+ let dir=fm.temporaryDirectory.appendingPathComponent("sn-restrict-"+UUID().uuidString);try fm.createDirectory(at:dir,withIntermediateDirectories:true);defer{try? fm.removeItem(at:dir)}
+ let context=dir.appendingPathComponent("c.json"),har=dir.appendingPathComponent("h.har")
+ try Data(#"{"format":"screenshot-note-context","version":1,"console":[{"kind":"error","message":"x"}],"summary":{"failedRequests":[{"url":"https://s/t"}]},"elements":[{"selector":"a","name":"secret","text":"t"}]}"#.utf8).write(to:context)
+ try Data(#"{"log":{"entries":[{"request":{"postData":{"text":"pw"}},"response":{"content":{"text":"body","size":4}}}]}}"#.utf8).write(to:har)
+ var policy=ContextPolicy();policy.includeConsole=false;policy.includeElementText=false;policy.includeBodies=false
+ try check(restrictContextFile(context,har:false,policy:policy) && restrictContextFile(har,har:true,policy:policy),"restricted files stay")
+ let c=String(decoding:try Data(contentsOf:context),as:UTF8.self),h=String(decoding:try Data(contentsOf:har),as:UTF8.self)
+ try check(!c.contains("\"message\"") && !c.contains("secret") && c.contains("\"selector\""),"console and element texts are stripped")
+ try check(!h.contains("pw") && !h.contains("body") && h.contains("\"size\""),"HAR bodies are stripped")
+ policy.includeNetwork=false
+ try check(!restrictContextFile(har,har:true,policy:policy),"HAR is skipped without network")
+}

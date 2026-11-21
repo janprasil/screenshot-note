@@ -547,3 +547,4 @@
 "Nahrávat kontext z prohlížeče do cloudu?" = "Nahrávat kontext z prohlížeče do cloudu?";
 "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.";
 "Zapnout" = "Zapnout";
+"Kontext snímku %ld se do cloudu nenahrál: %@" = "Kontext snímku %ld se do cloudu nenahrál: %@";

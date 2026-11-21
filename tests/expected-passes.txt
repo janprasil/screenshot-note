@@ -12,6 +12,7 @@ PASS: asynchronous download aborts after disconnect or a changed local mapping b
 PASS: cancel/close with unsaved work asks (keep/later/discard), unchanged drafts close directly, autosaved draft is recovered on next launch
 PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression
 PASS: centered inactive and editing text fields, frameless movable panels
+PASS: cloud folder names and descriptions are escaped and author names cannot leave their code span
 PASS: combined adopted session trash/restore/purge moves its images with it, copies a shared image, user restore from .trash, root and assets/ untouched
 PASS: combined block removal trashes the session after two scans, deleted combined file is regenerated without trashing
 PASS: combined file template header/footer, insertion before footer, precise updates and discovery
@@ -59,7 +60,6 @@ PASS: separate adopted session trash/restore/purge moves its images with it, cop
 PASS: separate logout → local conversion keeps settings/files/index, re-pair offer per owner/origin, reconciliation uploads only local sessions with folder_id, cloud-only downloaded, identical untouched, differing → _cloud.md
 PASS: separate trash flows: web trash, web restore, user restore via POST, modified copy kept with one notice, purge, unknown .trash entries untouched
 PASS: separate uploaded local sessions are adopted in place after transfer and re-pair, no duplicate download or _cloud copy
-PASS: server session templates are validated and author names cannot leave their code span
 PASS: server text is escaped in Markdown (no injected images, no session separator, single-line title) and unescaped on reopen
 PASS: session extension keeps original PNG bytes, requires new images in order, base_images manifest and old-job compatibility
 PASS: session index never evicts cloud or pending-deletion records and reports write failures

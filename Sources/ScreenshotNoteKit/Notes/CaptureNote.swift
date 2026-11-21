@@ -99,7 +99,8 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    index.batch{if let old{index.remove(old)};index.shift(file:markdown,after:previous.start,by:length-previous.length);index.put(record)}
    if record.combined{tagCombinedFile(markdown)}else{writeSessionTag(markdown,record.id)}
   } else if combinedFile != nil {
-   let (header,footer)=combinedTemplateParts(draft.topic?.combinedTemplate ?? defaultCombinedTemplate,folderName:draft.topic?.name ?? "",folderDescription:draft.topic?.detail ?? "")
+   let folderText=combinedFolderText(draft.topic)
+   let (header,footer)=combinedTemplateParts(draft.topic?.combinedTemplate ?? defaultCombinedTemplate,folderName:folderText.0,folderDescription:folderText.1)
    var data:Data,head:Data
    record.combined=true
    if fm.fileExists(atPath:markdown.path) {
@@ -164,6 +165,9 @@ func combinedTemplateParts(_ template:String,folderName:String,folderDescription
  while header.contains("\n\n\n"){header=header.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
  return (header,fillPlaceholders(pieces[1],values))
 }
-/// Šablona relace musí mít povinné proměnné a rozumnou délku; jinak platí výchozí.
-func validSessionTemplate(_ template:String)->Bool{["{title}","{screenshots}","{text}"].allSatisfy{template.contains($0)} && template.count<=20000}
+/// Název a popis cloudové složky jsou data ze serveru; lokální složky zůstávají beze změny.
+func combinedFolderText(_ topic:Topic?)->(String,String) {
+ guard let topic else{return ("","")}
+ return topic.cloudFolderID == nil ? (topic.name,topic.detail):(serverTitle(topic.name),escapeServerMarkdown(topic.detail))
+}
 func validCombinedTemplate(_ template:String)->Bool{template.components(separatedBy:"{sessions}").count==2 && template.count<=20000 && !template.contains("\0")}

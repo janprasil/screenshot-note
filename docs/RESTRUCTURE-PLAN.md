@@ -52,7 +52,7 @@ Závislosti a sdílený stav (vše v jednom modulu, bez `import` mezi soubory):
 - `xcrun swiftc -target <arch>-apple-macosx13.0` s ručním seznamem 24 souborů, bez `-O` (tj. `-Onone`) (`build.sh:14`).
 - Druhá binárka `screenshot-note-bridge`: `-parse-as-library BridgeWire.swift BridgeHost.swift` (`build.sh:16`).
 - Podpis: identita `SIGNING_IDENTITY` nebo první Apple Development/Developer ID, jinak ad-hoc; nejdřív helper, pak app,
-  `codesign --verify --strict` (`build.sh:18`–`22`). Bez hardened runtime a bez entitlements (žádný soubor v repu).
+  `codesign --verify --strict` (`build.sh:18`–`22`). Bez entitlements (žádný soubor v repu); hardened runtime od bezpečnostního auditu 2026-11 (PR #21).
 - Self-testy v produkční binárce: `--self-test`, `--folder-transfer-self-test`, `--bridge-self-test` (`build.sh:23`–`25`).
 - `--install`: ukončí appku, zálohuje do `~/Library/Application Support/Screenshot Note/App Updates/<čas>`, `ditto` (`build.sh:28`–`39`).
 - Poslední řádek `Vytvořeno: <cesta>` čte release workflow (`release.yml:83`–`85`).
@@ -193,7 +193,7 @@ Kontrola: `tests/test-inventory.py` (a) staticky počítá testovací funkce (19
 - Podpis: stejný výběr identity a pořadí (helper, pak app), `codesign --verify --strict`. Ověření `codesign -dv` (Identifier,
   TeamIdentifier, Authority) před/po; po `--install` načtení tokenu z Klíčenky (Cloudová knihovna ukazuje připojení).
 - Keychain service `cz.janprasil.screenshotnote.device.v1` (`CloudLibrary.swift:49`), access group žádná, `WhenUnlockedThisDeviceOnly`.
-- Bundle id `cz.janprasil.screenshotnote`, Info.plist a `configure-build.py` beze změny; žádné entitlements, žádný hardened runtime (beze změny).
+- Bundle id `cz.janprasil.screenshotnote`, Info.plist a `configure-build.py` beze změny; žádné entitlements (hardened runtime přibyl až v PR #21).
 - Native Messaging: název hostu, `allowed_origins`, helper `Contents/MacOS/screenshot-note-bridge` (`BrowserBridge.swift:192`–`197`).
 - Lokalizace en/cs: `Localizations/` beze změny, `localization-keys.py` rekurzivně přes `Sources/` s kontrolou, že našel soubory.
 - Data uživatele: `~/Library/Application Support/Screenshot Note`, UserDefaults domény, index, xattr — kód se nemění.
@@ -241,7 +241,7 @@ Každý PR: z aktuálního main, nezávislé review agentem, zelené CI (build +
 - `BrowserBridge.broadcast` (`BrowserBridge.swift:183`) je jen pro test, ale je v produkční třídě se `private` stavem;
   zůstává (přesun by vyžadoval změnu viditelnosti).
 - `tests/cloud-rest.py` neběží v CI (`ci.yml:28`).
-- Hardened runtime není zapnutý — patří k notarizaci, ne sem.
+- Hardened runtime zapnutý v PR #21 (audit 2026-11); notarizace a Developer ID zůstávají otevřené.
 
 ## Rozhodnuto v noci
 
@@ -265,7 +265,7 @@ Každý PR: z aktuálního main, nezávislé review agentem, zelené CI (build +
 
 1. Přejít na `-O` pro release (menší a rychlejší binárka; asserty v produkčním kódu nejsou)?
 2. Zavést XCTest/Swift Testing s injekcí `Bundle` (endpoint, lokalizace, helper), aby šlo `swift test`?
-3. Hardened runtime a entitlements při notarizaci.
+3. Notarizace a Developer ID podpis release buildů (hardened runtime už zapnutý).
 4. Mají `--preview-test` a `--design-export` zůstat v produkční binárce?
 
 ## Průběh

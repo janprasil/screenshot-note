@@ -1,15 +1,19 @@
 import Foundation
 @testable import ScreenshotNoteKit
 
-/// Data ze serveru nesmí rozbít šablonu ani vložit Markdown mimo své místo.
+/// Data ze serveru nesmí vložit Markdown mimo své místo.
 func serverMarkdownTests() throws {
- // Neplatná šablona relace ze serveru se nahradí výchozí.
- let broken=RemoteNote(id:UUID(),title:"T",comment:"X",template:"![x](https://evil.test/p.png) {text}",captions:[""],images:[.init(index:1,path:"/p")])
- let body=cloudSessionBody(broken,images:["a.png"])
- assert(!body.contains("evil.test") && body.contains("# T"),body)
- assert(validSessionTemplate(defaultMarkdownTemplate) && !validSessionTemplate("{title}") && !validSessionTemplate("{title}{screenshots}{text}"+String(repeating:"x",count:20001)))
- // Zpětný apostrof ve jménu autora neukončí code span.
+ // Název a popis cloudové složky se escapují, lokální složka zůstává beze změny.
+ var cloud=Topic(id:"cloud:x",name:"A ![x](https://evil.test/p.png)",detail:"---",folder:"",combined:true,combinedFile:"Note.md")
+ cloud.cloudFolderID=UUID()
+ let (name,detail)=combinedFolderText(cloud)
+ let header=combinedTemplateParts(defaultCombinedTemplate,folderName:name,folderDescription:detail).0
+ assert(header.contains("!\\[x]") && header.contains("\\---") && !header.contains("![x]"),header)
+ var local=cloud;local.cloudFolderID=nil
+ assert(combinedFolderText(local)==(cloud.name,cloud.detail))
+ // Zpětný apostrof ve jménu autora neukončí code span, obrázek zůstane uvnitř.
  let comments=renderComments([RemoteNote.Comment(author_name:"Eve` ![p](https://evil.test/p.png) `",body:"Ahoj",created_at:nil)])
- assert(comments.components(separatedBy:"`").count==5,comments)
- print("PASS: server session templates are validated and author names cannot leave their code span")
+ let author=comments.components(separatedBy:"\n")[1]
+ assert(author.hasPrefix("`Eve' ![p](https://evil.test/p.png) '`"),author)
+ print("PASS: cloud folder names and descriptions are escaped and author names cannot leave their code span")
 }

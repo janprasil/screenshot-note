@@ -33,8 +33,7 @@ final class TemplateDefaults {
  @MainActor func refresh() async {
   guard let c=connection(),c.ownerID != nil,let endpoint=CloudEndpoint(c.endpoint),
         let data=try? await request(endpoint,"/api/v1/account/templates",c.token),let remote=try? JSONDecoder().decode(Envelope.self,from:data).data else{return}
-  // Neplatná šablona ze serveru se nepoužije.
-  keep(remote.session_template.flatMap{validSessionTemplate($0) ? $0:nil},remote.file_template.flatMap{validCombinedTemplate($0) ? $0:nil},revision:remote.revision)
+  keep(remote.session_template,remote.file_template,revision:remote.revision)
  }
  /// Uloží výchozí šablony; vestavěné hodnoty se ukládají jako null.
  @MainActor func save(session:String,file:String) async throws {

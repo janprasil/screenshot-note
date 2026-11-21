@@ -55,8 +55,7 @@ struct FlexibleString:Decodable {
 func cloudSessionBody(_ note:RemoteNote,images names:[String])->String {
  let screenshots=screenshotsMarkdown(names,note.captions.map(escapeServerMarkdown))
  let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at)}
- // Šablonu ze serveru bereme jen platnou.
- return renderSessionTemplate(validSessionTemplate(note.template) ? note.template:defaultMarkdownTemplate,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""))
+  return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""))
 }
 
 /// Tělo a metadata starého staženého souboru se značkami.

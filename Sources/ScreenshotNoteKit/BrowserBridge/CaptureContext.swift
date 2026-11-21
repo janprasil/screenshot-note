@@ -11,15 +11,21 @@ func contextSidecars(_ image:URL)->[URL]{[image.appendingPathExtension("context.
 /// Soubory kontextu v assets/: `<název>.context.json` a `<název>.har` vedle `<název>.png`.
 func assetContextFiles(_ assets:URL,_ image:String)->[URL]{let base=(image as NSString).deletingPathExtension;return [assets.appendingPathComponent(base+".context.json"),assets.appendingPathComponent(base+".har")]}
 
+/// Okno prohlížeče v popředí: proces, bounds a cíl pro capture.request.
+struct BrowserWindow {
+ let pid:pid_t,target:[String:Any]
+ var bounds:CGRect?{guard let b=target["windowBounds"] as? [String:CGFloat],let x=b["x"],let y=b["y"],let width=b["width"],let height=b["height"] else{return nil};return CGRect(x:x,y:y,width:width,height:height)}
+}
 /// Cíl pro capture.request, když je v popředí Chromium prohlížeč; jinak nil.
-func browserCaptureTarget()->[String:Any]? {
+func browserCaptureTarget()->[String:Any]?{browserCaptureWindow()?.target}
+func browserCaptureWindow()->BrowserWindow? {
  let own=ProcessInfo.processInfo.processIdentifier
  let windows=(CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]]) ?? []
  var app=NSWorkspace.shared.frontmostApplication
  // Při otevřeném komposeru je v popředí appka sama; rozhoduje nejvyšší cizí okno.
  if app?.processIdentifier==own,let pid=windows.lazy.filter({windowNumber($0,kCGWindowLayer)==0}).compactMap({windowNumber($0,kCGWindowOwnerPID)}).first(where:{$0 != Int(own)}){app=NSRunningApplication(processIdentifier:pid_t(pid))}
  guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{return nil}
- return captureTarget(windows:windows,pid:app.processIdentifier)
+ return captureTarget(windows:windows,pid:app.processIdentifier).map{BrowserWindow(pid:app.processIdentifier,target:$0)}
 }
 private func windowNumber(_ window:[String:Any],_ key:CFString)->Int?{(window[key as String] as? NSNumber)?.intValue}
 /// Nejvyšší běžné okno procesu (vrstva 0) v bodech s počátkem vlevo nahoře.
@@ -50,8 +56,16 @@ struct CaptureContextFiles {
  init?(bundle:Data){
   guard bundle.count<=maxContextBytes,var object=(try? JSONSerialization.jsonObject(with:bundle)) as? [String:Any],object["format"] as? String=="screenshot-note-context",(object["version"] as? NSNumber)?.intValue==1 else{return nil}
   let har=object.removeValue(forKey:"har") as? [String:Any]
+  // Geometrii výřezu doplňuje jen Mac, ne rozšíření.
+  object.removeValue(forKey:"capture")
   guard let context=try? JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]) else{return nil}
   self.context=context;self.har=har.flatMap{try? JSONSerialization.data(withJSONObject:$0,options:[.withoutEscapingSlashes])}
+ }
+ private init(context:Data,har:Data?){self.context=context;self.har=har}
+ /// Kontext s geometrií výřezu pod klíčem `capture`. Velký objekt se znovu neparsuje, klíč se vloží na začátek.
+ func attaching(_ capture:CaptureGeometry?)->CaptureContextFiles{
+  guard let capture,context.first==UInt8(ascii:"{"),context.count>2,let extra=try? JSONSerialization.data(withJSONObject:["capture":capture.json],options:[.sortedKeys]) else{return self}
+  return CaptureContextFiles(context:extra.dropLast()+Data(",".utf8)+context.dropFirst(),har:har)
  }
  /// Zapíše soubory vedle obrázku v pracovní složce, čitelné jen pro vlastníka.
  func write(besides image:URL)throws{

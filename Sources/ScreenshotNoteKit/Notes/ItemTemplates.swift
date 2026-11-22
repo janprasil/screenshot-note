@@ -127,13 +127,15 @@ private func captures(_ regex:NSRegularExpression?,_ keys:[String],in text:Strin
  for (i,key) in keys.enumerated() where match.range(at:i+1).location != NSNotFound{values[key]=(text as NSString).substring(with:match.range(at:i+1))}
  return values
 }
-/// Odstraní vykreslené komentáře obrázku jako celé odstavce (poslední takový výskyt) a zbylé prázdné řádky.
-private func removing(_ comments:String?,from text:String)->String {
+/// Odstraní vykreslené komentáře obrázku na místě {comments} (poslední výskyt) a zbylé prázdné řádky.
+/// lead a trail jsou literály šablony kolem {comments} v jeho odstavci.
+private func removing(_ comments:String?,from text:String,lead:String="",trail:String="")->String {
  guard let comments,!comments.isEmpty else{return text}
  var search=text.endIndex
  while let range=text.range(of:comments,options:.backwards,range:text.startIndex..<search) {
-  let starts=range.lowerBound==text.startIndex || text[..<range.lowerBound].hasSuffix("\n\n")
-  let ends=range.upperBound==text.endIndex || text[range.upperBound...].hasPrefix("\n\n")
+  let before=text[..<range.lowerBound],after=text[range.upperBound...]
+  let starts=before.hasSuffix(lead) && (before.count==lead.count || before.dropLast(lead.count).hasSuffix("\n\n"))
+  let ends=after.hasPrefix(trail) && (after.count==trail.count || after.dropFirst(trail.count).hasPrefix("\n\n"))
   if starts && ends {
    var value=text;value.removeSubrange(range)
    while value.contains("\n\n\n"){value=value.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
@@ -143,15 +145,26 @@ private func removing(_ comments:String?,from text:String)->String {
  }
  return text
 }
+/// Literály kolem {comments} v jeho odstavci; nil, když tam je jiný placeholder.
+private func commentFrame(_ part:String)->(lead:String,trail:String)? {
+ guard let at=part.range(of:"{comments}") else{return nil}
+ let lead=String(part[..<at.lowerBound]).components(separatedBy:"\n\n").last ?? ""
+ let trail=String(part[at.upperBound...]).components(separatedBy:"\n\n").first ?? ""
+ return lead.contains("{") || trail.contains("{") ? ("",""):(lead,trail)
+}
 
 /// Popisek obrázku podle šablony obrázku: before = text před odkazem (od předchozího odkazu), after = za ním.
 /// comments = vykreslené komentáře tohoto obrázku (cloud), z popisku se vynechají.
 /// previous = komentáře předchozího obrázku, které mohou ležet v before.
 /// following = komentáře dalšího obrázku, které mohou ležet v after.
 func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String?=nil,previous:String?=nil,following:String?=nil,first:Bool=true)->String {
- let after=removing(comments,from:removing(following,from:after.trimmingCharacters(in:.newlines))),before=removing(previous,from:removing(comments,from:before.trimmingCharacters(in:.newlines)))
- guard let template,template != defaultImageTemplate,let at=template.range(of:"{image}") else{return stripContextCallout(after).trimmingCharacters(in:.newlines)}
- let prefix=String(template[..<at.lowerBound]),suffix=String(template[at.upperBound...])
+ let source=template ?? defaultImageTemplate,at=source.range(of:"{image}") ?? source.endIndex..<source.endIndex
+ let prefix=String(source[..<at.lowerBound]),suffix=String(source[at.upperBound...])
+ // Komentáře se hledají jen tam, kam je šablona dává: před obrázkem (vlastní a dalšího obrázku), nebo za ním (vlastní a předchozího).
+ var after=after.trimmingCharacters(in:.newlines),before=before.trimmingCharacters(in:.newlines)
+ if let frame=commentFrame(suffix){after=removing(comments,from:after,lead:frame.lead,trail:frame.trail);before=removing(previous,from:before,lead:frame.lead,trail:frame.trail)}
+ if let frame=commentFrame(prefix){before=removing(comments,from:before,lead:frame.lead,trail:frame.trail);after=removing(following,from:after,lead:frame.lead,trail:frame.trail)}
+ guard let template,template != defaultImageTemplate,template.contains("{image}") else{return stripContextCallout(after).trimmingCharacters(in:.newlines)}
  var values:[String:String]=[:]
  // Pole před obrázkem: od konce předchozího obrázku (jeho generované odstavce se přeskočí).
  if prefix.contains("{description}") || prefix.contains("{elements}") {

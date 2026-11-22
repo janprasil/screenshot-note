@@ -78,6 +78,14 @@ import Foundation
  echo.comments=[RemoteNote.Comment(author_name:"Eva",body:"1",created_at:"2026-03-05T08:07:00Z",image_index:1),RemoteNote.Comment(author_name:"Eva",body:"Další",created_at:"2026-03-05T08:07:00Z",image_index:2)]
  let echoRead=parsedSession(echo.template,cloudSessionBody(echo,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:echo.image_template,comments:cloudImageComments(echo,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(echoRead?.3["S-1.png"]=="Popis 1" && echoRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:echoRead))
+ // Komentář shodný s popisem jiného obrázku nic nesmaže; komentář s literálem v odstavci se odstraní.
+ var same=custom;same.comment_template="{text}";same.image_template=nil
+ same.comments=[RemoteNote.Comment(author_name:"Eva",body:"Popis 1",created_at:"2026-03-05T08:07:00Z",image_index:2)]
+ let sameRead=parsedSession(same.template,cloudSessionBody(same,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:same.image_template,comments:cloudImageComments(same,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(sameRead?.3["S-1.png"]=="Popis 1" && sameRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:sameRead))
+ var labeled=same;labeled.image_template="{image}\n\n{description}\n\nComment: {comments}"
+ let labeledRead=parsedSession(labeled.template,cloudSessionBody(labeled,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:labeled.image_template,comments:cloudImageComments(labeled,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(labeledRead?.3["S-1.png"]=="Popis 1" && labeledRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:labeledRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

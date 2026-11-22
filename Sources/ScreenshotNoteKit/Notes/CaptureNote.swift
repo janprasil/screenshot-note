@@ -179,10 +179,10 @@ func renderSessionTemplate(_ template:String,title:String,screenshots:String,tex
  if template.contains("{comments}") && comments.isEmpty{while let last=output.last,last.isWhitespace{output.removeLast()}}
  return output.hasSuffix("\n") ? output:output+"\n"
 }
-/// Komentáře pro {comments}: text, pod ním autor a místní čas, oddělené prázdným řádkem.
+/// Komentáře pro {comments}: text, pod ním autor, místní čas a u obrázku jeho číslo, oddělené prázdným řádkem.
 func renderComments(_ comments:[RemoteNote.Comment])->String {
  let format=DateFormatter();format.locale=Locale(identifier:"en_US_POSIX");format.timeZone = .current;format.dateFormat="yyyy-MM-dd HH:mm"
- return comments.map{$0.body+"\n`"+($0.author_name ?? "").replacingOccurrences(of:"`",with:"'")+"` - `"+(parseServerDate($0.created_at).map(format.string) ?? $0.created_at ?? "")+"`"}.joined(separator:"\n\n")
+ return comments.map{$0.body+"\n`"+($0.author_name ?? "").replacingOccurrences(of:"`",with:"'")+"` - `"+(parseServerDate($0.created_at).map(format.string) ?? $0.created_at ?? "")+"`"+($0.image_index.map{" - `Screenshot \($0)`"} ?? "")}.joined(separator:"\n\n")
 }
 func fillPlaceholders(_ template:String,_ values:[String:String])->String {
  let expression=try! NSRegularExpression(pattern:values.keys.map(NSRegularExpression.escapedPattern(for:)).joined(separator:"|"))

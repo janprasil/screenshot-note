@@ -44,7 +44,8 @@ struct RemoteNote:Codable,Equatable {
  }
  var images:[Image]
  // Komentáře z detailu; prázdný seznam je nil, aby se otisk starších relací nezměnil.
- struct Comment:Codable,Equatable{let author_name:String?;let body:String;let created_at:String?}
+ // image_index: komentář obrázku (1-based), nil = celá relace; starší server pole neposílá.
+ struct Comment:Codable,Equatable{let author_name:String?;let body:String;let created_at:String?;var image_index:Int? = nil}
  var comments:[Comment]? = nil
  // Starší server autora neposílá; nil nemění otisk relace.
  var author:CloudAuthor? = nil
@@ -68,7 +69,7 @@ func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[Str
   }
   return text
  }.joined(separator:"\n\n")
- let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at)}
+ let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at,image_index:$0.image_index)}
   return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""),context:sessionContextMarkdown(items))
 }
 

@@ -110,6 +110,10 @@ import AppKit
  try check(areaStored["elementsOutsideCapture"] as? Int==1 && areaStored["trimmed"]==nil && CaptureGeometry(json:areaStored["capture"])==region,"area metadata")
  // Bez geometrie (bez okna prohlížeče) zůstane kontext beze změny.
  try check(areaFiles.restrictingElements(to:nil).context==areaFiles.context,"no geometry keeps the bundle")
+ // Neurčitelná poloha stránky (bez geometrie okna) elementy nemaže.
+ var unmapped=page;unmapped["page"]=["url":"https://example.test/"]
+ let unmappedFiles=CaptureContextFiles(bundle:try JSONSerialization.data(withJSONObject:unmapped))!
+ try check(unmappedFiles.restrictingElements(to:region).context==unmappedFiles.context,"unmapped page keeps the elements")
  print("PASS: area capture maps elements of the selected region only and stores its geometry")
  print("PASS element mapping")
 }

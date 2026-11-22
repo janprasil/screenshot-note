@@ -79,7 +79,9 @@ struct CaptureContextFiles {
  /// Jen elementy viditelné ve výřezu (mapa podle geometrie); bez geometrie nebo mapy beze změny.
  /// Pořadí zůstává, index v anotacích pak odpovídá novému seznamu.
  func restrictingElements(to capture:CaptureGeometry?)->CaptureContextFiles{
-  guard let capture,var object=(try? JSONSerialization.jsonObject(with:context)) as? [String:Any],let elements=object["elements"] as? [Any],!elements.isEmpty else{return self}
+  guard let capture,var object=(try? JSONSerialization.jsonObject(with:context)) as? [String:Any],let elements=object["elements"] as? [Any],!elements.isEmpty,
+   // Nejistá poloha obsahu stránky (např. DevTools bez Accessibility) není důkaz, že elementy leží mimo výřez.
+   let geometry=(object["page"] as? [String:Any])?["geometry"] as? [String:Any],pageContentFrame(geometry,capture:capture) != nil else{return self}
   let visible=Set(mapElements(object,capture:capture).map(\.index))
   guard visible.count<elements.count else{return self}
   object["elements"]=elements.enumerated().filter{visible.contains($0.offset)}.map(\.element)

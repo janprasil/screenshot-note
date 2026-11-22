@@ -16,7 +16,7 @@ struct SessionRecord:Codable,Equatable {
  // Otisk naposledy zapsané cloudové verze vedle upravené kopie.
  var cloudCopy:String? = nil
  // Šablona obrázku při zápisu (čtení popisků) a verze vykreslení cloudové relace.
- var imageTemplate:String? = nil;var render:Int? = nil
+ var imageTemplate:String? = nil;var commentTemplate:String? = nil;var render:Int? = nil
  // Relace z kořene v .trash: obrázky, které se přesunuly s ní (sdílené zůstaly v assets).
  var rootMoved:[String]? = nil
  // Sdílené obrázky zkopírované do .trash, aby se poznámka v koši zobrazila.

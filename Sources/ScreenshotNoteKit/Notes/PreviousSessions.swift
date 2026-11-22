@@ -112,10 +112,12 @@ func rewriteImageLinks(_ text:String,order:[String],rename:[String:String]=[:])-
  return output
 }
 /// Název, komentář, obrázky a popisky z bloku podle šablony.
-func parsedSession(_ template:String,_ body:String,imageTemplate:String?=nil)->(String,String,[String],[String:String])? {
+/// comments: šablona komentáře cloudové relace (komentáře se z popisků vynechají), nil = lokální relace.
+func parsedSession(_ template:String,_ body:String,imageTemplate:String?=nil,comments:String??=nil)->(String,String,[String],[String:String])? {
  guard let values=extractTemplateValues(template,from:body),let screenshotText=values["{screenshots}"] else{return nil}
  let source=screenshotText as NSString,matches=imageLinks(screenshotText);var images:[String]=[],notes:[String:String]=[:]
- for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;notes[name]=imageCaption(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))).trimmingCharacters(in:.newlines),template:imageTemplate,next:i+1<matches.count ? i+2:nil)}
+ for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;let start=i>0 ? NSMaxRange(matches[i-1].range):0
+  notes[name]=imageCaption(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))),before:source.substring(with:NSRange(location:start,length:match.range.location-start)),template:imageTemplate,next:i+1<matches.count ? i+2:nil,comments:comments)}
  return (values["{title}"] ?? "",values["{text}"] ?? "",images,notes)
 }
 private let separator="\n\n---\n\n"
@@ -129,7 +131,7 @@ func sessionSegments(_ ns:NSString)->[NSRange] {
  }
 }
 /// Hledá blok podle šablony; začátek i konec zkouší na hranicích řádků kolem kotvy.
-func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,footer:String="",imageTemplate:String?=nil)->(NSRange,(String,String,[String],[String:String]))? {
+func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,footer:String="",imageTemplate:String?=nil,comments:String??=nil)->(NSRange,(String,String,[String],[String:String]))? {
  var starts:[Int]=[]
  if let anchor {
   var position=anchor
@@ -155,7 +157,7 @@ func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,foot
  }
  for start in starts{for end in ends where end>start {
   let range=NSRange(location:start,length:end-start)
-  if let values=parsedSession(template,ns.substring(with:range),imageTemplate:imageTemplate){return (range,values)}
+  if let values=parsedSession(template,ns.substring(with:range),imageTemplate:imageTemplate,comments:comments){return (range,values)}
  }}
  return nil
 }
@@ -182,14 +184,14 @@ func locateSession(_ record:SessionRecord,in ns:NSString,avoid:[NSRange])->(NSRa
  if !record.combined {
   let whole=NSRange(location:0,length:ns.length)
   guard free(whole) else{return nil}
-  return fuzzyBlock(record.template,ns,segment:whole,anchor:nil,footer:record.footer,imageTemplate:record.imageTemplate)
+  return fuzzyBlock(record.template,ns,segment:whole,anchor:nil,footer:record.footer,imageTemplate:record.imageTemplate,comments:record.isCloud ? .some(record.commentTemplate):nil)
  }
  for image in record.images {
   anchors+=imageLinkRanges(image,in:ns).map(\.location)
  }
  let segments=sessionSegments(ns)
  for anchor in anchors {
-  guard let segment=segments.first(where:{NSLocationInRange(anchor,$0)}),let found=fuzzyBlock(record.template,ns,segment:segment,anchor:anchor,footer:record.footer,imageTemplate:record.imageTemplate),free(found.0),
+  guard let segment=segments.first(where:{NSLocationInRange(anchor,$0)}),let found=fuzzyBlock(record.template,ns,segment:segment,anchor:anchor,footer:record.footer,imageTemplate:record.imageTemplate,comments:record.isCloud ? .some(record.commentTemplate):nil),free(found.0),
         found.1.2.contains(where:{record.images.contains($0)}) else{continue}
   return found
  }

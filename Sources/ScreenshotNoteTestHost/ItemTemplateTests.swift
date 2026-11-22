@@ -45,5 +45,16 @@ import Foundation
  // Výchozí šablona čte popisky jako dřív.
  let simple=renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Popis")],template:nil),text:"X")
  assert(parsedSession(defaultMarkdownTemplate,simple)?.3["a.png"]=="Popis")
+ // Popis před obrázkem patří k následujícímu odkazu.
+ let before="{description}\n\n{image}"
+ let reversed=renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:before),text:"X")
+ let reread=parsedSession(defaultMarkdownTemplate,reversed,imageTemplate:before)
+ assert(reread?.3["a.png"]=="Jedna" && reread?.3["b.png"]=="Dvě",String(describing:reread))
+ // Komentáře obrázku cloudové relace nejsou součástí popisku.
+ let withImageComment=cloudSessionBody(note,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc)
+ let cloudRead=parsedSession(defaultMarkdownTemplate,withImageComment,comments:.some(nil))
+ assert(cloudRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik" && cloudRead?.3["S-1.png"]=="Popis 1",String(describing:cloudRead))
+ let customRead=parsedSession(custom.template,customBody,imageTemplate:custom.image_template,comments:.some(custom.comment_template))
+ assert(customRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:customRead))
  print("PASS: image template paragraphs, {elements} split, template checks and caption parsing with a custom image template")
 }

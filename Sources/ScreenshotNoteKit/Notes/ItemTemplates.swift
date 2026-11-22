@@ -82,20 +82,32 @@ func checkItemTemplate(_ kind:String,_ value:String)->(valid:Bool,unknown:[Strin
  return (!value.isEmpty && value.count<=itemTemplateMaxLength && (kind=="comment" || value.contains("{image}")),unknown)
 }
 
-/// Popisek obrázku z bloku za odkazem podle šablony obrázku; vestavěná šablona zachová dřívější čtení.
-/// Popisek bere vše, co šablona nedává jinam; generované odstavce bez obsahu mohou chybět.
-func imageCaption(_ raw:String,template:String?,next:Int?)->String {
- var text=raw
- guard let template,template != defaultImageTemplate,let at=template.range(of:"{image}") else{return stripContextCallout(text)}
- // Konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).
- let prefix=String(template[..<at.lowerBound]).trimmingCharacters(in:.whitespacesAndNewlines)
- if let next,!prefix.isEmpty {
-  let rendered=prefix.replacingOccurrences(of:"{number}",with:String(next))
-  if !rendered.contains("{"),text.hasSuffix(rendered){text=String(text.dropLast(rendered.count)).trimmingCharacters(in:.newlines)}
+/// Komentáře na konci popisku (cloudová relace) se odstraní; šablona s prázdným řádkem se nečte.
+func stripCommentBlocks(_ text:String,template:String?)->String {
+ let source=template ?? defaultCommentTemplate
+ guard !source.contains("\n\n") else{return text}
+ let token=try! NSRegularExpression(pattern:"\\{(?:text|name|date)\\}"),ns=source as NSString
+ var pattern="\\A",offset=0
+ for match in token.matches(in:source,range:NSRange(location:0,length:ns.length)) {
+  pattern+=NSRegularExpression.escapedPattern(for:ns.substring(with:NSRange(location:offset,length:match.range.location-offset)))
+  pattern+=ns.substring(with:match.range)=="{text}" ? "[\\s\\S]*":"[^\\n]*";offset=NSMaxRange(match.range)
  }
- let paragraphs=String(template[at.upperBound...]).components(separatedBy:"\n\n")
+ guard let regex=try? NSRegularExpression(pattern:pattern+NSRegularExpression.escapedPattern(for:ns.substring(from:offset))+"\\z") else{return text}
+ var output=text
+ while !output.isEmpty {
+  let current=output as NSString,at=current.range(of:"\n\n",options:.backwards)
+  let last=at.location==NSNotFound ? output:current.substring(from:NSMaxRange(at))
+  guard regex.firstMatch(in:last,range:NSRange(location:0,length:(last as NSString).length)) != nil else{break}
+  output=at.location==NSNotFound ? "":current.substring(to:at.location)
+ }
+ return output
+}
+
+/// Regex odstavců šablony; odstavec jen z placeholderů může chybět, povinný je ten u {image}.
+private func paragraphPattern(_ paragraphs:[String],imageAtEnd:Bool)->(pattern:String,keys:[String]) {
  let token=try! NSRegularExpression(pattern:"\\{(?:description|comments|number|context|elements)\\}")
  var pattern="",keys:[String]=[]
+ let required=imageAtEnd ? paragraphs.count-1:0
  for (index,paragraph) in paragraphs.enumerated() {
   let ns=paragraph as NSString,matches=token.matches(in:paragraph,range:NSRange(location:0,length:ns.length))
   var piece="",offset=0
@@ -110,15 +122,45 @@ func imageCaption(_ raw:String,template:String?,next:Int?)->String {
    offset=NSMaxRange(match.range)
   }
   piece+=NSRegularExpression.escapedPattern(for:ns.substring(from:offset))
-  // Zbytek odstavce s {image} je povinný; další odstavec jen z placeholderů může chybět.
-  if index==0{pattern=piece;continue}
+  if index==required{pattern+=piece;continue}
   let placeholderOnly = !matches.isEmpty && token.stringByReplacingMatches(in:paragraph,range:NSRange(location:0,length:ns.length),withTemplate:"").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty
-  pattern+=placeholderOnly ? "(?:\\n\\n"+piece+")?":"\\n\\n"+piece
+  let part=imageAtEnd ? piece+"\\n\\n":"\\n\\n"+piece
+  pattern+=placeholderOnly ? "(?:"+part+")?":part
  }
+ return (pattern,keys)
+}
+
+/// Popisek obrázku podle šablony obrázku: before = text před odkazem, after = za ním.
+/// Popisek bere vše, co šablona nedává jinam; komentáře cloudové relace se vynechají.
+func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String??=nil)->String {
+ func clean(_ text:String)->String {
+  var value=text.trimmingCharacters(in:.newlines)
+  if let comments{value=stripCommentBlocks(value,template:comments)}
+  return stripContextCallout(value).trimmingCharacters(in:.newlines)
+ }
+ guard let template,template != defaultImageTemplate,let at=template.range(of:"{image}") else{return clean(after)}
+ let prefix=String(template[..<at.lowerBound])
+ var text=after.trimmingCharacters(in:.newlines)
+ // Popis před obrázkem: čte se z textu před odkazem.
+ if prefix.contains("{description}") || prefix.contains("{elements}") {
+  let parts=paragraphPattern(prefix.components(separatedBy:"\n\n"),imageAtEnd:true)
+  guard let regex=try? NSRegularExpression(pattern:parts.pattern+"\\z"),let match=regex.firstMatch(in:before,range:NSRange(location:0,length:(before as NSString).length)) else{return clean(after)}
+  return joined(match,parts.keys,in:before,clean:clean)
+ }
+ // Konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).
+ let head=prefix.trimmingCharacters(in:.whitespacesAndNewlines)
+ if let next,!head.isEmpty {
+  let rendered=head.replacingOccurrences(of:"{number}",with:String(next))
+  if !rendered.contains("{"),text.hasSuffix(rendered){text=String(text.dropLast(rendered.count)).trimmingCharacters(in:.newlines)}
+ }
+ let parts=paragraphPattern(String(template[at.upperBound...]).components(separatedBy:"\n\n"),imageAtEnd:false)
  let source="\n\n"+text
- guard let regex=try? NSRegularExpression(pattern:"\\A(?:\\n\\n)?"+pattern+"\\s*\\z"),
-       let match=regex.firstMatch(in:source,range:NSRange(location:0,length:(source as NSString).length)) else{return stripContextCallout(text)}
+ guard let regex=try? NSRegularExpression(pattern:"\\A(?:\\n\\n)?"+parts.pattern+"\\s*\\z"),
+       let match=regex.firstMatch(in:source,range:NSRange(location:0,length:(source as NSString).length)) else{return clean(text)}
+ return joined(match,parts.keys,in:source,clean:clean)
+}
+private func joined(_ match:NSTextCheckingResult,_ keys:[String],in source:String,clean:(String)->String)->String {
  var values:[String:String]=[:]
  for (i,key) in keys.enumerated() where match.range(at:i+1).location != NSNotFound{values[key]=(source as NSString).substring(with:match.range(at:i+1))}
- return [stripContextCallout(values["description"] ?? "").trimmingCharacters(in:.newlines),values["elements"] ?? ""].filter{!$0.isEmpty}.joined(separator:"\n\n")
+ return [clean(values["description"] ?? ""),values["elements"] ?? ""].filter{!$0.isEmpty}.joined(separator:"\n\n")
 }

@@ -99,6 +99,10 @@ import AppKit
  let local=try Data(contentsOf:synced.appendingPathComponent("1.mp4"))
  assert(kept==written && local==Data([9,9]))
  try mp4.write(to:synced.appendingPathComponent("1.mp4"))
+ // Video na serveru je, jen se nestáhlo: místní kopie zůstane.
+ let retained=try CloudFolders.shared.writeContextAttachments([1:["video.keep":Data()]],names:["1.png"],assets:synced,previous:written)
+ assert(retained==written)
+ assert(fm.fileExists(atPath:synced.appendingPathComponent("1.mp4").path))
  _ = try CloudFolders.shared.writeContextAttachments([:],names:["1.png"],assets:synced,previous:written)
  assert(!fm.fileExists(atPath:synced.appendingPathComponent("1.mp4").path) && !fm.fileExists(atPath:synced.appendingPathComponent("1.frames").path))
  print("PASS: recording files beside the poster, copy/remove with the item, assets rendering and cloud download of MP4 and frames")
@@ -111,6 +115,9 @@ import AppKit
  assert(CloudAttachment(index:1,kind:"har",bytes:1,sha256:"").filename=="1.har" && CloudAttachment(index:1,kind:"context",bytes:1,sha256:"").contentType=="application/json")
  assert(["context","har","video","frame-1","frame-12"].allSatisfy(CloudAttachment.validKind) && !["frame-13","frame-0","poster","mp4"].contains(where:CloudAttachment.validKind))
  // Starší job bez nových polí se načte beze změny.
+ let sized=CloudAttachment(index:1,kind:"video",bytes:1,sha256:"a",durationMs:4200,width:640,height:360)
+ let roundTrip=try JSONDecoder().decode(CloudAttachment.self,from:JSONEncoder().encode(sized))
+ assert(roundTrip==sized)
  let legacy=try JSONDecoder().decode(CloudAttachment.self,from:Data("{\"index\":1,\"kind\":\"har\",\"bytes\":1,\"sha256\":\"x\"}".utf8))
  assert(legacy.timestampMs==nil && legacy.video==nil)
  print("PASS: video and key frame cloud attachments: kinds, MIME types, size limits, queue file names and legacy jobs")

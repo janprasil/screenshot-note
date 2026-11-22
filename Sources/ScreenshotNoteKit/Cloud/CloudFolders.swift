@@ -865,13 +865,13 @@ final class CloudFolders {
    // Smaže se jen to, co se do .trash přesunulo s relací, a jen netknuté.
    let markdown=URL(fileURLWithPath:record.file)
    if SessionIndex.key(markdown).hasPrefix(SessionIndex.key(trashURL(base))+"/"),fileHash(markdown)==record.files[markdown.lastPathComponent]{try? fm.removeItem(at:markdown)}
-   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url)};removeTrashedVideo(record,image:image,base:base)}
+   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url);removeTrashedVideo(record,image:image,base:base)}}
    removeTrashCopies(record,base:base);index.remove(record);return
   }
   if record.stem != nil {
    if record.trashed==true {
     if let note=record.trashNote,fileHash(URL(fileURLWithPath:note))==record.trashHash{try? fm.removeItem(atPath:note)}
-    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url)};removeTrashedVideo(record,image:name,base:base)}
+    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url);removeTrashedVideo(record,image:name,base:base)}}
    } else {var copy=record;_ = trashCombined(&copy,base:base)}
   } else {
    let directory=record.directory
@@ -1237,6 +1237,8 @@ final class CloudFolders {
    // Metadata videa jako video.json do složky snímků (časy z media).
    if result[image.index]?["video"] != nil,let json=remoteVideoInfo(image.attachments ?? [],downloaded:Set(result[image.index]?.keys.map{$0} ?? [])).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
    else{result[image.index]?["video"]=nil}
+   // Video na serveru je, jen se teď nestáhlo: místní kopie zůstane a stažení se zopakuje.
+   if result[image.index]?["video"] == nil,(image.attachments ?? []).contains(where:{$0.kind=="video"}){result[image.index,default:[:]]["video.keep"]=Data()}
   }
   return result
  }
@@ -1277,7 +1279,9 @@ final class CloudFolders {
      }catch{try? fm.removeItem(at:staging);throw error}
     }
     files[key]=sessionFingerprint(mp4)
-   } else if previous[key] != nil {for url in video{try? fm.removeItem(at:url)}}
+   } else if let hash=previous[key] {
+    if contexts[position+1]?["video.keep"] != nil{files[key]=hash}else{for url in video{try? fm.removeItem(at:url)}}
+   }
   }
   return files
  }

@@ -140,7 +140,7 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
   try? await stream?.stopCapture()
   let (start,failure,frames)=queue.sync{stopped=true;return (self.start,self.failure,selector.frames)}
   guard let start,let first=frames.first,writer.status == .writing else{
-   writer.cancelWriting();try? FileManager.default.removeItem(at:output)
+   if writer.status == .writing{writer.cancelWriting()};try? FileManager.default.removeItem(at:output)
    throw failure ?? NSError(domain:"ScreenshotNote",code:41,userInfo:[NSLocalizedDescriptionKey:L("Záznam neobsahuje žádný snímek.")])
   }
   let now=CMClockGetTime(CMClockGetHostTimeClock())
@@ -152,7 +152,7 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
   return RecordingResult(video:output,durationMs:duration,width:width,height:height,poster:first.frame,frames:frames.map{($0.ms,$0.frame)})
  }
  func cancel() {
-  Task{try? await stream?.stopCapture();queue.sync{stopped=true};writer.cancelWriting();try? FileManager.default.removeItem(at:output)}
+  Task{try? await stream?.stopCapture();queue.sync{stopped=true};if writer.status == .writing{writer.cancelWriting()};try? FileManager.default.removeItem(at:output)}
  }
 }
 

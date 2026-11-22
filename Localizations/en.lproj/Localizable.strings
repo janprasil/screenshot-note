@@ -581,3 +581,4 @@
 "Záznam videa se nepodařilo připravit." = "The video recording could not be prepared.";
 "Záznam začne za %d s" = "Recording starts in %d s";
 "Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "The video of item %ld is larger than 8 MB and cannot be uploaded to the cloud. Save it to a local folder or record a shorter clip.";
+"Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky." = "The video of item %ld could not be prepared for upload. Save it to a local folder.";

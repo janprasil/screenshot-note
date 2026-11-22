@@ -256,7 +256,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   session=root;return(draft,root)
  }
  @objc func resume(){
-  if let composer=composer{composer.reveal();return};guard !capturing else{return}
+  if let composer=composer{composer.reveal();return};guard !capturing,recording.state == .idle,!deliveringRecording else{return}
   do{
    let(draft,root)=try workingCopy()
    if !draft.images.isEmpty || !draft.comment.isEmpty || !(draft.title ?? "").isEmpty{present(draft,root:root);return}

@@ -41,7 +41,10 @@ final class Hotkeys {
   },1,&type,Unmanaged.passUnretained(self).toOpaque(),&handler)
  }
  func register()->[String]{for r in refs{UnregisterEventHotKey(r)};refs=[];registered=[];if let monitor{NSEvent.removeMonitor(monitor);self.monitor=nil};var errors:[String]=[]
-  for id in 1...3 {let s=Shortcut.load(id);var ref:EventHotKeyRef?;let status=RegisterEventHotKey(s.key,s.modifiers,EventHotKeyID(signature:0x53434E54,id:UInt32(id)),GetApplicationEventTarget(),0,&ref)
+  for id in 1...3 {let s=Shortcut.load(id)
+   // Výchozí zkratka videa, kterou už má uživatel u screenshotu, se jen neregistruje.
+   if id == 3,UserDefaults.standard.data(forKey:"shortcut3") == nil,(1...2).map(Shortcut.load).contains(where:{$0.key==s.key && $0.modifiers==s.modifiers}){continue}
+   var ref:EventHotKeyRef?;let status=RegisterEventHotKey(s.key,s.modifiers,EventHotKeyID(signature:0x53434E54,id:UInt32(id)),GetApplicationEventTarget(),0,&ref)
    if status == noErr,let ref=ref {refs.append(ref);registered.insert(id)} else {errors.append(LF("Zkratka %@ je již obsazená. Změň ji v nastavení.",s.display))}
   }
   monitor=NSEvent.addLocalMonitorForEvents(matching:.keyDown){[weak self] event in

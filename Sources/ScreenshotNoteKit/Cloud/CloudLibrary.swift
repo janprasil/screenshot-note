@@ -648,6 +648,7 @@ final class CloudLibrary {
   try fm.createDirectory(at:receipt.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(CommittedUpload(owner:owner,origin:c.endpoint,id:job.sessionID,folder:job.manifest.folder_id,digest:state.manifest_digest)).write(to:receipt,options:.atomic)
   // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
+  var videoRejected = false
   for item in job.attachments ?? [] {
    let file = directory.appendingPathComponent(item.filename)
    guard CloudAttachment.validKind(item.kind), !item.isContext || cloudAttachmentAllowed(directory, index: item.index, folder: job.manifest.folder_id) else { continue }
@@ -660,8 +661,11 @@ final class CloudLibrary {
    } catch let failure as CloudFailure where [400,402,403,404,413,415].contains(failure.status) || failure.code=="session_trashed" {
     // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu, uživatel dostane hlášku.
     lastError=item.isContext ? LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message):LF("Video položky %ld se do cloudu nenahrálo: %@",item.index,failure.message)
+    if !item.isContext { videoRejected = true }
    }
   }
+  // Odmítnuté video je jediná kopie záznamu; job se odloží, místo aby se smazal.
+  if videoRejected { try park(directory, job, reason: lastError ?? ""); return }
   try fm.removeItem(at:directory)
  }
  private func park(_ directory:URL,_ job:CloudJob,reason:String)throws {

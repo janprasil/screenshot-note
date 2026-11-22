@@ -10,9 +10,9 @@ import AppKit
  assert(recordingSize(width:1800,height:2880)==(800,1280))
  // Délka m:ss jako web videoDuration.
  assert([500,59499,59500,60500,0].map(videoDuration)==["0:01","0:59","1:00","1:01","0:00"])
- assert(RecordingLimits.fps==10 && RecordingLimits.maxSide==1280 && RecordingLimits.bitrate==1_000_000 && RecordingLimits.maxDuration==60 && RecordingLimits.maxFrames==12)
+ assert(RecordingLimits.fps==10 && RecordingLimits.maxSide==1280 && RecordingLimits.bitrate==850_000 && RecordingLimits.maxDuration==60 && RecordingLimits.maxFrames==12)
  // 60 s při cílovém bitrate se s rezervou vejde do 8 MiB limitu cloudu.
- assert(Double(RecordingLimits.bitrate)*RecordingLimits.maxDuration/8<Double(CloudAttachment.videoLimit)*0.92)
+ assert(Double(RecordingLimits.bitrate)*RecordingLimits.maxDuration/8<Double(CloudAttachment.videoLimit)*0.8)
  // Odpočet: výchozí 3 s, jen 3/5/10.
  let savedCountdown=UserDefaults.standard.object(forKey:"recordingCountdown")
  UserDefaults.standard.removeObject(forKey:"recordingCountdown");assert(recordingCountdown==3)

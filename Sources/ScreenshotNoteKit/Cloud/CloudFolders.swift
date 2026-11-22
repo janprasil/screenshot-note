@@ -1019,18 +1019,20 @@ final class CloudFolders {
     index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower);return
    }
    // Upravená místní kopie zůstává; cloudová verze jde vedle jako <název>_cloud.md.
-   var links:[String]=[]
-   for (name,bytes) in zip(names,data) {
+   var links:[String]=[],fresh:[Int:[String:Data]]=[:]
+   for (position,(name,bytes)) in zip(names,data).enumerated() {
     let url=folderAssets.appendingPathComponent(name),hash=fileHash(url)
-    if hash==nil{try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true);try bytes.write(to:url,options:.withoutOverwriting);links.append(name)}
+    if hash==nil{try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true);try bytes.write(to:url,options:.withoutOverwriting);links.append(name);fresh[position+1]=contexts[position+1]}
     else if hash==sessionFingerprint(bytes){links.append(name)}
-    else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent)}
+    else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent);fresh[position+1]=contexts[position+1]}
    }
-   // Kopie nese i video a kontext stažené ke svým obrázkům; cizí nebo upravené soubory zůstanou.
-   let sides=try writeContextAttachments(contexts,names:links,assets:folderAssets,previous:saved.files)
-   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:contexts).utf8)
+   // Video a kontext jen k nově zapsaným obrázkům; místní soubory upravené relace se nemění ani nemažou.
+   let videoFree={(position:Int)->Bool in !assetVideoFiles(folderAssets,links[position-1]).contains{fm.fileExists(atPath:$0.path)} && !assetContextFiles(folderAssets,links[position-1]).contains{fm.fileExists(atPath:$0.path)}}
+   fresh=fresh.filter{videoFree($0.key)}
+   let sides=try writeContextAttachments(fresh,names:links,assets:folderAssets)
+   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:fresh).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){a,_ in a};index.put(kept);return
+   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date()),base:base)

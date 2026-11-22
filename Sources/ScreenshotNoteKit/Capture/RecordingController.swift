@@ -95,7 +95,8 @@ final class RecordingController {
   if target == .region{selector=RegionSelector.choose(on:screen){[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
  }
 
- private func begin(_ target:RecordingTarget,screen:NSScreen,region:CGRect?,window:CGWindowID?,output:URL,attempt current:Int)async {
+ /// Na hlavním vlákně: stav, menu bar i chybové hlášky; await se vrací sem.
+ @MainActor private func begin(_ target:RecordingTarget,screen:NSScreen,region:CGRect?,window:CGWindowID?,output:URL,attempt current:Int)async {
   guard state == .counting,attempt == current else{return}
   countdown=nil
   let live={self.state == .counting && self.attempt == current}

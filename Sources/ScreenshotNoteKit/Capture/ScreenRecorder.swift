@@ -8,8 +8,8 @@ import UniformTypeIdentifiers
 enum RecordingLimits {
  static let fps:Int32=10
  static let maxSide=1280
- // 1 Mbit/s: 60 s se i s režií kontejneru vejde do 8 MiB limitu webu.
- static let bitrate=1_000_000
+ // Průměr není strop; 0,85 Mbit/s nechá na 60 s přes 25 % rezervy do 8 MiB limitu webu.
+ static let bitrate=850_000
  static let maxDuration:TimeInterval=60
  static let maxFrames=12
  static let countdowns=[3,5,10]

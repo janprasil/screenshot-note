@@ -28,10 +28,11 @@ final class RegionSelection {
  /// Zrušení zvenku (zkratka během výběru): bez volání completion.
  func cancel(){guard completion != nil else{return};completion=nil;close()}
  fileprivate func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;close();done(result)}
- private func close(){NSCursor.pop();for window in windows{window.orderOut(nil)};windows=[]}
+ private func close(){NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil};windows=[]}
 }
 final class RegionSelector:NSWindow {
- private var origin:NSPoint?;private weak var group:RegionSelection?;private var minimum:CGFloat=40
+ // Okna drží výběr silně, aby přežil i bez reference volajícího; close() cyklus zruší.
+ private var origin:NSPoint?;fileprivate var group:RegionSelection?;private var minimum:CGFloat=40
  private let selection=CAShapeLayer()
  @discardableResult static func choose(on screens:[NSScreen]=NSScreen.screens,minimum:CGFloat=40,_ completion:@escaping (CGRect?)->Void)->RegionSelection {
   RegionSelection(screens:screens.isEmpty ? NSScreen.screens:screens,minimum:minimum,completion:completion)

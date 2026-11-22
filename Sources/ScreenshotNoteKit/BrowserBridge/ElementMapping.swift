@@ -41,6 +41,14 @@ struct CaptureGeometry:Equatable {
   guard abs(pixelSize.height/bounds.height-scale)<0.01 else{return nil}
   return CaptureGeometry(rect:bounds,backingScale:backingScale>0 ? backingScale:scale,imageScale:scale,browserScale:browserScale,window:window,webAreas:webAreas)
  }
+ /// Geometrie výřezu vybraného v appce: obdélník v globálních bodech Quartz a pixely hotového obrázku.
+ static func region(_ rect:CGRect,image:URL,window:CGRect?,webAreas:[CGRect]=[])->CaptureGeometry?{
+  guard let source=CGImageSourceCreateWithURL(image as CFURL,nil),let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
+   let width=number(properties[kCGImagePropertyPixelWidth]),let height=number(properties[kCGImagePropertyPixelHeight]) else{return nil}
+  let displays=activeDisplays().compactMap{id in screenScale(id).map{(bounds:CGDisplayBounds(id),scale:$0)}}
+  let backing=dominant(rect,displays:displays) ?? 0
+  return display(bounds:rect,backingScale:backing,pixelSize:CGSize(width:width,height:height),browserScale:window.flatMap{dominant($0,displays:displays)},window:window,webAreas:webAreas)
+ }
  /// Displej s největším překryvem okna rozhoduje o devicePixelRatio stránky.
  static func dominant(_ window:CGRect,displays:[(bounds:CGRect,scale:CGFloat)])->CGFloat?{
   displays.map{($0.scale,$0.bounds.intersection(window))}.filter{!$0.1.isNull}.max{$0.1.width*$0.1.height<$1.1.width*$1.1.height}?.0
@@ -154,7 +162,7 @@ func mapElements(_ context:[String:Any],capture:CaptureGeometry)->[MappedElement
  }
  return result
 }
-/// Mapa elementů ze souboru kontextu; bez uložené geometrie výřezu (výběr oblasti) je prázdná.
+/// Mapa elementů ze souboru kontextu; bez uložené geometrie výřezu je prázdná.
 /// S `imageSize` vrací prázdnou mapu, když obrázek neodpovídá výřezu (např. už oříznutý).
 func mapElements(contextFile:URL,imageSize:CGSize?=nil)->[MappedElement]{
  guard let size=(try? fm.attributesOfItem(atPath:contextFile.path))?[.size] as? NSNumber,size.intValue<=maxContextBytes,let data=try? Data(contentsOf:contextFile),

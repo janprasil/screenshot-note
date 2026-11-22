@@ -8,13 +8,18 @@ func displaySourceRect(_ rect:CGRect,screen:CGRect)->CGRect {
  CGRect(x:rect.minX-screen.minX,y:screen.maxY-rect.maxY,width:rect.width,height:rect.height).integral
 }
 
+/// Obdélník AppKit (počátek vlevo dole) v globálních bodech Quartz (počátek vlevo nahoře hlavního displeje), celé body.
+func quartzRect(_ rect:CGRect,primaryHeight:CGFloat=NSScreen.screens.first?.frame.height ?? 0)->CGRect {
+ CGRect(x:rect.minX,y:primaryHeight-rect.maxY,width:rect.width,height:rect.height).integral
+}
+
 /// Výběr oblasti tažením přes obrazovku pod kurzorem; Escape zruší.
 final class RegionSelector:NSWindow {
- private var origin:NSPoint?;private var completion:((CGRect?)->Void)?
+ private var origin:NSPoint?;private var completion:((CGRect?)->Void)?;private var minimum:CGFloat=40
  private let selection=CAShapeLayer()
- @discardableResult static func choose(on screen:NSScreen,_ completion:@escaping (CGRect?)->Void)->RegionSelector {
+ @discardableResult static func choose(on screen:NSScreen,minimum:CGFloat=40,_ completion:@escaping (CGRect?)->Void)->RegionSelector {
   let window=RegionSelector(contentRect:screen.frame,styleMask:.borderless,backing:.buffered,defer:false)
-  window.completion=completion;window.level = .screenSaver;window.isOpaque=false;window.backgroundColor=NSColor.black.withAlphaComponent(0.25)
+  window.completion=completion;window.minimum=minimum;window.level = .screenSaver;window.isOpaque=false;window.backgroundColor=NSColor.black.withAlphaComponent(0.25)
   window.ignoresMouseEvents=false;window.isReleasedWhenClosed=false;window.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
   let view=NSView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true
   window.selection.fillColor=NSColor.white.withAlphaComponent(0.15).cgColor;window.selection.strokeColor=NSColor.white.cgColor;window.selection.lineWidth=1.5
@@ -30,7 +35,8 @@ final class RegionSelector:NSWindow {
  override func mouseDragged(with event:NSEvent){guard let origin else{return};selection.path=CGPath(rect:rect(origin,event.locationInWindow),transform:nil)}
  override func mouseUp(with event:NSEvent){
   guard let origin else{return};let local=rect(origin,event.locationInWindow)
-  finish(local.width>=40 && local.height>=40 ? local.offsetBy(dx:frame.minX,dy:frame.minY):nil)
+  // Kliknutí bez tažení se nepočítá; malý výřez (screenshot) je v pořádku, video si limit ohlídá samo.
+  finish(local.width>=minimum && local.height>=minimum ? local.offsetBy(dx:frame.minX,dy:frame.minY):nil)
  }
  override func keyDown(with event:NSEvent){if event.keyCode==53{finish(nil)}else{super.keyDown(with:event)}}
  private func rect(_ a:NSPoint,_ b:NSPoint)->CGRect{CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(a.x-b.x),height:abs(a.y-b.y))}

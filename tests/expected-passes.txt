@@ -86,3 +86,4 @@ PASS: scene signature, key frame threshold, spacing and 12-frame budget keeping 
 PASS: video Markdown links the poster to the MP4 like the web export; link parsing and renaming keep the video
 PASS: recording files beside the poster, copy/remove with the item, assets rendering and cloud download of MP4 and frames
 PASS: video and key frame cloud attachments: kinds, MIME types, size limits, queue file names and legacy jobs
+PASS: area capture maps elements of the selected region only and stores its geometry

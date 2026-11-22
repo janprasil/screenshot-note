@@ -92,5 +92,24 @@ import AppKit
  let before=try Data(contentsOf:image)
  guard let debug=ElementDebug.render(image:image,elements:mapped,to:root.appendingPathComponent("debug")),let copy=NSImageRep(contentsOf:debug) else{throw BrowserBridgeError(message:"debug render failed")}
  try check(copy.pixelsWide==2880 && copy.pixelsHigh==1800 && (try Data(contentsOf:image))==before,"debug render size or original changed")
+ // Výřez vybraný v appce: AppKit → Quartz, geometrie z obrázku a v kontextu jen elementy z výřezu.
+ try check(quartzRect(CGRect(x:100,y:600,width:300,height:200),primaryHeight:900)==CGRect(x:100,y:100,width:300,height:200),"quartz rect")
+ try check(quartzRect(CGRect(x:1440.4,y:-100.2,width:99.5,height:50),primaryHeight:900).origin.x==1440,"quartz integral")
+ let area=fm.temporaryDirectory.appendingPathComponent("area-\(UUID().uuidString).png");defer{try? fm.removeItem(at:area)}
+ let picture=CGContext(data:nil,width:600,height:400,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+ try writePNG(picture,to:area)
+ let window=CGRect(x:100,y:50,width:1000,height:800)
+ let region=CaptureGeometry.region(CGRect(x:200,y:150,width:300,height:200),image:area,window:window)
+ try check(region?.rect==CGRect(x:200,y:150,width:300,height:200) && region?.imageScale==2,"region geometry: \(String(describing:region))")
+ // Obsah stránky začíná na (100,150); prvek 0 je ve výřezu, 1 mimo, 2 přesahuje okraj.
+ let page=context(ratio:2,inner:(1000,700),elements:[element(150,50,50,20),element(700,500,50,50),element(380,190,100,50)])
+ let areaFiles=CaptureContextFiles(bundle:try JSONSerialization.data(withJSONObject:page))!
+ let kept=areaFiles.restrictingElements(to:region).attaching(region)
+ let areaStored=try JSONSerialization.jsonObject(with:kept.context) as! [String:Any]
+ try check((areaStored["elements"] as? [[String:Any]])?.compactMap{$0["selector"] as? String}==["#e150.0","#e380.0"],"area elements: \(areaStored["elements"] ?? "")")
+ try check(areaStored["elementsOutsideCapture"] as? Int==1 && areaStored["trimmed"]==nil && CaptureGeometry(json:areaStored["capture"])==region,"area metadata")
+ // Bez geometrie (bez okna prohlížeče) zůstane kontext beze změny.
+ try check(areaFiles.restrictingElements(to:nil).context==areaFiles.context,"no geometry keeps the bundle")
+ print("PASS: area capture maps elements of the selected region only and stores its geometry")
  print("PASS element mapping")
 }

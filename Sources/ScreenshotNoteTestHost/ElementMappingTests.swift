@@ -104,16 +104,18 @@ import AppKit
  // Obsah stránky začíná na (100,150); prvek 0 je ve výřezu, 1 mimo, 2 přesahuje okraj.
  let page=context(ratio:2,inner:(1000,700),elements:[element(150,50,50,20),element(700,500,50,50),element(380,190,100,50)])
  let areaFiles=CaptureContextFiles(bundle:try JSONSerialization.data(withJSONObject:page))!
- let kept=areaFiles.restrictingElements(to:region).attaching(region)
+ // Filtrování s pevnou geometrií (měřítko displejů testovacího Macu se liší).
+ let fixed=CaptureGeometry(rect:CGRect(x:200,y:150,width:300,height:200),backingScale:2,imageScale:2,browserScale:2,window:window)
+ let kept=areaFiles.restrictingElements(to:fixed).attaching(fixed)
  let areaStored=try JSONSerialization.jsonObject(with:kept.context) as! [String:Any]
  try check((areaStored["elements"] as? [[String:Any]])?.compactMap{$0["selector"] as? String}==["#e150.0","#e380.0"],"area elements: \(areaStored["elements"] ?? "")")
- try check(areaStored["elementsOutsideCapture"] as? Int==1 && areaStored["trimmed"]==nil && CaptureGeometry(json:areaStored["capture"])==region,"area metadata")
+ try check(areaStored["elementsOutsideCapture"] as? Int==1 && areaStored["trimmed"]==nil && CaptureGeometry(json:areaStored["capture"])==fixed,"area metadata")
  // Bez geometrie (bez okna prohlížeče) zůstane kontext beze změny.
  try check(areaFiles.restrictingElements(to:nil).context==areaFiles.context,"no geometry keeps the bundle")
  // Neurčitelná poloha stránky (bez geometrie okna) elementy nemaže.
  var unmapped=page;unmapped["page"]=["url":"https://example.test/"]
  let unmappedFiles=CaptureContextFiles(bundle:try JSONSerialization.data(withJSONObject:unmapped))!
- try check(unmappedFiles.restrictingElements(to:region).context==unmappedFiles.context,"unmapped page keeps the elements")
+ try check(unmappedFiles.restrictingElements(to:fixed).context==unmappedFiles.context,"unmapped page keeps the elements")
  print("PASS: area capture maps elements of the selected region only and stores its geometry")
  print("PASS element mapping")
 }

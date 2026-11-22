@@ -19,7 +19,7 @@ final class RegionSelection {
  init(screens:[NSScreen],minimum:CGFloat,completion:@escaping (CGRect?)->Void) {
   self.completion=completion
   windows=screens.map{RegionSelector(screen:$0,minimum:minimum,group:self)}
-  NSApp.activate(ignoringOtherApps:true)
+  // Bez aktivace appky: cílová aplikace si nechá fokus, popovery a vzhled aktivního okna.
   for window in windows{window.orderFrontRegardless()}
   let pointer=windows.first{$0.frame.contains(NSEvent.mouseLocation)} ?? windows.first
   pointer?.makeKeyAndOrderFront(nil)
@@ -30,7 +30,7 @@ final class RegionSelection {
  fileprivate func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;close();done(result)}
  private func close(){NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil};windows=[]}
 }
-final class RegionSelector:NSWindow {
+final class RegionSelector:NSPanel {
  // Okna drží výběr silně, aby přežil i bez reference volajícího; close() cyklus zruší.
  private var origin:NSPoint?;fileprivate var group:RegionSelection?;private var minimum:CGFloat=40
  private let selection=CAShapeLayer()
@@ -38,7 +38,8 @@ final class RegionSelector:NSWindow {
   RegionSelection(screens:screens.isEmpty ? NSScreen.screens:screens,minimum:minimum,completion:completion)
  }
  fileprivate convenience init(screen:NSScreen,minimum:CGFloat,group:RegionSelection) {
-  self.init(contentRect:screen.frame,styleMask:.borderless,backing:.buffered,defer:false)
+  self.init(contentRect:screen.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+  becomesKeyOnlyIfNeeded=false
   self.group=group;self.minimum=minimum;level = .screenSaver;isOpaque=false;backgroundColor=NSColor.black.withAlphaComponent(0.25)
   ignoresMouseEvents=false;isReleasedWhenClosed=false;collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];acceptsMouseMovedEvents=true
   let view=NSView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true

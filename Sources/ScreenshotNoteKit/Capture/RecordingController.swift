@@ -8,33 +8,59 @@ func displaySourceRect(_ rect:CGRect,screen:CGRect)->CGRect {
  CGRect(x:rect.minX-screen.minX,y:screen.maxY-rect.maxY,width:rect.width,height:rect.height).integral
 }
 
-/// Výběr oblasti tažením přes obrazovku pod kurzorem; Escape zruší.
-final class RegionSelector:NSWindow {
- private var origin:NSPoint?;private var completion:((CGRect?)->Void)?
- private let selection=CAShapeLayer()
- @discardableResult static func choose(on screen:NSScreen,_ completion:@escaping (CGRect?)->Void)->RegionSelector {
-  let window=RegionSelector(contentRect:screen.frame,styleMask:.borderless,backing:.buffered,defer:false)
-  window.completion=completion;window.level = .screenSaver;window.isOpaque=false;window.backgroundColor=NSColor.black.withAlphaComponent(0.25)
-  window.ignoresMouseEvents=false;window.isReleasedWhenClosed=false;window.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
-  let view=NSView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true
-  window.selection.fillColor=NSColor.white.withAlphaComponent(0.15).cgColor;window.selection.strokeColor=NSColor.white.cgColor;window.selection.lineWidth=1.5
-  view.layer?.addSublayer(window.selection);window.contentView=view
-  window.setFrame(screen.frame,display:true);NSApp.activate(ignoringOtherApps:true);window.makeKeyAndOrderFront(nil)
+/// Obdélník AppKit (počátek vlevo dole) v globálních bodech Quartz (počátek vlevo nahoře hlavního displeje), celé body.
+func quartzRect(_ rect:CGRect,primaryHeight:CGFloat=NSScreen.screens.first?.frame.height ?? 0)->CGRect {
+ CGRect(x:rect.minX,y:primaryHeight-rect.maxY,width:rect.width,height:rect.height).integral
+}
+
+/// Výběr oblasti tažením na kterémkoli displeji (překryv na každém); Escape zruší. Výřez leží na displeji, kde tažení začalo.
+final class RegionSelection {
+ fileprivate var windows:[RegionSelector]=[];private var completion:((CGRect?)->Void)?
+ init(screens:[NSScreen],minimum:CGFloat,completion:@escaping (CGRect?)->Void) {
+  self.completion=completion
+  windows=screens.map{RegionSelector(screen:$0,minimum:minimum,group:self)}
+  // Bez aktivace appky: cílová aplikace si nechá fokus, popovery a vzhled aktivního okna.
+  for window in windows{window.orderFrontRegardless()}
+  let pointer=windows.first{$0.frame.contains(NSEvent.mouseLocation)} ?? windows.first
+  pointer?.makeKeyAndOrderFront(nil)
   NSCursor.crosshair.push()
-  return window
  }
  /// Zrušení zvenku (zkratka během výběru): bez volání completion.
- func cancel(){guard completion != nil else{return};completion=nil;NSCursor.pop();orderOut(nil)}
+ func cancel(){guard completion != nil else{return};completion=nil;close()}
+ fileprivate func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;close();done(result)}
+ private func close(){NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil};windows=[]}
+}
+final class RegionSelector:NSPanel {
+ // Okna drží výběr silně, aby přežil i bez reference volajícího; close() cyklus zruší.
+ private var origin:NSPoint?;fileprivate var group:RegionSelection?;private var minimum:CGFloat=40
+ private let selection=CAShapeLayer()
+ @discardableResult static func choose(on screens:[NSScreen]=NSScreen.screens,minimum:CGFloat=40,_ completion:@escaping (CGRect?)->Void)->RegionSelection {
+  RegionSelection(screens:screens.isEmpty ? NSScreen.screens:screens,minimum:minimum,completion:completion)
+ }
+ fileprivate convenience init(screen:NSScreen,minimum:CGFloat,group:RegionSelection) {
+  self.init(contentRect:screen.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+  becomesKeyOnlyIfNeeded=false
+  self.group=group;self.minimum=minimum;level = .screenSaver;isOpaque=false;backgroundColor=NSColor.black.withAlphaComponent(0.25)
+  ignoresMouseEvents=false;isReleasedWhenClosed=false;collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];acceptsMouseMovedEvents=true
+  let view=NSView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true
+  selection.fillColor=NSColor.white.withAlphaComponent(0.15).cgColor;selection.strokeColor=NSColor.white.cgColor;selection.lineWidth=1.5
+  view.layer?.addSublayer(selection);contentView=view;setFrame(screen.frame,display:true)
+ }
  override var canBecomeKey:Bool{true}
- override func mouseDown(with event:NSEvent){origin=event.locationInWindow}
+ // První klik na jiném displeji okno rovnou aktivuje a začne výběr.
+ override func mouseDown(with event:NSEvent){makeKey();origin=event.locationInWindow}
  override func mouseDragged(with event:NSEvent){guard let origin else{return};selection.path=CGPath(rect:rect(origin,event.locationInWindow),transform:nil)}
  override func mouseUp(with event:NSEvent){
   guard let origin else{return};let local=rect(origin,event.locationInWindow)
-  finish(local.width>=40 && local.height>=40 ? local.offsetBy(dx:frame.minX,dy:frame.minY):nil)
+  // Kliknutí bez tažení se nepočítá; malý výřez (screenshot) je v pořádku, video si limit ohlídá samo.
+  group?.finish(local.width>=minimum && local.height>=minimum ? local.offsetBy(dx:frame.minX,dy:frame.minY):nil)
  }
- override func keyDown(with event:NSEvent){if event.keyCode==53{finish(nil)}else{super.keyDown(with:event)}}
- private func rect(_ a:NSPoint,_ b:NSPoint)->CGRect{CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(a.x-b.x),height:abs(a.y-b.y))}
- private func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;NSCursor.pop();orderOut(nil);done(result)}
+ override func keyDown(with event:NSEvent){if event.keyCode==53{group?.finish(nil)}else{super.keyDown(with:event)}}
+ private func rect(_ a:NSPoint,_ b:NSPoint)->CGRect{
+  // Tažení přes okraj se ořízne na tento displej.
+  let bounds=CGRect(origin:.zero,size:frame.size),c=CGPoint(x:min(max(b.x,0),bounds.width),y:min(max(b.y,0),bounds.height))
+  return CGRect(x:min(a.x,c.x),y:min(a.y,c.y),width:abs(a.x-c.x),height:abs(a.y-c.y))
+ }
 }
 
 /// Odpočet uprostřed obrazovky; okno se do záznamu nedostane (filtr vynechá vlastní aplikaci).
@@ -66,7 +92,7 @@ final class CountdownOverlay {
 final class RecordingController {
  enum State {case idle,preparing,counting,recording,finishing}
  private(set) var state:State = .idle
- private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelector?;private var limit:Timer?;private var ticker:Timer?
+ private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelection?;private var limit:Timer?;private var ticker:Timer?
  private(set) var startedAt:Date?
  /// Číslo pokusu; zrušený start po await nic nenastaví.
  private var attempt=0
@@ -90,9 +116,11 @@ final class RecordingController {
    if target == .region && region == nil{self.reset();self.onFinish?(nil);return}
    self.state = .counting;self.onChange?()
    let overlay=CountdownOverlay();self.countdown=overlay
-   overlay.run(seconds:recordingCountdown,on:screen){Task{@MainActor in await self.begin(target,screen:screen,region:region,window:front,output:output,attempt:current)}}
+   // Oblast se zaznamenává na displeji, kde byla vybraná.
+   let display=region.flatMap{area in NSScreen.screens.first{$0.frame.contains(CGPoint(x:area.midX,y:area.midY))}} ?? screen
+   overlay.run(seconds:recordingCountdown,on:display){Task{@MainActor in await self.begin(target,screen:display,region:region,window:front,output:output,attempt:current)}}
   }
-  if target == .region{selector=RegionSelector.choose(on:screen){[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
+  if target == .region{selector=RegionSelector.choose{[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
  }
 
  /// Na hlavním vlákně: stav, menu bar i chybové hlášky; await se vrací sem.

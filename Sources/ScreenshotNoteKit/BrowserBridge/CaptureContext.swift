@@ -71,11 +71,25 @@ struct CaptureContextFiles {
   guard bundle.count<=maxContextBytes,var object=(try? JSONSerialization.jsonObject(with:bundle)) as? [String:Any],object["format"] as? String=="screenshot-note-context",(object["version"] as? NSNumber)?.intValue==1 else{return nil}
   let har=object.removeValue(forKey:"har") as? [String:Any]
   // Geometrii výřezu doplňuje jen Mac, ne rozšíření.
-  object.removeValue(forKey:"capture")
+  object.removeValue(forKey:"capture");object.removeValue(forKey:"elementsOutsideCapture")
   guard let context=try? JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]) else{return nil}
   self.context=context;self.har=har.flatMap{try? JSONSerialization.data(withJSONObject:$0,options:[.withoutEscapingSlashes])}
  }
  private init(context:Data,har:Data?){self.context=context;self.har=har}
+ /// Jen elementy viditelné ve výřezu (mapa podle geometrie); bez geometrie nebo mapy beze změny.
+ /// Pořadí zůstává, index v anotacích pak odpovídá novému seznamu.
+ func restrictingElements(to capture:CaptureGeometry?)->CaptureContextFiles{
+  guard let capture,var object=(try? JSONSerialization.jsonObject(with:context)) as? [String:Any],let elements=object["elements"] as? [Any],!elements.isEmpty,
+   // Nejistá poloha obsahu stránky (např. DevTools bez Accessibility) není důkaz, že elementy leží mimo výřez.
+   let geometry=(object["page"] as? [String:Any])?["geometry"] as? [String:Any],pageContentFrame(geometry,capture:capture) != nil else{return self}
+  let visible=Set(mapElements(object,capture:capture).map(\.index))
+  guard visible.count<elements.count else{return self}
+  object["elements"]=elements.enumerated().filter{visible.contains($0.offset)}.map(\.element)
+  // Kolik elementů leželo mimo výřez (vlastní klíč; `trimmed` znamená ořez kvůli velikosti).
+  object["elementsOutsideCapture"]=elements.count-visible.count
+  guard let data=try? JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]) else{return self}
+  return CaptureContextFiles(context:data,har:har)
+ }
  /// Kontext s geometrií výřezu pod klíčem `capture`. Velký objekt se znovu neparsuje, klíč se vloží na začátek.
  func attaching(_ capture:CaptureGeometry?)->CaptureContextFiles{
   // Prázdný objekt by po vložení skončil čárkou.

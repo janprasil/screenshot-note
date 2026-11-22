@@ -300,13 +300,15 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let file=root.appendingPathComponent(UUID().uuidString+".png")
    let process=Process();process.executableURL=URL(fileURLWithPath:"/usr/sbin/screencapture")
    let display=full ? DisplayCaptureTarget.current(main:!fromOpenComposer):nil
-   process.arguments=["-x"]+(display?.arguments ?? ["-i"])+[file.path]
+   // Výřez vybírá appka sama (RegionSelector), aby znala jeho polohu pro mapu elementů.
+   process.arguments=["-x"]+(display?.arguments ?? [])+[file.path]
+   var region:CGRect?
    // Kontext z prohlížeče v popředí se žádá souběžně se snímkem; bez rozšíření je nil hned.
    var browser:BrowserWindow?
    let folder=draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
    let context=PendingCaptureContext.start(topic:folder,target:{browser=browserCaptureWindow();return browser?.target})
-   // Výřez je známý jen u celoobrazovkového snímku se zapnutou mapou; výběr oblasti mapu elementů nemá.
-   let window=display != nil && context != nil && folder?.effectiveContextPolicy?.includeElements==true ? browser?.bounds:nil
+   // Mapa elementů u celé obrazovky i výřezu, jen když ji politika složky zapíná.
+   let window=context != nil && folder?.effectiveContextPolicy?.includeElements==true ? browser?.bounds:nil
    let probe=window.flatMap{bounds in browser.flatMap{WebAreaProbe(pid:$0.pid,window:bounds)}}
    capturing=true
    hiddenWindows=NSApp.orderedWindows.filter{$0.isVisible}
@@ -322,8 +324,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     // Na kontext se po snímku čeká nejvýš 1 s, pak se pokračuje bez něj.
     let deliver={(files:CaptureContextFiles?) in
     self.capturing=false
-    let geometry=files == nil || window == nil ? nil:display?.geometry(image:file,window:window,webAreas:probe?.result ?? [])
-    let attached=files.map{(try? $0.attaching(geometry).write(besides:file)) != nil} ?? false
+    let geometry=files == nil || window == nil ? nil:display.map{$0.geometry(image:file,window:window,webAreas:probe?.result ?? [])} ?? region.flatMap{CaptureGeometry.region($0,image:file,window:window,webAreas:probe?.result ?? [])}
+    // V kontextu zůstanou jen elementy viditelné ve snímku (u výřezu jen z vybrané části).
+    let attached=files.map{(try? $0.restrictingElements(to:geometry).attaching(geometry).write(besides:file)) != nil} ?? false
     if attached,geometry != nil,ElementDebug.enabled{DispatchQueue.global(qos:.utility).async{if let debug=ElementDebug.render(image:file,elements:mapElements(contextFile:contextSidecars(file)[0])){NSLog("Browser bridge element map: %@",debug.path)}}}
     if let active=active {
      guard active.appendCapturedImage(file.lastPathComponent,context:attached) else{removeAnnotatedImage(file);restoreWindows();restoreComposerSize();return}
@@ -337,9 +340,21 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     if let context{context.wait(upTo:1,deliver)}else{deliver(nil)}
    }}
    // Give WindowServer a frame to remove our panels before taking the screenshot.
-   DispatchQueue.main.asyncAfter(deadline:.now()+0.15){
-    do {try process.run()}catch{
-     self.capturing=false;restoreWindows();restoreComposerSize();if active == nil{try? fm.removeItem(at:root)};showError(error.localizedDescription)
+   let run={
+    DispatchQueue.main.asyncAfter(deadline:.now()+0.15){
+     do {try process.run()}catch{
+      self.capturing=false;restoreWindows();restoreComposerSize();if active == nil{try? fm.removeItem(at:root)};showError(error.localizedDescription)
+     }
+    }
+   }
+   if display != nil{run()}
+   else {
+    RegionSelector.choose(minimum:4){rect in
+     // Escape: stejné chování jako zrušený screencapture -i (soubor nevznikne).
+     guard let rect else{self.capturing=false;restoreWindows();restoreComposerSize();if active == nil{try? fm.removeItem(at:root)};return}
+     region=quartzRect(rect)
+     process.arguments=["-x","-R",[region!.minX,region!.minY,region!.width,region!.height].map{String(Int($0.rounded()))}.joined(separator:","),file.path]
+     run()
     }
    }
   }catch{capturing=false;restoreWindows();restoreComposerSize();showError(error.localizedDescription)}

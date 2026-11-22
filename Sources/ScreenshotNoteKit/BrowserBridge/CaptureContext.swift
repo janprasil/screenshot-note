@@ -40,11 +40,11 @@ func captureTarget(windows:[[String:Any]],pid:pid_t,screens:[CGRect]=displayBoun
  func bounds(_ window:[String:Any])->CGRect?{(window[kCGWindowBounds as String] as? NSDictionary).flatMap{CGRect(dictionaryRepresentation:$0 as CFDictionary)}}
  for window in own {
   guard var rect=bounds(window),rect.width>=100,rect.height>=100 else{continue}
-  // Celá obrazovka: Chrome okno rozdělí na pruhy, které dohromady pokryjí displej; cílem je celý displej.
+  // Celá obrazovka: Chrome okno rozdělí na pruhy, které dohromady pokryjí displej; jeho okno (chrome.windows, window.screenY) je největší pruh s obsahem.
   if let screen=screens.first(where:{$0.contains(CGPoint(x:rect.midX,y:rect.midY))}) {
    let parts=own.compactMap(bounds).filter{screen.insetBy(dx:-1,dy:-1).contains($0)}
    let union=parts.reduce(CGRect.null){$0.union($1)}
-   if rect.width>=screen.width-1,parts.count>1,abs(union.minY-screen.minY)<=1,abs(union.maxY-screen.maxY)<=1,abs(union.width-screen.width)<=1{rect=screen}
+   if rect.width>=screen.width-1,parts.count>1,abs(union.minY-screen.minY)<=1,abs(union.maxY-screen.maxY)<=1,abs(union.width-screen.width)<=1,let content=parts.max(by:{$0.width*$0.height<$1.width*$1.height}){rect=content}
   }
   var target:[String:Any]=["windowBounds":["x":rect.minX,"y":rect.minY,"width":rect.width,"height":rect.height]]
   if let title=window[kCGWindowName as String] as? String,!title.isEmpty{target["windowTitle"]=title}

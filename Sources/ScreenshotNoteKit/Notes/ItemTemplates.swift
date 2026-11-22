@@ -129,10 +129,11 @@ private func captures(_ regex:NSRegularExpression?,_ keys:[String],in text:Strin
 }
 /// Odstraní vykreslené komentáře obrázku na místě {comments} (poslední výskyt) a zbylé prázdné řádky.
 /// lead a trail jsou literály šablony kolem {comments} v jeho odstavci.
-private func removing(_ comments:String?,from text:String,lead:String="",trail:String="")->String {
+private func removing(_ comments:String?,from text:String,lead:String="",trail:String="",forward:Bool=false)->String {
  guard let comments,!comments.isEmpty else{return text}
- var search=text.endIndex
- while let range=text.range(of:comments,options:.backwards,range:text.startIndex..<search) {
+ // Komentáře před popisem se hledají od začátku, za ním od konce.
+ var search=forward ? text.startIndex:text.endIndex
+ while let range=text.range(of:comments,options:forward ? []:.backwards,range:forward ? search..<text.endIndex:text.startIndex..<search) {
   let before=text[..<range.lowerBound],after=text[range.upperBound...]
   // Hranice řádku; prázdné řádky kolem jsou v textu i rámečku oříznuté.
   let starts=before.hasSuffix(lead) && (before.count==lead.count || before.dropLast(lead.count).hasSuffix("\n"))
@@ -142,16 +143,18 @@ private func removing(_ comments:String?,from text:String,lead:String="",trail:S
    while value.contains("\n\n\n"){value=value.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
    return value.trimmingCharacters(in:.newlines)
   }
-  search=range.lowerBound
+  search=forward ? range.upperBound:range.lowerBound
  }
  return text
 }
 /// Literály kolem {comments} v jeho odstavci; nil, když tam je jiný placeholder.
-private func commentFrame(_ part:String)->(lead:String,trail:String)? {
+private func commentFrame(_ part:String)->(lead:String,trail:String,forward:Bool)? {
  guard let at=part.range(of:"{comments}") else{return nil}
  let lead=String(part[..<at.lowerBound]).components(separatedBy:"\n").last ?? ""
  let trail=String(part[at.upperBound...]).components(separatedBy:"\n").first ?? ""
- return lead.contains("{") || trail.contains("{") ? ("",""):(lead,trail)
+ let field=[part.range(of:"{description}"),part.range(of:"{elements}")].compactMap{$0?.lowerBound}.min()
+ let forward=field.map{at.lowerBound<$0} ?? false
+ return lead.contains("{") || trail.contains("{") ? ("","",forward):(lead,trail,forward)
 }
 
 /// Popisek obrázku podle šablony obrázku: before = text před odkazem (od předchozího odkazu), after = za ním.
@@ -163,8 +166,8 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
  let prefix=String(source[..<at.lowerBound]),suffix=String(source[at.upperBound...])
  // Komentáře se hledají jen tam, kam je šablona dává: před obrázkem (vlastní a dalšího obrázku), nebo za ním (vlastní a předchozího).
  var after=after.trimmingCharacters(in:.newlines),before=before.trimmingCharacters(in:.newlines)
- if let frame=commentFrame(suffix){after=removing(comments,from:after,lead:frame.lead,trail:frame.trail);before=removing(previous,from:before,lead:frame.lead,trail:frame.trail)}
- if let frame=commentFrame(prefix){before=removing(comments,from:before,lead:frame.lead,trail:frame.trail);after=removing(following,from:after,lead:frame.lead,trail:frame.trail)}
+ if let frame=commentFrame(suffix){after=removing(comments,from:after,lead:frame.lead,trail:frame.trail,forward:frame.forward);before=removing(previous,from:before,lead:frame.lead,trail:frame.trail,forward:frame.forward)}
+ if let frame=commentFrame(prefix){before=removing(comments,from:before,lead:frame.lead,trail:frame.trail,forward:frame.forward);after=removing(following,from:after,lead:frame.lead,trail:frame.trail,forward:frame.forward)}
  guard let template,template != defaultImageTemplate,template.contains("{image}") else{return stripContextCallout(after).trimmingCharacters(in:.newlines)}
  var values:[String:String]=[:]
  // Pole před obrázkem: od konce předchozího obrázku (jeho generované odstavce se přeskočí).

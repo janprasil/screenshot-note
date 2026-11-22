@@ -89,6 +89,11 @@ import Foundation
  var tight=same;tight.image_template="{image}\n{comments}\n\n{description}"
  let tightRead=parsedSession(tight.template,cloudSessionBody(tight,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:tight.image_template,comments:cloudImageComments(tight,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(tightRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:tightRead))
+ var echoLine=RemoteNote(id:note.id,title:"T",comment:"X",template:defaultMarkdownTemplate,captions:["First\necho\nLast"],images:[.init(index:1,path:"/1")])
+ echoLine.comment_template="{text}";echoLine.image_template="{image}\n\n{comments}\n\n{description}"
+ echoLine.comments=[RemoteNote.Comment(author_name:"Eva",body:"echo",created_at:"2026-03-05T08:07:00Z",image_index:1)]
+ let echoLineRead=parsedSession(echoLine.template,cloudSessionBody(echoLine,images:["S-1.png"],language:"cs",timeZone:utc),imageTemplate:echoLine.image_template,comments:cloudImageComments(echoLine,images:["S-1.png"],language:"cs",timeZone:utc))
+ assert(echoLineRead?.3["S-1.png"]=="First\necho\nLast",String(describing:echoLineRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

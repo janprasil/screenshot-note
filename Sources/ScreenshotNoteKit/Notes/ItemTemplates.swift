@@ -138,7 +138,7 @@ private func removing(_ comments:String?,from text:String)->String {
 /// Popisek obrázku podle šablony obrázku: before = text před odkazem (od předchozího odkazu), after = za ním.
 /// comments = vykreslené komentáře tohoto obrázku (cloud), z popisku se vynechají.
 /// previous = komentáře předchozího obrázku, které mohou ležet v before.
-func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String?=nil,previous:String?=nil)->String {
+func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String?=nil,previous:String?=nil,first:Bool=true)->String {
  let after=removing(comments,from:after.trimmingCharacters(in:.newlines)),before=removing(previous,from:removing(comments,from:before.trimmingCharacters(in:.newlines)))
  guard let template,template != defaultImageTemplate,let at=template.range(of:"{image}") else{return stripContextCallout(after).trimmingCharacters(in:.newlines)}
  let prefix=String(template[..<at.lowerBound]),suffix=String(template[at.upperBound...])
@@ -151,7 +151,9 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
   let source=before+String(prefix.reversed().prefix{$0=="\n"})
   let regex=try? NSRegularExpression(pattern:"\\A(?:"+previous.pattern+"\\n\\n)?"+own.pattern+"\\z")
   // Oříznutý začátek: generované odstavce předchozího obrázku začínají prázdným řádkem.
-  values.merge(captures(regex,own.keys,in:"\n\n"+source) ?? captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}
+  // První obrázek žádný předchozí nemá; text před ním patří celý jemu.
+  if first{values.merge(captures(try? NSRegularExpression(pattern:"\\A"+own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}}
+  else{values.merge(captures(regex,own.keys,in:"\n\n"+source) ?? captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}}
  }
  // Pole za obrázkem; konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).
  var text=after

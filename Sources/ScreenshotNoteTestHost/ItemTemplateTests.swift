@@ -68,6 +68,8 @@ import Foundation
  let around="{description}\n\n{image}\n\n{elements}"
  let aroundRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna\n\n- **[1] Kresba**: x"),ImageBlock(name:"b.png",caption:"Dvě")],template:around),text:"X"),imageTemplate:around)
  assert(aroundRead?.3["a.png"]=="Jedna\n\n- **[1] Kresba**: x" && aroundRead?.3["b.png"]=="Dvě",String(describing:aroundRead))
+ let leading=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"- **[1] Kresba**: x\n\nVýklad")],template:around),text:"X"),imageTemplate:around)
+ assert(leading?.3["a.png"]=="- **[1] Kresba**: x\n\nVýklad",String(describing:leading))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

@@ -144,7 +144,9 @@ enum FolderDialogs {
     // Nová cloudová složka převezme nastavení lokální složky.
     if let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.detail.isEmpty,!moved.combined,moved.markdownTemplate==nil,moved.combinedTemplate==nil {
      var settings=moved;settings.detail=source.detail;settings.combined=source.combined;settings.combinedFile=source.combinedFile;settings.markdownTemplate=source.markdownTemplate;settings.combinedTemplate=source.combinedTemplate
-     settings.commentTemplate=source.commentTemplate;settings.imageTemplate=source.imageTemplate
+     // Šablony položek jen místo zděděných výchozích; vlastní šablony cílové složky zůstanou.
+     if let value=source.commentTemplate,moved.commentTemplate==nil || moved.commentTemplate==TemplateDefaults.shared.comment{settings.commentTemplate=value}
+     if let value=source.imageTemplate,moved.imageTemplate==nil || moved.imageTemplate==TemplateDefaults.shared.image{settings.imageTemplate=value}
      if settings != moved{_ = try? await CloudFolders.shared.update(settings)}
     }
    }catch{showError(error.localizedDescription)}

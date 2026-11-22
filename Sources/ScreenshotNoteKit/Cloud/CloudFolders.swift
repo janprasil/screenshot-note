@@ -9,7 +9,9 @@ private struct RemoteFolder:Decodable {
  var owner_id:UUID? = nil;var owner_kind:String? = nil;var owner_name:String? = nil;var role:String? = nil
  // Šablony položek; items říká, že je server zná (starší server neposílá klíče a cizí odmítne).
  var comment_template:String? = nil;var image_template:String? = nil;var items=false
- enum CodingKeys:String,CodingKey{case id,name,revision,description,combined,combined_file,markdown_template,combined_template,owner_id,owner_kind,owner_name,role,comment_template,image_template}
+ // AI název; starší server pole neposílá.
+ var ai_title:Bool? = nil
+ enum CodingKeys:String,CodingKey{case id,name,revision,description,combined,combined_file,markdown_template,combined_template,owner_id,owner_kind,owner_name,role,comment_template,image_template,ai_title}
  init(from decoder:Decoder)throws {
   let c=try decoder.container(keyedBy:CodingKeys.self)
   id=try c.decode(UUID.self,forKey:.id);name=try c.decode(String.self,forKey:.name);revision=try c.decode(String.self,forKey:.revision)
@@ -18,11 +20,13 @@ private struct RemoteFolder:Decodable {
   owner_id=try c.decodeIfPresent(UUID.self,forKey:.owner_id);owner_kind=try c.decodeIfPresent(String.self,forKey:.owner_kind);owner_name=try c.decodeIfPresent(String.self,forKey:.owner_name);role=try c.decodeIfPresent(String.self,forKey:.role)
   comment_template=try c.decodeIfPresent(String.self,forKey:.comment_template);image_template=try c.decodeIfPresent(String.self,forKey:.image_template)
   items=c.contains(.comment_template) && c.contains(.image_template)
+  ai_title=try c.decodeIfPresent(Bool.self,forKey:.ai_title)
  }
  func record(owner account:UUID,origin:String,library:UUID?=nil)->CloudFolderRecord {
   var value=CloudFolderRecord(id:id,name:name,owner:owner_id ?? library ?? account,origin:origin,revision:revision,description:description,combined:combined,combinedFile:combined_file,markdownTemplate:markdown_template,combinedTemplate:combined_template)
   value.accountID=account;value.ownerKind=owner_kind;value.ownerName=owner_name;value.role=role
   if items{value.commentTemplate=comment_template;value.imageTemplate=image_template;value.itemTemplates=true}
+  value.aiTitle=ai_title
   return value
  }
 }
@@ -370,6 +374,8 @@ final class CloudFolders {
   guard next.owner==record.owner else{throw CloudFailure.invalid}
   next.folder=updated[index].folder;next.migratedLocalIDs=updated[index].migratedLocalIDs;next.confirmLocalDeletes=updated[index].confirmLocalDeletes
   next.ownerKind=record.ownerKind;next.ownerName=next.ownerName ?? record.ownerName;next.role=next.role ?? record.role
+  // Uložení nastavení AI název nevrací; drží se poslední známý stav.
+  next.aiTitle=next.aiTitle ?? updated[index].aiTitle
   if let name=next.combinedFile,!validCombinedFile(name){next.combinedFile=nil}
   updated[index]=next;try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
   return next.topic
@@ -383,6 +389,34 @@ final class CloudFolders {
   case "role_forbidden":return forbidden
   default:return failure
   }
+ }
+ /// Nastavení AI názvu složky a měsíční limit uživatele.
+ struct AITitleSetting:Decodable,Equatable{let enabled:Bool;let can_change:Bool;let plan:Bool;let used:Int;let limit:Int}
+ /// Čte (enable nil) nebo mění AI název cloudové složky; měnit smí vlastník nebo správce.
+ @MainActor func aiTitle(_ topic:Topic,enable:Bool?=nil)async throws->AITitleSetting {
+  guard let c=currentConnection(),let endpoint=CloudEndpoint(c.endpoint),let id=topic.cloudFolderID,topic.cloudOrigin==c.endpoint else{throw CloudFailure.invalid}
+  activate(c)
+  guard let record=records.first(where:{matches($0,topic) && $0.unavailable != true}) else{throw CloudFailure.invalid}
+  let path="/api/v1/folders/"+id.uuidString.lowercased()+"/ai-title"
+  let data:Data
+  do {
+   if let enable {
+    guard record.topic.canManageCloudFolder else{throw Self.forbidden}
+    data=try await send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["enabled":enable]))
+   } else {data=try await request(endpoint,path,c.token,4096)}
+  }
+  catch let failure as CloudFailure where failure.status==404 && failure.code != "not_found"{throw CloudFailure(L("Server zatím AI názvy relací nepodporuje."),status:404,code:failure.code)}
+  catch let failure as CloudFailure {
+   switch failure.code {
+   case "plan_required":throw CloudFailure(L("AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období."),status:failure.status,code:failure.code)
+   case "ai_title_unavailable":throw CloudFailure(L("AI názvy relací teď nejsou dostupné. Zkus to později."),status:failure.status,code:failure.code)
+   default:throw Self.friendly(failure)
+   }
+  }
+  let setting=try JSONDecoder().decode(FolderEnvelope<AITitleSetting>.self,from:data).data
+  guard currentConnection()?.token==c.token,setting.limit>0,setting.used>=0,let index=records.firstIndex(where:{matches($0,topic)}) else{throw CloudFailure.invalid}
+  if records[index].aiTitle != setting.enabled{var updated=records;updated[index].aiTitle=setting.enabled;try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)}
+  return setting
  }
  static var forbidden:CloudFailure{CloudFailure(L("Týmovou složku může přejmenovat, nastavit nebo smazat jen vlastník nebo správce týmu."),status:403,code:"role_forbidden")}
  @MainActor func refresh(_ connection:CloudConnection?) async {

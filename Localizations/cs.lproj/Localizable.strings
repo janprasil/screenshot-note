@@ -582,3 +582,13 @@
 "Záznam začne za %d s" = "Záznam začne za %d s";
 "Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.";
 "Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky." = "Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky.";
+"Navrhovat názvy relací pomocí AI" = "Navrhovat názvy relací pomocí AI";
+"U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele." = "U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele.";
+"AI názvy nastavuje vlastník nebo správce týmu." = "AI názvy nastavuje vlastník nebo správce týmu.";
+"AI názvy jsou zapnuté. Tento měsíc zbývá %ld z %ld." = "AI názvy jsou zapnuté. Tento měsíc zbývá %ld z %ld.";
+"AI názvy jsou vypnuté." = "AI názvy jsou vypnuté.";
+"Navrhovat názvy relací pomocí AI?" = "Navrhovat názvy relací pomocí AI?";
+"U nové relace bez názvu pošleme komentář, popisky snímků, titulky a adresy stránek (bez parametrů, zkrácené asi na 2 000 znaků) a nejvýš 3 zmenšené náhledy společnosti Anthropic, PBC v USA, která navrhne název. Konzole, requesty ani HAR se neposílají. Anthropic data zpracovává jako náš zpracovatel podle standardních smluvních doložek a nepoužívá je k trénování. Platí pro celou složku a jde kdykoli vypnout." = "U nové relace bez názvu pošleme komentář, popisky snímků, titulky a adresy stránek (bez parametrů, zkrácené asi na 2 000 znaků) a nejvýš 3 zmenšené náhledy společnosti Anthropic, PBC v USA, která navrhne název. Konzole, requesty ani HAR se neposílají. Anthropic data zpracovává jako náš zpracovatel podle standardních smluvních doložek a nepoužívá je k trénování. Platí pro celou složku a jde kdykoli vypnout.";
+"Server zatím AI názvy relací nepodporuje." = "Server zatím AI názvy relací nepodporuje.";
+"AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období." = "AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období.";
+"AI názvy relací teď nejsou dostupné. Zkus to později." = "AI názvy relací teď nejsou dostupné. Zkus to později.";

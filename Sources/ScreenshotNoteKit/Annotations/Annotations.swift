@@ -60,7 +60,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  func point(_ event:NSEvent)->NSPoint{let p=convert(event.locationInWindow,from:nil),r=imageRect;return NSPoint(x:max(viewport.minX,min(viewport.maxX,(p.x-r.minX)/scale+viewport.minX)),y:max(viewport.minY,min(viewport.maxY,(p.y-r.minY)/scale+viewport.minY)))}
  func displayRect(_ rect:NSRect)->NSRect{let r=imageRect;return NSRect(x:r.minX+(rect.minX-viewport.minX)*scale,y:r.minY+(rect.minY-viewport.minY)*scale,width:rect.width*scale,height:rect.height*scale)}
  func snapshot(){history.append((marks,viewport));if history.count>40{history.removeFirst()}}
- func undoChange(){finishText();defer{updateNoteButton()};guard let last=history.popLast() else{return};marks=last.0;viewport=last.1;selected=nil;activeElement=nil;needsDisplay=true;changed?()}
+ func undoChange(){dropElementField();finishText();defer{updateNoteButton()};guard let last=history.popLast() else{return};marks=last.0;viewport=last.1;selected=nil;activeElement=nil;needsDisplay=true;changed?()}
  func paint(_ mark:Mark){guard let first=mark.points.first,let last=mark.points.last else{return}
   NSGraphicsContext.saveGraphicsState();defer{NSGraphicsContext.restoreGraphicsState()}
   if mark.rotation != 0{let center=mark.bounds;let transform=NSAffineTransform();transform.translateX(by:center.midX,yBy:center.midY);transform.rotate(byRadians:mark.rotation);transform.translateX(by:-center.midX,yBy:-center.midY);transform.concat()}

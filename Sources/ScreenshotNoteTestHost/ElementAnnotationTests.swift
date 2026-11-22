@@ -117,6 +117,13 @@ import AppKit
  try check(notes.noteBox?.expanded==true && notes.noteBox?.markdown=="Krátce","expanding keeps the text")
  notes.noteBox?.markdown="Řádek 1\nŘádek 2";notes.confirmElementNote()
  try check(notes.marks[0].comment=="Řádek 1\nŘádek 2" && notes.noteBox==nil,"expanded comment is saved")
+ // Sbalení a znovurozbalení zachová řádky; potvrzení ve sbaleném stavu uloží původní text.
+ notes.startElementNote(0);try check(notes.noteBox?.expanded==true,"multi-line comment opens expanded");notes.noteBox?.toggleExpanded()
+ try check(notes.noteBox?.field.stringValue=="Řádek 1 Řádek 2" && notes.noteBox?.value=="Řádek 1\nŘádek 2","collapsed view keeps the lines");notes.noteBox?.toggleExpanded()
+ try check(notes.noteBox?.markdown=="Řádek 1\nŘádek 2","re-expanding restores the lines");notes.dropElementField()
+ // Zpět při otevřeném poli zahodí rozepsaný komentář a vrátí předchozí krok.
+ let before=notes.marks.count;notes.snapshot();notes.marks.append(shape(.ellipse,NSRect(x:0,y:0,width:50,height:50)));notes.startElementNote(notes.marks.count-1);notes.noteBox?.field.stringValue="rozepsané";notes.undoChange()
+ try check(notes.marks.count==before && notes.noteBox==nil,"undo with an open comment undoes the last change")
  notes.choose(0);try check(notes.noteButton==nil && notes.noteButtonTitle(notes.marks[0])==L("Upravit komentář") && notes.noteButtonTitle(notes.marks[1])==L("Přidat komentář"),"comment button title follows the comment")
  // Úprava popisu existujícího elementu jde vrátit.
  let undoCanvas=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))

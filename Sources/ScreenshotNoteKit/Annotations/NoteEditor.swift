@@ -38,28 +38,34 @@ final class NoteEditorBox:NSView {
   for (button,symbol,help,action) in [(expandButton,"arrow.up.left.and.arrow.down.right",L("Rozbalit na víceřádkový Markdown"),#selector(toggleExpanded)),(doneButton,"checkmark.circle.fill",L("Potvrdit komentář (Enter, v rozbaleném ⌘Enter)"),#selector(confirm))] as [(NSButton,String,String,Selector)] {
    button.image=NSImage(systemSymbolName:symbol,accessibilityDescription:help);button.isBordered=false;button.toolTip=help;button.target=self;button.action=action;button.contentTintColor=AppPalette.accent;addSubview(button)
   }
-  field.stringValue=value
+  fullText=value;collapsedDisplay=Self.oneLine(value);field.stringValue=collapsedDisplay
   if value.contains("\n"){setExpanded(true)}
   updateColors();layoutParts()
  }
  required init?(coder:NSCoder){nil}
+ // Klik do plochy pole (mimo prvky) nesmí propadnout do plátna, to by komentář zavřelo.
+ override func mouseDown(with event:NSEvent){window?.makeFirstResponder(editor)}
  override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();updateColors()}
  private func updateColors(){effectiveAppearance.performAsCurrentDrawingAppearance{self.layer?.backgroundColor=AppPalette.paper.cgColor;self.layer?.borderColor=AppPalette.accent.withAlphaComponent(0.55).cgColor}}
  /// Text rozbaleného editoru; mimo okno se drží stranou (NSTextView bez okna sahá na vstupní metody).
  private var detachedText=""
+ /// Sbalené pole ukazuje víceřádkový text na jednom řádku; beze změny v poli se ukládá původní text s řádky.
+ private var fullText="",collapsedDisplay=""
+ static func oneLine(_ text:String)->String{text.components(separatedBy:.newlines).filter{!$0.isEmpty}.joined(separator:" ")}
  var markdown:String{
   get{window == nil ? detachedText:textView.string}
   set{detachedText=newValue;if window != nil{textView.string=newValue}}
  }
  override func viewDidMoveToWindow(){super.viewDidMoveToWindow();if window != nil,expanded,textView.string != detachedText{textView.string=detachedText}}
  /// Aktuální text: z rozbaleného editoru, jinak z jednořádkového pole.
- var value:String{expanded ? markdown:field.stringValue}
+ var value:String{expanded ? markdown:(field.stringValue==collapsedDisplay ? fullText:field.stringValue)}
  var editor:NSView{expanded ? textView:field}
  @objc func toggleExpanded(){setExpanded(!expanded);window?.makeFirstResponder(editor);onResize?()}
  @objc func confirm(){onConfirm?()}
  func setExpanded(_ value:Bool){
   if value==expanded{return}
-  if value{markdown=field.stringValue}else{field.stringValue=markdown.components(separatedBy:.newlines).joined(separator:" ")}
+  if value{markdown=field.stringValue==collapsedDisplay ? fullText:field.stringValue}
+  else{fullText=markdown;collapsedDisplay=Self.oneLine(fullText);field.stringValue=collapsedDisplay}
   expanded=value;field.isHidden=value;scroll.isHidden = !value
   expandButton.image=NSImage(systemSymbolName:value ? "arrow.down.right.and.arrow.up.left":"arrow.up.left.and.arrow.down.right",accessibilityDescription:nil)
   expandButton.toolTip=value ? L("Sbalit na jeden řádek"):L("Rozbalit na víceřádkový Markdown")
@@ -81,7 +87,9 @@ extension DrawingView {
  /// Bod odznaku čísla anotace v souřadnicích obrázku.
  func badgeCenter(_ mark:Mark)->NSPoint?{
   guard let number=mark.noteNumber,number>0 else{return nil}
-  let anchor=mark.tool == .element ? NSPoint(x:mark.bounds.intersection(viewport).minX,y:mark.bounds.intersection(viewport).maxY):mark.badgeAnchor
+  let clipped=mark.bounds.intersection(viewport)
+  if mark.tool == .element && clipped.isNull{return nil}
+  let anchor=mark.tool == .element ? NSPoint(x:clipped.minX,y:clipped.maxY):mark.badgeAnchor
   let size=max(24,mark.width*6)
   return NSPoint(x:max(viewport.minX+size/2,min(viewport.maxX-size/2,anchor.x)),y:max(viewport.minY+size/2,min(viewport.maxY-size/2,anchor.y)))
  }
@@ -91,7 +99,8 @@ extension DrawingView {
   for (index,mark) in marks.enumerated() where index != editingIndex && !mark.noteText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
    guard let center=badgeCenter(mark) else{continue}
    let size=max(24,mark.width*6)*scale,point=displayRect(NSRect(origin:center,size:.zero)).origin
-   let rect=NSRect(x:point.x+size/2-2,y:point.y+size/2-8,width:18,height:16)
+   // Bublina vpravo vedle odznaku, odznak nepřekryje při žádném zvětšení.
+   let rect=NSRect(x:point.x+size/2+3,y:point.y-8,width:18,height:16)
    AppPalette.paper.setFill();NSBezierPath(roundedRect:rect.insetBy(dx:-2,dy:-2),xRadius:5,yRadius:5).fill()
    drawAdaptiveSymbol(symbol,in:rect,color:mark.color)
   }

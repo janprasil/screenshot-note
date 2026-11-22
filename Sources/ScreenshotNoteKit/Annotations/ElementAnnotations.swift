@@ -191,6 +191,7 @@ extension DrawingView:NSTextFieldDelegate {
    else{if marks[i].number == nil{marks[i].number=nextElementNumber};marks[i].comment=value}
    changed?()
   }
+  updateNoteButton()
   needsDisplay=true
  }
  func control(_ control:NSControl,textView:NSTextView,doCommandBy selector:Selector)->Bool{

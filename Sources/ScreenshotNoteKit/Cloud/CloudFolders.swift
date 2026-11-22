@@ -147,6 +147,7 @@ final class CloudFolders {
   // Týmovou složku mohou mít dva účty; její lokální kopie má v ID i účet.
   var topic=Topic(id:"former-cloud:"+(record.isTeam ? record.account.uuidString.lowercased()+":":"")+record.id.uuidString.lowercased(),name:record.name,detail:record.description ?? "",folder:record.folder,combined:record.combined ?? false,combinedFile:record.combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:record.markdownTemplate,combinedTemplate:record.combinedTemplate)
   topic.formerCloudFolderID=record.id;topic.formerCloudOwnerID=record.owner;topic.formerCloudOrigin=record.origin
+  topic.commentTemplate=record.commentTemplate;topic.imageTemplate=record.imageTemplate
   return topic
  }
  // Lokální složky dříve přesunuté do cloudu se stejným adresářem nahradí nová lokální kopie.

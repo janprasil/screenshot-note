@@ -127,19 +127,29 @@ private func captures(_ regex:NSRegularExpression?,_ keys:[String],in text:Strin
  for (i,key) in keys.enumerated() where match.range(at:i+1).location != NSNotFound{values[key]=(text as NSString).substring(with:match.range(at:i+1))}
  return values
 }
-/// Odstraní přesně vykreslené komentáře obrázku (první výskyt) a zbylé prázdné řádky.
+/// Odstraní vykreslené komentáře obrázku jako celé odstavce (poslední takový výskyt) a zbylé prázdné řádky.
 private func removing(_ comments:String?,from text:String)->String {
- guard let comments,!comments.isEmpty,let range=text.range(of:comments) else{return text}
- var value=text;value.removeSubrange(range)
- while value.contains("\n\n\n"){value=value.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
- return value.trimmingCharacters(in:.newlines)
+ guard let comments,!comments.isEmpty else{return text}
+ var search=text.endIndex
+ while let range=text.range(of:comments,options:.backwards,range:text.startIndex..<search) {
+  let starts=range.lowerBound==text.startIndex || text[..<range.lowerBound].hasSuffix("\n\n")
+  let ends=range.upperBound==text.endIndex || text[range.upperBound...].hasPrefix("\n\n")
+  if starts && ends {
+   var value=text;value.removeSubrange(range)
+   while value.contains("\n\n\n"){value=value.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
+   return value.trimmingCharacters(in:.newlines)
+  }
+  search=range.lowerBound
+ }
+ return text
 }
 
 /// Popisek obrázku podle šablony obrázku: before = text před odkazem (od předchozího odkazu), after = za ním.
 /// comments = vykreslené komentáře tohoto obrázku (cloud), z popisku se vynechají.
 /// previous = komentáře předchozího obrázku, které mohou ležet v before.
-func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String?=nil,previous:String?=nil,first:Bool=true)->String {
- let after=removing(comments,from:after.trimmingCharacters(in:.newlines)),before=removing(previous,from:removing(comments,from:before.trimmingCharacters(in:.newlines)))
+/// following = komentáře dalšího obrázku, které mohou ležet v after.
+func imageCaption(_ after:String,before:String="",template:String?,next:Int?,comments:String?=nil,previous:String?=nil,following:String?=nil,first:Bool=true)->String {
+ let after=removing(comments,from:removing(following,from:after.trimmingCharacters(in:.newlines))),before=removing(previous,from:removing(comments,from:before.trimmingCharacters(in:.newlines)))
  guard let template,template != defaultImageTemplate,let at=template.range(of:"{image}") else{return stripContextCallout(after).trimmingCharacters(in:.newlines)}
  let prefix=String(template[..<at.lowerBound]),suffix=String(template[at.upperBound...])
  var values:[String:String]=[:]

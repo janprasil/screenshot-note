@@ -73,6 +73,11 @@ import Foundation
  let spaced="\n\n**{description}** {image}"
  let spacedRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:spaced),text:"X"),imageTemplate:spaced)
  assert(spacedRead?.3["a.png"]=="Jedna" && spacedRead?.3["b.png"]=="Dvě",String(describing:spacedRead))
+ // Komentář shodný s částí popisu a komentáře dalšího obrázku před ním.
+ var echo=custom;echo.comment_template="{text}";echo.image_template="{comments}\n\n{image}\n\n{description}"
+ echo.comments=[RemoteNote.Comment(author_name:"Eva",body:"1",created_at:"2026-03-05T08:07:00Z",image_index:1),RemoteNote.Comment(author_name:"Eva",body:"Další",created_at:"2026-03-05T08:07:00Z",image_index:2)]
+ let echoRead=parsedSession(echo.template,cloudSessionBody(echo,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:echo.image_template,comments:cloudImageComments(echo,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(echoRead?.3["S-1.png"]=="Popis 1" && echoRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:echoRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

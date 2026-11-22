@@ -117,7 +117,7 @@ func parsedSession(_ template:String,_ body:String,imageTemplate:String?=nil,com
  guard let values=extractTemplateValues(template,from:body),let screenshotText=values["{screenshots}"] else{return nil}
  let source=screenshotText as NSString,matches=imageLinks(screenshotText);var images:[String]=[],notes:[String:String]=[:]
  for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;let start=i>0 ? NSMaxRange(matches[i-1].range):0
-  notes[name]=imageCaption(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))),before:source.substring(with:NSRange(location:start,length:match.range.location-start)),template:imageTemplate,next:i+1<matches.count ? i+2:nil,comments:comments?[name],previous:i>0 ? comments?[images[i-1]]:nil,first:i==0)}
+  notes[name]=imageCaption(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))),before:source.substring(with:NSRange(location:start,length:match.range.location-start)),template:imageTemplate,next:i+1<matches.count ? i+2:nil,comments:comments?[name],previous:i>0 ? comments?[images[i-1]]:nil,following:i+1<matches.count ? comments?[linkName(matches[i+1],in:source)]:nil,first:i==0)}
  return (values["{title}"] ?? "",values["{text}"] ?? "",images,notes)
 }
 private let separator="\n\n---\n\n"

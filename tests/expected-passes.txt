@@ -79,3 +79,5 @@ PASS: unmapped cloud folders map to sanitized, deduplicated subfolders
 PASS: upload into a trashed cloud folder is parked with a clear message
 PASS: web restore with an occupied image name renames the image and rewrites Markdown links and the index record
 PASS: web-deleted folder keep/restore-before-answer/delete to macOS Trash, app delete of local vs cloud folder, unsupported server keeps everything
+PASS: comment and image templates match the web export byte for byte ({date} cs/en, image comments, {elements}, {issues}, escaping)
+PASS: image template paragraphs, {elements} split, template checks and caption parsing with a custom image template

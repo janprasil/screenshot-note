@@ -61,7 +61,7 @@ final class FolderTransfers {
    try fm.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
    defer{try? fm.removeItem(at:root)}
    var draft=try workingDraft(from:session,topic:source,root:root)
-   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;draft.topic=frozen;draft.previous=nil
+   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;frozen.commentTemplate=source.commentTemplate;frozen.imageTemplate=source.imageTemplate;draft.topic=frozen;draft.previous=nil
    try library.enqueue(draft,root:root,sessionID:entry.id,folders:folders.topics)
    await Task.yield()
   }
@@ -142,8 +142,9 @@ enum FolderDialogs {
     }
     if !(try await FolderTransfers.shared.move(source,to:target)){showError(L("Přesun čeká na potvrzené nahrání všech poznámek. Místní složka zůstává dostupná a přesun se zkusí znovu."));continue}
     // Nová cloudová složka převezme nastavení lokální složky.
-    if let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.detail.isEmpty,!moved.combined,moved.markdownTemplate==nil,moved.combinedTemplate==nil {
+    if let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.detail.isEmpty,!moved.combined,moved.markdownTemplate==nil,moved.combinedTemplate==nil,moved.commentTemplate==nil,moved.imageTemplate==nil {
      var settings=moved;settings.detail=source.detail;settings.combined=source.combined;settings.combinedFile=source.combinedFile;settings.markdownTemplate=source.markdownTemplate;settings.combinedTemplate=source.combinedTemplate
+     settings.commentTemplate=source.commentTemplate;settings.imageTemplate=source.imageTemplate
      if settings != moved{_ = try? await CloudFolders.shared.update(settings)}
     }
    }catch{showError(error.localizedDescription)}

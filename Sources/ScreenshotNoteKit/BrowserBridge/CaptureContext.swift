@@ -250,16 +250,17 @@ func importAssetContext(assets:URL,image:String,to destination:URL)throws->Bool 
  return true
 }
 /// {screenshots} s callouty pod obrázky a {context} podle souborů kontextu v assets/.
-func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL,without excluded:Set<String> = [])->(screenshots:String,context:String) {
+/// Obrázky se vykreslí šablonou obrázku složky (nil = vestavěná).
+func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL,without excluded:Set<String> = [],imageTemplate:String?=nil)->(screenshots:String,context:String) {
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
- let blocks=zip(names,captions).enumerated().map{(offset,pair)->String in
-  var text=imageMarkdown(pair.0,offset+1)+(pair.1.isEmpty ? "":"\n\n"+pair.1)
+ let blocks=zip(names,captions).enumerated().map{(offset,pair)->ImageBlock in
+  var block=ImageBlock(name:pair.0,caption:pair.1)
   let files=assetContextFiles(assets,pair.0)
   if !excluded.contains(pair.0),let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=fm.fileExists(atPath:files[1].path)
-   text+="\n\n"+contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
+   block.context=contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
   }
-  return text
+  return block
  }
- return (blocks.joined(separator:"\n\n"),sessionContextMarkdown(items))
+ return (renderImageBlocks(blocks,template:imageTemplate),sessionContextMarkdown(items))
 }

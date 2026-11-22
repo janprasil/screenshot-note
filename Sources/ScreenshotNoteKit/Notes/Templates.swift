@@ -5,9 +5,23 @@ final class TemplateDefaults {
  static var shared=TemplateDefaults()
  private struct Remote:Codable {
   let session_template:String?;let file_template:String?;let revision:String?
-  enum CodingKeys:String,CodingKey{case session_template,file_template,revision}
+  // Šablony položek; items = server je zná (starší server cizí klíče odmítne).
+  var comment_template:String? = nil;var image_template:String? = nil;var items=false
+  enum CodingKeys:String,CodingKey{case session_template,file_template,revision,comment_template,image_template}
+  init(session_template:String?,file_template:String?,revision:String?,comment_template:String?=nil,image_template:String?=nil,items:Bool=false){
+   self.session_template=session_template;self.file_template=file_template;self.revision=revision;self.comment_template=comment_template;self.image_template=image_template;self.items=items
+  }
+  init(from decoder:Decoder)throws{
+   let c=try decoder.container(keyedBy:CodingKeys.self)
+   session_template=try c.decodeIfPresent(String.self,forKey:.session_template);file_template=try c.decodeIfPresent(String.self,forKey:.file_template);revision=try c.decodeIfPresent(String.self,forKey:.revision)
+   comment_template=try c.decodeIfPresent(String.self,forKey:.comment_template);image_template=try c.decodeIfPresent(String.self,forKey:.image_template)
+   items=c.contains(.comment_template) && c.contains(.image_template)
+  }
   // Vestavěná šablona se posílá jako explicitní null.
-  func encode(to encoder:Encoder)throws{var c=encoder.container(keyedBy:CodingKeys.self);try c.encode(session_template,forKey:.session_template);try c.encode(file_template,forKey:.file_template);try c.encode(revision,forKey:.revision)}
+  func encode(to encoder:Encoder)throws{
+   var c=encoder.container(keyedBy:CodingKeys.self);try c.encode(session_template,forKey:.session_template);try c.encode(file_template,forKey:.file_template);try c.encode(revision,forKey:.revision)
+   if items{try c.encode(comment_template,forKey:.comment_template);try c.encode(image_template,forKey:.image_template)}
+  }
  }
  private struct Envelope:Decodable{let data:Remote}
  private let store:UserDefaults
@@ -22,11 +36,17 @@ final class TemplateDefaults {
  var file:String?{store.string(forKey:"defaultFileTemplate")}
  var effectiveSession:String{session ?? defaultMarkdownTemplate}
  var effectiveFile:String{file ?? defaultCombinedTemplate}
+ var comment:String?{store.string(forKey:"defaultCommentTemplate")}
+ var image:String?{store.string(forKey:"defaultImageTemplate")}
  /// Kopie výchozích šablon pro novou složku (šablona relace, šablona souboru nebo nil).
  var newFolderTemplates:(String,String?){(effectiveSession,file)}
  private var revision:String?{store.string(forKey:"defaultTemplatesRevision")}
+ private var remoteItems:Bool{store.bool(forKey:"defaultItemTemplatesRemote")}
  private func keep(_ session:String?,_ file:String?,revision:String?) {
   for (key,value) in [("defaultSessionTemplate",session),("defaultFileTemplate",file),("defaultTemplatesRevision",revision)]{if let value{store.set(value,forKey:key)}else{store.removeObject(forKey:key)}}
+ }
+ private func keepItems(_ comment:String?,_ image:String?) {
+  for (key,value) in [("defaultCommentTemplate",comment),("defaultImageTemplate",image)]{if let value{store.set(value,forKey:key)}else{store.removeObject(forKey:key)}}
  }
  static func valid(session:String,file:String)->Bool{["{title}","{screenshots}","{text}"].allSatisfy{session.contains($0)} && session.count<=20000 && validCombinedTemplate(file)}
  /// Účet má přednost; starý server bez endpointu nechá lokální hodnoty.
@@ -34,29 +54,36 @@ final class TemplateDefaults {
   guard let c=connection(),c.ownerID != nil,let endpoint=CloudEndpoint(c.endpoint),
         let data=try? await request(endpoint,"/api/v1/account/templates",c.token),let remote=try? JSONDecoder().decode(Envelope.self,from:data).data else{return}
   keep(remote.session_template,remote.file_template,revision:remote.revision)
+  store.set(remote.items,forKey:"defaultItemTemplatesRemote");if remote.items{keepItems(remote.comment_template,remote.image_template)}
  }
  /// Uloží výchozí šablony; vestavěné hodnoty se ukládají jako null.
- @MainActor func save(session:String,file:String) async throws {
+ @MainActor func save(session:String,file:String,comment:String=defaultCommentTemplate,image:String=defaultImageTemplate) async throws {
   guard Self.valid(session:session,file:file) else{throw CloudFailure(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."))}
+  guard checkItemTemplate("comment",comment).valid,checkItemTemplate("image",image).valid else{throw CloudFailure(L("Šablona obrázku musí obsahovat {image}."))}
   let sessionValue=session==defaultMarkdownTemplate ? nil:session,fileValue=file==defaultCombinedTemplate ? nil:file
-  guard let c=connection(),c.ownerID != nil,let endpoint=CloudEndpoint(c.endpoint) else{keep(sessionValue,fileValue,revision:nil);return}
+  let commentValue=comment==defaultCommentTemplate ? nil:comment,imageValue=image==defaultImageTemplate ? nil:image
+  guard let c=connection(),c.ownerID != nil,let endpoint=CloudEndpoint(c.endpoint) else{keep(sessionValue,fileValue,revision:nil);keepItems(commentValue,imageValue);return}
   // První uložení na účet má revizi "0".
-  let body=try JSONEncoder().encode(Remote(session_template:sessionValue,file_template:fileValue,revision:revision ?? "0"))
+  let body=try JSONEncoder().encode(Remote(session_template:sessionValue,file_template:fileValue,revision:revision ?? "0",comment_template:commentValue,image_template:imageValue,items:remoteItems))
   do {
    let data=try await send(endpoint,"/api/v1/account/templates",c.token,body)
    let remote=try JSONDecoder().decode(Envelope.self,from:data).data
    keep(remote.session_template,remote.file_template,revision:remote.revision)
+   // Starší server šablony položek nezná; zůstanou na tomto Macu.
+   keepItems(remote.items ? remote.comment_template:commentValue,remote.items ? remote.image_template:imageValue)
   }
   catch let failure as CloudFailure where failure.status==409 {await refresh();throw CloudFailure(L("Změněno jinde. Načetl jsem novou verzi."),status:409,code:failure.code)}
   // Server bez výchozích šablon: hodnoty zůstanou aspoň na tomto Macu.
-  catch let failure as CloudFailure where failure.status==404 {keep(sessionValue,fileValue,revision:nil)}
+  catch let failure as CloudFailure where failure.status==404 {keep(sessionValue,fileValue,revision:nil);keepItems(commentValue,imageValue)}
  }
  /// Po odhlášení zůstanou poslední hodnoty účtu jako lokální.
  func forgetAccount(){store.removeObject(forKey:"defaultTemplatesRevision")}
 }
 
 /// Nápověda proměnných šablon pro editor; jediné místo textu.
-var sessionTemplateHint:String{L("Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}")}
+var sessionTemplateHint:String{L("Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}, {issues}")}
+var commentTemplateHint:String{L("Proměnné: {text}, {name}, {date} (podle jazyka aplikace)")}
+var imageTemplateHint:String{L("Proměnné: {image} (povinná), {description}, {comments}, {number}, {context}, {elements}")}
 var fileTemplateHint:String{L("Proměnné: {folderName}, {folderDescription}, {sessions}")}
 /// Počet relací ve složce, kterých se změna šablony týká.
 func indexedSessionCount(_ topic:Topic)->Int {
@@ -68,9 +95,9 @@ func indexedSessionCount(_ topic:Topic)->Int {
 @discardableResult func rerenderFolder(_ topic:Topic,previous:Topic)->(updated:Int,edited:Int) {
  guard topic.cloudFolderID==nil else{return (0,0)}
  migrateLegacyMarkers(in:topic.destination)
- let index=SessionIndex.shared,folder=SessionIndex.key(topic.destination),template=topic.markdownTemplate ?? defaultMarkdownTemplate
+ let index=SessionIndex.shared,folder=SessionIndex.key(topic.destination),template=topic.markdownTemplate ?? defaultMarkdownTemplate,imageTemplate=topic.imageTemplate
  let records=index.all.filter{!$0.isCloud && SessionIndex.key($0.directory)==folder}
- func body(_ r:SessionRecord)->String{let rendered=screenshotsWithContext(r.images,r.images.map{r.notes[$0] ?? ""},assets:r.directory.appendingPathComponent("assets"));return renderSessionTemplate(template,title:r.title,screenshots:rendered.screenshots,text:r.comment,context:rendered.context)}
+ func body(_ r:SessionRecord)->String{let rendered=screenshotsWithContext(r.images,r.images.map{r.notes[$0] ?? ""},assets:r.directory.appendingPathComponent("assets"),imageTemplate:imageTemplate);return renderSessionTemplate(template,title:r.title,screenshots:rendered.screenshots,text:r.comment,context:rendered.context)}
  func exact(_ r:SessionRecord,_ ns:NSString)->Bool{r.start>=0 && r.start+r.length<=ns.length && sessionFingerprint(Data(ns.substring(with:NSRange(location:r.start,length:r.length)).utf8))==r.hash}
  var updated=0,edited=0
  index.batch {
@@ -83,7 +110,7 @@ func indexedSessionCount(_ topic:Topic)->Int {
     var r=blocks[0];let next=body(r)
     guard exact(r,ns),r.start==0,r.length==ns.length else{_ = try? writeGeneratedCopy(Data(next.utf8),to:sidecar);edited+=1;continue}
     guard (try? Data(next.utf8).write(to:file,options:.atomic)) != nil else{continue}
-    r.length=(next as NSString).length;r.hash=sessionFingerprint(Data(next.utf8));r.heading=firstLine(next);r.template=template;index.put(r);writeSessionTag(file,r.id);updated+=1
+    r.length=(next as NSString).length;r.hash=sessionFingerprint(Data(next.utf8));r.heading=firstLine(next);r.template=template;r.imageTemplate=imageTemplate;index.put(r);writeSessionTag(file,r.id);updated+=1
     continue
    }
    // Společný soubor se přepíše jen tehdy, když odpovídá přesně tomu, co aplikace zapsala.
@@ -96,7 +123,7 @@ func indexedSessionCount(_ topic:Topic)->Int {
    output+=footer
    if !pristine{_ = try? writeGeneratedCopy(Data(output.utf8),to:sidecar);edited+=max(1,blocks.filter{!exact($0,ns)}.count);continue}
    guard (try? Data(output.utf8).write(to:file,options:.atomic)) != nil else{continue}
-   for (r,start,value) in placed{var next=r;next.start=start;next.length=(value as NSString).length;next.hash=sessionFingerprint(Data(value.utf8));next.heading=firstLine(value);next.template=template;next.footer=footer;index.put(next);updated+=1}
+   for (r,start,value) in placed{var next=r;next.start=start;next.length=(value as NSString).length;next.hash=sessionFingerprint(Data(value.utf8));next.heading=firstLine(value);next.template=template;next.imageTemplate=imageTemplate;next.footer=footer;index.put(next);updated+=1}
    tagCombinedFile(file)
   }
  }

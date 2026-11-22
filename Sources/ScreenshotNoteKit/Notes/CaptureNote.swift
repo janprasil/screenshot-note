@@ -106,7 +106,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   // Anotace Element se vypíšou pod popisek obrázku a zůstanou v něm i pro přerenderování.
   // Bez kontextu (odebraný nebo vypnutý politikou) jdou ven jen čísla a popisy, ne data stránky.
   let captions=draft.images.map{captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:keepContext && draft.contexts?[$0] != nil)}
-  let rendered=screenshotsWithContext(imageNames,captions,assets:assets,without:Set(removedContext.keys))
+  let rendered=screenshotsWithContext(imageNames,captions,assets:assets,without:Set(removedContext.keys),imageTemplate:draft.topic?.imageTemplate)
   let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   // Replace placeholders in a single pass so user content containing tokens stays literal.
@@ -117,6 +117,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   var hashes:[String:String]=[:]
   for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));if removedContext[name] != nil{continue};for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}}}
   var record=SessionRecord(id:previous?.session ?? UUID().uuidString,file:SessionIndex.key(markdown),start:0,length:length,hash:sessionFingerprint(Data(content.utf8)),heading:firstLine(content),title:title,comment:draft.comment,template:template,images:imageNames,notes:notes,combined:false,footer:"",files:hashes,seen:0)
+  record.imageTemplate=draft.topic?.imageTemplate
   if let previous=previous {
    let original=try checkedPreviousFile(previous)
    let updated=(original as NSString).replacingCharacters(in:NSRange(location:previous.start,length:previous.length),with:content)
@@ -170,19 +171,15 @@ let defaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# De
 let legacyDefaultMarkdownTemplate="# {title}\n\n# Screenshots\n\n{screenshots}\n\n# Description\n\n{text}\n"
 /// `{author}` je jméno autora cloudové relace, jinak prázdné; vestavěné šablony ho nemají.
 /// `{context}` je souhrn kontextu z prohlížeče za relaci; vestavěné šablony ho nemají.
-func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="",author:String="",context:String="")->String{
- let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments,"{author}":author,"{context}":context]
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context)\\}")
+/// `{issues}` jsou odkazy cloudové relace, lokálně prázdné.
+func renderSessionTemplate(_ template:String,title:String,screenshots:String,text:String,comments:String="",author:String="",context:String="",issues:String="")->String{
+ let values=["{title}":title,"{screenshots}":screenshots,"{text}":text,"{comments}":comments,"{author}":author,"{context}":context,"{issues}":issues]
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context|issues)\\}")
  let source=template as NSString;var output=template
  for match in expression.matches(in:template,range:NSRange(location:0,length:source.length)).reversed(){output=(output as NSString).replacingCharacters(in:match.range,with:values[source.substring(with:match.range)]!)}
  // Bez komentářů nezůstanou na konci prázdné řádky.
  if template.contains("{comments}") && comments.isEmpty{while let last=output.last,last.isWhitespace{output.removeLast()}}
  return output.hasSuffix("\n") ? output:output+"\n"
-}
-/// Komentáře pro {comments}: text, pod ním autor, místní čas a u obrázku jeho číslo, oddělené prázdným řádkem.
-func renderComments(_ comments:[RemoteNote.Comment])->String {
- let format=DateFormatter();format.locale=Locale(identifier:"en_US_POSIX");format.timeZone = .current;format.dateFormat="yyyy-MM-dd HH:mm"
- return comments.map{$0.body+"\n`"+($0.author_name ?? "").replacingOccurrences(of:"`",with:"'")+"` - `"+(parseServerDate($0.created_at).map(format.string) ?? $0.created_at ?? "")+"`"+($0.image_index.map{" - `Screenshot \($0)`"} ?? "")}.joined(separator:"\n\n")
 }
 func fillPlaceholders(_ template:String,_ values:[String:String])->String {
  let expression=try! NSRegularExpression(pattern:values.keys.map(NSRegularExpression.escapedPattern(for:)).joined(separator:"|"))

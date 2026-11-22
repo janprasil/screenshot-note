@@ -6,8 +6,8 @@ let defaultImageTemplate="{image}\n\n{description}\n\n{context}\n\n{comments}"
 let commentPlaceholders=["date","name","text"]
 let imagePlaceholders=["image","description","comments","number","context","elements"]
 let itemTemplateMaxLength=5000
-/// Verze vykreslení cloudových relací; zvýšení je jednou přerenderuje.
-let cloudRenderVersion=3
+/// Verze vykreslení cloudových relací; zvýšení je jednou přerenderuje (4: video).
+let cloudRenderVersion=4
 
 private let monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 /// {date}: cs `22. 11. 2026 14:05`, jinak `Nov 22, 2026, 14:05`.
@@ -55,12 +55,13 @@ func renderCommentList(_ comments:[RemoteNote.Comment],template:String?,language
 }
 
 /// Jeden obrázek pro {screenshots}; popisek a komentáře jsou připravené pro Markdown.
-struct ImageBlock{var name:String;var caption:String;var context:String="";var comments:String=""}
+/// videoMs: položka je video, {image} odkazuje poster na `<název>.mp4` (web renderImageList).
+struct ImageBlock{var name:String;var caption:String;var context:String="";var comments:String="";var videoMs:Int?=nil}
 func renderImageBlocks(_ images:[ImageBlock],template:String?)->String {
  let source=template ?? defaultImageTemplate,separate=source.contains("{elements}")
  return images.enumerated().map{(offset,image) in
   let parts=separate ? splitElements(image.caption):(image.caption,"")
-  return renderParagraphs(source,["image":imageMarkdown(image.name,offset+1),"description":parts.0,"comments":image.comments,"number":String(offset+1),"context":image.context,"elements":parts.1])
+  return renderParagraphs(source,["image":image.videoMs.map{videoMarkdown(image.name,durationMs:$0)} ?? imageMarkdown(image.name,offset+1),"description":parts.0,"comments":image.comments,"number":String(offset+1),"context":image.context,"elements":parts.1])
  }.joined(separator:"\n\n")
 }
 

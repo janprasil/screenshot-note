@@ -42,7 +42,11 @@ struct RemoteNote:Codable,Equatable {
  struct Image:Codable,Equatable{
   let index:Int;let path:String
   /// Přílohy kontextu z prohlížeče; prázdný seznam je nil, aby se otisk relací bez kontextu nezměnil.
-  struct Attachment:Codable,Equatable{let kind:String;let bytes:Int;let sha256:String;let path:String}
+  /// media: video {duration_ms,width,height}, snímek {timestamp_ms}; kontext ho nemá.
+  struct Attachment:Codable,Equatable{
+   struct Media:Codable,Equatable{var duration_ms:Int?=nil;var width:Int?=nil;var height:Int?=nil;var timestamp_ms:Int?=nil}
+   let kind:String;let bytes:Int;let sha256:String;let path:String;var media:Media?=nil
+  }
   var attachments:[Attachment]? = nil
  }
  var images:[Image]
@@ -66,13 +70,17 @@ struct FlexibleString:Decodable {
 
 /// Markdown cloudové relace bez skrytých značek; obrázky podle zadaných názvů v assets/.
 /// Vykreslení je stejné jako webový export (lib/markdown.ts), navíc s kontextem z prohlížeče.
-func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[String:Data]]=[:],language:String=AppLanguage.current,timeZone:TimeZone = .current)->String {
+/// assets: s ním se video, které se teď nestáhlo (video.keep), vykreslí jen při existujícím místním MP4.
+func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[String:Data]]=[:],assets:URL?=nil,language:String=AppLanguage.current,timeZone:TimeZone = .current)->String {
  let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at,image_index:$0.image_index)}
  func list(_ items:[RemoteNote.Comment])->String{renderCommentList(items,template:note.comment_template,language:language,timeZone:timeZone)}
  // Stažený kontext dostane stejný callout s odkazy do assets/ jako lokální export.
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
  let blocks=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->ImageBlock in
   var block=ImageBlock(name:pair.0,caption:pair.1,comments:list(comments.filter{$0.image_index==offset+1}))
+  // Video se staženými metadaty (video.json z contextAttachments nebo z disku).
+  let kept=contexts[offset+1]?["video.keep"] != nil && assets.map{fm.fileExists(atPath:assetVideoFiles($0,pair.0)[0].path)} == true
+  if contexts[offset+1]?["video"] != nil || kept,let json=contexts[offset+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json){block.videoMs=info.durationMs}
   if let side=contexts[offset+1],let data=side["context"],let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=side["har"] != nil
    block.context=contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
@@ -89,9 +97,11 @@ func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[Str
 func diskContexts(_ names:[String],assets:URL)->[Int:[String:Data]] {
  var result:[Int:[String:Data]]=[:]
  for (offset,name) in names.enumerated() {
-  let files=assetContextFiles(assets,name)
+  let files=assetContextFiles(assets,name),video=assetVideoFiles(assets,name)
+  // Video jen jako značka s metadaty; MP4 se do paměti nečte.
+  if fm.fileExists(atPath:video[0].path),let info=readVideoInfo(video[1]),let json=try? JSONEncoder().encode(info){result[offset+1,default:[:]]["video"]=Data();result[offset+1,default:[:]]["video.json"]=json}
   guard let context=try? boundedData(files[0],max:maxContextBytes) else{continue}
-  result[offset+1]=["context":context].merging((try? boundedData(files[1],max:maxContextBytes)).map{["har":$0]} ?? [:]){a,_ in a}
+  result[offset+1,default:[:]].merge(["context":context].merging((try? boundedData(files[1],max:maxContextBytes)).map{["har":$0]} ?? [:]){a,_ in a}){a,_ in a}
  }
  return result
 }

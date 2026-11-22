@@ -197,7 +197,9 @@ final class CloudFolders {
    add(markdown)
    // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
    let flat=record.flat==true || SessionIndex.key(parent)==key
-   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}}
+   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}
+    // Video: MP4 a soubory ve složce snímků patří relaci.
+    let video=assetVideoFiles(directory,image);add(video[0]);for file in regularFiles(video[1]){add(file)}}
    if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
   }
   for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}
@@ -713,7 +715,7 @@ final class CloudFolders {
    let stem=flatStem(guid ? readableSessionName(record.title,created:parseServerDate(record.created) ?? Date()):directory.lastPathComponent,base:base)
    var output=text,names:[String:String]=[:]
    for (i,image) in record.images.enumerated() {
-    let name=uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.values.contains($0+".png")}+".png"
+    let name=uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.values.contains($0+".png")}+".png"
     names[image]=name
    }
    output=rewriteImageLinks(output,order:record.images,rename:names)
@@ -743,7 +745,9 @@ final class CloudFolders {
   var moved:[String]=[],copied:[String]=[]
   for image in record.images where fm.fileExists(atPath:assets.appendingPathComponent(image).path) && !fm.fileExists(atPath:trash.appendingPathComponent(image).path) {
    let target=trash.appendingPathComponent(image);try? fm.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
-   if own.contains(image){if (try? fm.moveItem(at:assets.appendingPathComponent(image),to:target)) != nil{moved.append(image)}}
+   if own.contains(image){if (try? fm.moveItem(at:assets.appendingPathComponent(image),to:target)) != nil{moved.append(image)
+    // Video jde s posterem, aby se po obnovení dalo přejmenovat spolu s ním.
+    for (source,side) in zip(assetVideoFiles(assets,image),assetVideoFiles(trash,image)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}}}
    else if (try? fm.copyItem(at:assets.appendingPathComponent(image),to:target)) != nil{copied.append(image)}
   }
   return (moved,copied)
@@ -780,16 +784,23 @@ final class CloudFolders {
   var renamed:[String:String]=[:]
   for image in record.rootMoved ?? [] where fm.fileExists(atPath:trash.appendingPathComponent("assets/"+image).path) {
    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
-   let name=uniqueName(stem){fm.fileExists(atPath:assets.appendingPathComponent($0+"."+ext).path)}+"."+ext
+   let name=uniqueName(stem){candidate in [ext,"mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
    try? fm.createDirectory(at:assets,withIntermediateDirectories:true)
-   if (try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))) != nil,name != image{renamed[image]=name}
+   if (try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))) != nil {
+    for (source,side) in zip(assetVideoFiles(trash.appendingPathComponent("assets"),image),assetVideoFiles(assets,name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
+    if name != image{renamed[image]=name}
+   }
   }
   if !renamed.isEmpty {
    // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
    next.images=next.images.map{renamed[$0] ?? $0}
    next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
    next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
-   for (old,new) in renamed{if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}}
+   for (old,new) in renamed{
+    if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}
+    let video={(name:String)->String in "assets/"+(name as NSString).deletingPathExtension+".mp4"}
+    if let hash=next.files.removeValue(forKey:video(old)){next.files[video(new)]=hash}
+   }
    let markdown=URL(fileURLWithPath:next.file),key=markdown.lastPathComponent
    if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {
     let pristine=fileHash(markdown)==next.files[key],output=rewriteImageLinks(text,order:record.images,rename:renamed)
@@ -838,7 +849,14 @@ final class CloudFolders {
    let from=trashURL(base).appendingPathComponent("assets/"+name),to=base.appendingPathComponent("assets/"+name)
    guard fm.fileExists(atPath:from.path),!fm.fileExists(atPath:to.path) else{continue}
    try? fm.createDirectory(at:to.deletingLastPathComponent(),withIntermediateDirectories:true);try? fm.moveItem(at:from,to:to)
+   for (source,side) in zip(assetVideoFiles(trashURL(base).appendingPathComponent("assets"),name),assetVideoFiles(base.appendingPathComponent("assets"),name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
   }
+ }
+ /// Video posteru v .trash: MP4 jen netknuté (hash z indexu), složka snímků s ním.
+ private func removeTrashedVideo(_ record:SessionRecord,image:String,base:URL) {
+  let files=assetVideoFiles(trashURL(base).appendingPathComponent("assets"),image)
+  guard let hash=record.files["assets/"+(image as NSString).deletingPathExtension+".mp4"],fileHash(files[0])==hash else{return}
+  for url in files{try? fm.removeItem(at:url)}
  }
  /// Natrvalo smazaná relace zmizí z .trash, jen pokud ji nikdo neupravil.
  private func purge(_ record:SessionRecord,base:URL) {
@@ -847,13 +865,13 @@ final class CloudFolders {
    // Smaže se jen to, co se do .trash přesunulo s relací, a jen netknuté.
    let markdown=URL(fileURLWithPath:record.file)
    if SessionIndex.key(markdown).hasPrefix(SessionIndex.key(trashURL(base))+"/"),fileHash(markdown)==record.files[markdown.lastPathComponent]{try? fm.removeItem(at:markdown)}
-   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url)}}
+   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url);removeTrashedVideo(record,image:image,base:base)}}
    removeTrashCopies(record,base:base);index.remove(record);return
   }
   if record.stem != nil {
    if record.trashed==true {
     if let note=record.trashNote,fileHash(URL(fileURLWithPath:note))==record.trashHash{try? fm.removeItem(atPath:note)}
-    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url)}}
+    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url);removeTrashedVideo(record,image:name,base:base)}}
    } else {var copy=record;_ = trashCombined(&copy,base:base)}
   } else {
    let directory=record.directory
@@ -961,7 +979,7 @@ final class CloudFolders {
   }
   let data=try await images(note,topic:topic,endpoint:endpoint,token:token),shas=data.map(sessionFingerprint)
   let contexts=try await contextAttachments(note,topic:topic,endpoint:endpoint,token:token)
-  func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har")}
+  func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har") || key.hasSuffix(".mp4")}
   guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
   try Topics.validateDestination(topic,folder:base,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
   let assets=base.appendingPathComponent("assets");try fm.createDirectory(at:assets,withIntermediateDirectories:true)
@@ -973,7 +991,7 @@ final class CloudFolders {
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
    // Starší netknutá podsložka se aktualizuje na místě; při další synchronizaci se zploští.
-   let directory=saved.directory,markdown=URL(fileURLWithPath:saved.file).lastPathComponent,names=note.images.map{"\($0.index).png"},body=cloudSessionBody(note,images:names,contexts:contexts)
+   let directory=saved.directory,markdown=URL(fileURLWithPath:saved.file).lastPathComponent,names=note.images.map{"\($0.index).png"},body=cloudSessionBody(note,images:names,contexts:contexts,assets:directory.appendingPathComponent("assets"))
    var files:[String:Data]=[markdown:Data(body.utf8)];for (name,bytes) in zip(names,data){files["assets/"+name]=bytes}
    try fm.createDirectory(at:directory.appendingPathComponent("assets"),withIntermediateDirectories:true)
    for (name,bytes) in files{try bytes.write(to:directory.appendingPathComponent(name),options:.atomic)}
@@ -986,36 +1004,40 @@ final class CloudFolders {
    let flat=isRoot(saved,base),markdown=URL(fileURLWithPath:saved.file),stem=markdown.deletingPathExtension().lastPathComponent
    let folderAssets=flat ? assets:saved.directory.appendingPathComponent("assets")
    var names:[String]=[]
-   for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:folderAssets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png":"\(i+1).png"))}
+   for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){assetStemTaken(folderAssets,$0) || names.contains($0+".png")}+".png":"\(i+1).png"))}
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
-   if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
+   if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts,assets:folderAssets).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
     var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;same.render=cloudRenderVersion;same.imageTemplate=note.image_template;same.imageComments=cloudImageComments(note,images:names);index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
-    let body=cloudSessionBody(note,images:names,contexts:contexts);var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
+    let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets);var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
     for (name,bytes) in zip(names,data){let url=assets.appendingPathComponent(name);if fileHash(url) != sessionFingerprint(bytes){try bytes.write(to:url,options:.atomic)};files["assets/"+name]=sessionFingerprint(bytes)}
     try Data(body.utf8).write(to:markdown,options:.atomic)
     files.merge(try writeContextAttachments(contexts,names:names,assets:assets,previous:saved.files)){a,_ in a}
     index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower);return
    }
    // Upravená místní kopie zůstává; cloudová verze jde vedle jako <název>_cloud.md.
-   var links:[String]=[]
-   for (name,bytes) in zip(names,data) {
+   var links:[String]=[],fresh:[Int:[String:Data]]=[:]
+   for (position,(name,bytes)) in zip(names,data).enumerated() {
     let url=folderAssets.appendingPathComponent(name),hash=fileHash(url)
-    if hash==nil{try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true);try bytes.write(to:url,options:.withoutOverwriting);links.append(name)}
+    if hash==nil{try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true);try bytes.write(to:url,options:.withoutOverwriting);links.append(name);fresh[position+1]=contexts[position+1]}
     else if hash==sessionFingerprint(bytes){links.append(name)}
-    else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent)}
+    else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent);fresh[position+1]=contexts[position+1]}
    }
-   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links).utf8)
+   // Video a kontext jen k nově zapsaným obrázkům; místní soubory upravené relace se nemění ani nemažou.
+   let videoFree={(position:Int)->Bool in !assetVideoFiles(folderAssets,links[position-1]).contains{fm.fileExists(atPath:$0.path)} && !assetContextFiles(folderAssets,links[position-1]).contains{fm.fileExists(atPath:$0.path)}}
+   fresh=fresh.filter{videoFree($0.key)}
+   let sides=try writeContextAttachments(fresh,names:links,assets:folderAssets)
+   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:fresh).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;index.put(kept);return
+   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date()),base:base)
-  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png")}
-  let body=cloudSessionBody(note,images:names,contexts:contexts),markdown=base.appendingPathComponent(stem+".md")
+  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
+  let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets),markdown=base.appendingPathComponent(stem+".md")
   var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
   for (name,bytes) in zip(names,data){try bytes.write(to:assets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
   try Data(body.utf8).write(to:markdown,options:.withoutOverwriting)
@@ -1080,7 +1102,7 @@ final class CloudFolders {
    let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date()),base:base)
    var names=Array((record?.images ?? []).prefix(data.count)),files=record?.files ?? [:]
    for (i,bytes) in data.enumerated() {
-    if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png")}
+    if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
     let url=assets.appendingPathComponent(names[i]),existing=try? boundedData(url,max:52428800)
     // Místně upravený obrázek zůstává; převzatý originál, ze kterého server vznikl, se nepřepisuje.
     let source=existing != nil && record?.shas?.indices.contains(i)==true && record?.shas?[i]==sessionFingerprint(bytes) && existing.map(sessionFingerprint)==files["assets/"+names[i]]
@@ -1092,7 +1114,7 @@ final class CloudFolders {
    }
    // Přílohy kontextu i ve společném souboru; index relace nese jejich hashe.
    let sides=try writeContextAttachments(contexts,names:names,assets:assets,previous:record?.files ?? [:])
-   files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har")}.merging(sides){a,_ in a}
+   files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har") && !$0.key.hasSuffix(".mp4")}.merging(sides){a,_ in a}
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
@@ -1187,12 +1209,12 @@ final class CloudFolders {
   currentConnection()?.token==token && account?.0==currentConnection()?.ownerID && account?.1==topic.cloudOrigin &&
    records.contains(where:{matches($0,topic) && $0.folder==topic.folder && $0.unavailable != true && $0.remoteDeleted != true})
  }
- /// Platné přílohy kontextu; neznámé nebo nesedící záznamy se zahodí, prázdný seznam je nil.
+ /// Platné přílohy kontextu a videa; neznámé nebo nesedící záznamy se zahodí, prázdný seznam je nil.
  static func normalizedAttachments(_ source:RemoteNote,path:String)->RemoteNote {
   var note=source
   note.images=note.images.map{image in
    var copy=image
-   let valid=(image.attachments ?? []).filter{["context","har"].contains($0.kind) && (1...CloudAttachment.limit).contains($0.bytes) && $0.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
+   let valid=(image.attachments ?? []).filter{CloudAttachment.validKind($0.kind) && (1...CloudAttachment(index:1,kind:$0.kind,bytes:0,sha256:"").sizeLimit).contains($0.bytes) && $0.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
     && $0.path==path+"/attachments/\(image.index)/\($0.kind)"}
    copy.attachments=valid.isEmpty ? nil:Array(Dictionary(valid.map{($0.kind,$0)},uniquingKeysWith:{a,_ in a}).values).sorted{$0.kind<$1.kind}
    return copy
@@ -1207,10 +1229,18 @@ final class CloudFolders {
     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
     // Chybějící nebo poškozená příloha neblokuje stažení relace; dočasná chyba ho zopakuje později.
     let data:Data
-    do{data=try await request(endpoint,item.path,token,CloudAttachment.limit+1)}
+    do{data=try await request(endpoint,item.path,token,CloudAttachment(index:1,kind:item.kind,bytes:0,sha256:"").sizeLimit+1)}
     catch let failure as CloudFailure where failure.status==404{continue}
     guard data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{continue}
     result[image.index,default:[:]][item.kind]=data
+   }
+   // Metadata videa jako video.json do složky snímků (časy z media).
+   if result[image.index]?["video"] != nil,let json=remoteVideoInfo(image.attachments ?? [],downloaded:Set(result[image.index]?.keys.map{$0} ?? [])).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
+   else{result[image.index]?["video"]=nil}
+   // Video na serveru je, jen se teď nestáhlo: místní kopie zůstane a Markdown na ni dál odkazuje.
+   if result[image.index]?["video"] == nil,(image.attachments ?? []).contains(where:{$0.kind=="video"}) {
+    result[image.index,default:[:]]["video.keep"]=Data()
+    if let json=remoteVideoInfo(image.attachments ?? [],downloaded:[]).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
    }
   }
   return result
@@ -1232,8 +1262,37 @@ final class CloudFolders {
     // Smazat jen přílohu staženou dřív z cloudu; místní soubor zůstává.
     } else if previous[key] != nil,fm.fileExists(atPath:target.path){try fm.removeItem(at:target)}
    }
+   // Video: `<název>.mp4` a `<název>.frames/` (N.png + video.json) vedle posteru.
+   let video=assetVideoFiles(assets,name),key=prefix+video[0].lastPathComponent
+   // Místně změněné MP4 (jiný hash než při posledním stažení) se nepřepíše ani nesmaže.
+   let edited=fm.fileExists(atPath:video[0].path) && fileHash(video[0]) != previous[key]
+   // Cizí MP4 bez záznamu v indexu se nepřebírá (sync ho nikdy nepřepíše ani nesmaže).
+   if edited{if let hash=previous[key]{files[key]=hash}}
+   else if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
+    if fileHash(video[0]) != sessionFingerprint(mp4){try replaceFile(video[0],with:mp4,in:assets)}
+    // Snímky se porovnají i obsahem; stejný čas a název neznamená stejný obrázek.
+    let current=info.frames.allSatisfy{frame in (try? Data(contentsOf:video[1].appendingPathComponent(frame.file))) == contexts[position+1]?["frame-"+frame.file.replacingOccurrences(of:".png",with:"")]}
+    if (try? Data(contentsOf:video[1].appendingPathComponent("video.json"))) != json || !current {
+     let staging=assets.appendingPathComponent(".\(UUID().uuidString).frames",isDirectory:true)
+     try fm.createDirectory(at:staging,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+     do {
+      for frame in info.frames{guard let data=contexts[position+1]?["frame-"+frame.file.replacingOccurrences(of:".png",with:"")] else{continue};guard fm.createFile(atPath:staging.appendingPathComponent(frame.file).path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}}
+      guard fm.createFile(atPath:staging.appendingPathComponent("video.json").path,contents:json,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}
+      try? fm.removeItem(at:video[1]);try fm.moveItem(at:staging,to:video[1])
+     }catch{try? fm.removeItem(at:staging);throw error}
+    }
+    files[key]=sessionFingerprint(mp4)
+   } else if let hash=previous[key] {
+    if contexts[position+1]?["video.keep"] != nil{if fm.fileExists(atPath:video[0].path){files[key]=hash}}else{for url in video{try? fm.removeItem(at:url)}}
+   }
   }
   return files
+ }
+ /// Soubor vzniká rovnou jako 0600 a přejmenuje se na místo.
+ private func replaceFile(_ target:URL,with data:Data,in assets:URL)throws {
+  let temporary=assets.appendingPathComponent(".\(UUID().uuidString).tmp")
+  guard fm.createFile(atPath:temporary.path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}
+  guard rename(temporary.path,target.path)==0 else{try? fm.removeItem(at:temporary);throw CloudFailure.invalid}
  }
  @MainActor private func images(_ note:RemoteNote,topic:Topic,endpoint:CloudEndpoint,token:String)async throws->[Data] {
   var total=0;var result:[Data]=[]

@@ -95,10 +95,14 @@ import AppKit
    await store.refresh(c);assert(gone.contains(id("První")) && exists(".trash/assets/\(P)-1.png") && !exists("assets/\(P)-1.png") && exists(".trash/\(P).md"))
    // Obsazený název obrázku při obnově z webu: obrázek dostane nový název a odkaz i záznam se přepíšou.
    try Data("cizí obrázek".utf8).write(to:assets.appendingPathComponent("\(P)-1.png"))
+   // Video u posteru v koši se při obnově přejmenuje spolu s ním.
+   let trashedVideo=assetVideoFiles(trash.appendingPathComponent("assets"),"\(P)-1.png")
+   try Data([1]).write(to:trashedVideo[0]);try fm.createDirectory(at:trashedVideo[1],withIntermediateDirectories:true)
    gone.remove(id("První"));await store.refresh(c);assert(exists("\(P).md") && exists("assets/\(P)-1.png") && !exists(".trash/assets/\(P)-1.png"))
    let restoredText=try String(contentsOf:dir.appendingPathComponent("\(P).md"),encoding:.utf8),record=SessionIndex.shared.cloud(id("První"),base:try Topics.checkedDestination(dir.path))!
    assert(imageLinkNames(restoredText)==["\(P)-1 2.png"] && record.images==["\(P)-1 2.png"] && record.files["assets/\(P)-1 2.png"] != nil && exists("assets/\(P)-1 2.png") && (try! Data(contentsOf:assets.appendingPathComponent("\(P)-1.png")))==Data("cizí obrázek".utf8))
    assert(record.files["\(P).md"]==fileHash(dir.appendingPathComponent("\(P).md")))
+   assert(exists("assets/\(P)-1 2.mp4") && exists("assets/\(P)-1 2.frames") && !exists(".trash/assets/\(P)-1.mp4"))
    print("PASS: web restore with an occupied image name renames the image and rewrites Markdown links and the index record")
   }
   _ = assets

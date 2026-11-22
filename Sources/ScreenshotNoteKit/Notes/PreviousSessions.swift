@@ -92,22 +92,28 @@ func previousSessions(in folder:URL,template fallback:String?=nil)throws->[Previ
  return result.sorted{if $0.modified != $1.modified{return $0.modified>$1.modified};return $0.target.start>$1.target.start}
 }
 // Čte oba formáty: Obsidian ![[assets/x]] i standardní ![alt](<assets/x>) nebo ![alt](assets/x).
-private let linkExpression=try! NSRegularExpression(pattern:"!\\[\\[assets/([^]\\n]+)\\]\\]|!\\[[^\\]\\n]*\\]\\(<assets/([^>\\n]+)>\\)|!\\[[^\\]\\n]*\\]\\(assets/([^)\\s]+)\\)")
+// Video [![Video m:ss](<assets/x.png>)](<assets/x.mp4>) je jeden odkaz s názvem posteru (skupina 5).
+private let linkExpression=try! NSRegularExpression(pattern:"!\\[\\[assets/([^]\\n]+)\\]\\]|!\\[[^\\]\\n]*\\]\\(<assets/([^>\\n]+)>\\)|!\\[[^\\]\\n]*\\]\\(assets/([^)\\s]+)\\)|\\[!\\[(Video \\d+:\\d{2})\\]\\(<assets/([^>\\n]+)>\\)\\]\\(<assets/[^>\\n]+\\.mp4>\\)")
 func imageLinks(_ text:String)->[NSTextCheckingResult]{linkExpression.matches(in:text,range:NSRange(location:0,length:(text as NSString).length))}
 /// Název obrázku z nalezeného odkazu bez ohledu na formát.
-func linkName(_ match:NSTextCheckingResult,in ns:NSString)->String{for i in 1...3 where match.range(at:i).location != NSNotFound{return ns.substring(with:match.range(at:i))};return ""}
+func linkName(_ match:NSTextCheckingResult,in ns:NSString)->String{for i in [1,2,3,5] where match.range(at:i).location != NSNotFound{return ns.substring(with:match.range(at:i))};return ""}
 func imageLinkNames(_ text:String)->[String]{let ns=text as NSString;return imageLinks(text).map{linkName($0,in:ns)}}
 func imageLinkRanges(_ name:String,in ns:NSString)->[NSRange]{imageLinks(ns as String).filter{linkName($0,in:ns)==name}.map(\.range)}
 func containsImageLink(_ text:String,_ name:String)->Bool{imageLinkNames(text).contains(name)}
 /// Standardní Markdown odkaz; úhlové závorky kvůli mezerám v názvu.
 func imageMarkdown(_ name:String,_ number:Int)->String{"![Screenshot \(number)](<assets/\(name)>)"}
+/// Video: poster odkazuje na MP4 se stejným základem názvu.
+func videoMarkdown(_ name:String,durationMs:Int)->String{"[![Video \(videoDuration(durationMs))](<assets/\(name)>)](<assets/\((name as NSString).deletingPathExtension).mp4>)"}
 func screenshotsMarkdown(_ names:[String],_ captions:[String])->String{zip(names,captions).enumerated().map{imageMarkdown($0.element.0,$0.offset+1)+($0.element.1.isEmpty ? "":"\n\n"+$0.element.1)}.joined(separator:"\n\n")}
 /// Přepíše všechny odkazy na obrázky do standardního formátu (s volitelným přejmenováním).
 func rewriteImageLinks(_ text:String,order:[String],rename:[String:String]=[:])->String {
  let ns=text as NSString;var output=text
  for match in imageLinks(text).reversed() {
   let name=linkName(match,in:ns),number=(order.firstIndex(of:name) ?? 0)+1
-  output=(output as NSString).replacingCharacters(in:match.range,with:imageMarkdown(rename[name] ?? name,number))
+  // Video zůstane videem; délka se přenese z popisku odkazu.
+  let target=rename[name] ?? name
+  let replacement=match.range(at:4).location != NSNotFound ? "[![\(ns.substring(with:match.range(at:4)))](<assets/\(target)>)](<assets/\((target as NSString).deletingPathExtension).mp4>)":imageMarkdown(target,number)
+  output=(output as NSString).replacingCharacters(in:match.range,with:replacement)
  }
  return output
 }
@@ -259,6 +265,7 @@ func workingDraft(from session:PreviousSession,topic:Topic,root:URL,queuedEdit:(
    let destination=root.appendingPathComponent(name);try fm.copyItem(at:assets.appendingPathComponent(image),to:destination);images.append(name)
    try copyAnnotationSidecar(from:assets.appendingPathComponent(image),to:destination);target.imported[name]=image;notes[name]=session.imageNotes[image]
    if try importAssetContext(assets:assets,image:image,to:destination){contexts[name]=name+".context.json"}
+   try importAssetVideo(assets:assets,image:image,to:destination)
   }
  }catch{for name in images{removeAnnotatedImage(root.appendingPathComponent(name))};throw error}
  var draft=Draft(images:images,comment:session.comment,title:session.title,topic:topic,previous:target,imageNotes:notes)

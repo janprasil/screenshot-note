@@ -70,11 +70,19 @@ func cloudAttachmentAllowed(_ directory:URL,index:Int,folder:UUID?)->Bool {
  let policy=CloudContextPolicies.policy(folder)
  return policy.enabled && contextRedactionCovers(directory.appendingPathComponent("\(index).context.json"),policy:policy)
 }
-/// Příloha kontextu snímku v cloudu (`.context.json` nebo `.har`), soubor `<index>.<kind>` ve složce jobu.
+/// Příloha položky v cloudu: kontext (`.context.json`, `.har`), video (`.mp4`) nebo klíčový snímek (`.frame-N.png`), soubor `<index>.<přípona>` ve složce jobu.
 struct CloudAttachment: Codable, Equatable {
- static let limit=16*1024*1024
+ static let limit=16*1024*1024,videoLimit=8*1024*1024,frameLimit=4*1024*1024
  let index: Int; let kind: String; let bytes: Int; let sha256: String
- var filename: String { "\(index)."+(kind=="har" ? "har":"context.json") }
+ /// Snímek: čas ve videu a sha256 videa, ke kterému patří.
+ var timestampMs: Int? = nil; var video: String? = nil
+ /// Video: délka a rozměry, aby šlo odloženou úlohu uložit lokálně i s videem.
+ var durationMs: Int? = nil; var width: Int? = nil; var height: Int? = nil
+ var filename: String { "\(index)."+(kind=="har" ? "har":kind=="context" ? "context.json":kind=="video" ? "mp4":kind+".png") }
+ var isContext: Bool { kind=="context" || kind=="har" }
+ static func validKind(_ kind:String)->Bool{["context","har","video"].contains(kind) || kind.range(of:"^frame-([1-9]|1[0-2])$",options:.regularExpression) != nil}
+ var sizeLimit: Int { kind=="video" ? Self.videoLimit:isContext ? Self.limit:Self.frameLimit }
+ var contentType: String { kind=="video" ? "video/mp4":isContext ? "application/json":"image/png" }
 }
 /// Odebrání příloh snímků už nahrané relace (Odebrat kontext u znovuotevřené relace).
 private struct AttachmentRemoval: Codable { let endpoint: String; let ownerID: UUID; let sessionID: UUID; var indices: [Int] }
@@ -266,6 +274,27 @@ final class CloudLibrary {
      if let policy, !restrictContextFile(staged, har: kind == "har", policy: policy) { try? fm.removeItem(at: staged); continue }
      guard let side = try? boundedData(staged, max: CloudAttachment.limit) else { try? fm.removeItem(at: staged); continue }
      attachments.append(CloudAttachment(index:index + 1,kind:kind,bytes:side.count,sha256:sessionFingerprint(side)))
+    }
+   }
+   // Video nové položky: MP4 a klíčové snímky s časem; nezávisí na politice kontextu z prohlížeče.
+   let video = videoSidecars(root.appendingPathComponent(filename))
+   // Video nad limit cloudu nezahodíme potichu: uložení selže a koncept zůstane.
+   if index >= (base?.count ?? 0), readVideoInfo(video[1]) != nil, let size = try? video[0].resourceValues(forKeys:[.fileSizeKey]).fileSize, size > CloudAttachment.videoLimit {
+    throw CloudFailure(LF("Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.", index + 1))
+   }
+   // Nečitelné video se taky nezahodí potichu.
+   if index >= (base?.count ?? 0), fm.fileExists(atPath: video[0].path), readVideoInfo(video[1]) == nil || (try? boundedData(video[0], max: CloudAttachment.videoLimit)) == nil {
+    throw CloudFailure(LF("Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky.", index + 1))
+   }
+   if index >= (base?.count ?? 0), let info = readVideoInfo(video[1]), let mp4 = try? boundedData(video[0], max: CloudAttachment.videoLimit) {
+    try mp4.write(to: staging.appendingPathComponent("\(index + 1).mp4"), options: .atomic)
+    let videoHash = sessionFingerprint(mp4)
+    attachments.append(CloudAttachment(index:index + 1,kind:"video",bytes:mp4.count,sha256:videoHash,durationMs:info.durationMs,width:info.width,height:info.height))
+    for (offset, frame) in info.frames.prefix(RecordingLimits.maxFrames).enumerated() {
+     guard let png = try? boundedData(video[1].appendingPathComponent(frame.file), max: CloudAttachment.frameLimit) else { continue }
+     let item = CloudAttachment(index:index + 1,kind:"frame-\(offset + 1)",bytes:png.count,sha256:sessionFingerprint(png),timestampMs:frame.ms,video:videoHash)
+     try png.write(to: staging.appendingPathComponent(item.filename), options: .atomic)
+     attachments.append(item)
     }
    }
   }
@@ -625,18 +654,24 @@ final class CloudLibrary {
   try fm.createDirectory(at:receipt.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(CommittedUpload(owner:owner,origin:c.endpoint,id:job.sessionID,folder:job.manifest.folder_id,digest:state.manifest_digest)).write(to:receipt,options:.atomic)
   // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
+  var videoRejected: String? = nil
   for item in job.attachments ?? [] {
    let file = directory.appendingPathComponent(item.filename)
-   guard cloudAttachmentAllowed(directory, index: item.index, folder: job.manifest.folder_id) else { continue }
-   guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= CloudAttachment.limit, sessionFingerprint(data) == item.sha256 else { continue }
+   guard CloudAttachment.validKind(item.kind), !item.isContext || cloudAttachmentAllowed(directory, index: item.index, folder: job.manifest.folder_id) else { continue }
+   guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= item.sizeLimit, sessionFingerprint(data) == item.sha256 else { continue }
+   var headers = ["Content-Type":item.contentType,"x-bytes":String(item.bytes),"x-sha256":item.sha256]
+   if let ms = item.timestampMs, let video = item.video { headers["x-timestamp-ms"] = String(ms); headers["x-video-sha256"] = video }
    do {
     _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
-     headers:["Content-Type":"application/json","x-bytes":String(item.bytes),"x-sha256":item.sha256])
+     headers:headers)
    } catch let failure as CloudFailure where [400,402,403,404,413,415].contains(failure.status) || failure.code=="session_trashed" {
     // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu, uživatel dostane hlášku.
-    lastError=LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message)
+    lastError=item.isContext ? LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message):LF("Video položky %ld se do cloudu nenahrálo: %@",item.index,failure.message)
+    if item.kind == "video" { videoRejected = lastError }
    }
   }
+  // Odmítnuté video je jediná kopie záznamu; job se odloží, místo aby se smazal.
+  if let videoRejected { try park(directory, job, reason: videoRejected); return }
   try fm.removeItem(at:directory)
  }
  private func park(_ directory:URL,_ job:CloudJob,reason:String)throws {
@@ -683,7 +718,7 @@ final class CloudLibrary {
    images.append(.init(index:index,bytes:image.bytes,sha256:image.sha256))
    // Přílohy jdou s novým indexem snímku.
    for item in (job.attachments ?? []) where item.index==image.index {
-    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256)
+    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256,timestampMs:item.timestampMs,video:item.video,durationMs:item.durationMs,width:item.width,height:item.height)
     try fm.copyItem(at:directory.appendingPathComponent(item.filename),to:staging.appendingPathComponent(moved.filename));attachments.append(moved)
    }
   }
@@ -751,6 +786,19 @@ final class CloudLibrary {
   for (image,caption) in zip(job.manifest.images,job.manifest.captions) {
    let name="\(image.index).png";try fm.copyItem(at:item.url.appendingPathComponent(name),to:work.appendingPathComponent(name))
    draft.images.append(name);if !caption.isEmpty{draft.imageNotes?[name]=caption}
+   // Video z úlohy (MP4 a snímky) se vrátí vedle posteru, jinak by se ztratilo.
+   let items=(job.attachments ?? []).filter{$0.index==image.index}
+   if let video=items.first(where:{$0.kind=="video"}),let duration=video.durationMs,let width=video.width,let height=video.height,
+      fm.fileExists(atPath:item.url.appendingPathComponent(video.filename).path) {
+    let poster=work.appendingPathComponent(name),sides=videoSidecars(poster)
+    try fm.copyItem(at:item.url.appendingPathComponent(video.filename),to:sides[0]);try fm.createDirectory(at:sides[1],withIntermediateDirectories:true)
+    var frames:[VideoInfo.Frame]=[]
+    for frame in items where frame.kind.hasPrefix("frame-") {
+     guard let ms=frame.timestampMs,fm.fileExists(atPath:item.url.appendingPathComponent(frame.filename).path) else{continue}
+     let file=String(frame.kind.dropFirst(6))+".png";try fm.copyItem(at:item.url.appendingPathComponent(frame.filename),to:sides[1].appendingPathComponent(file));frames.append(.init(file:file,ms:ms))
+    }
+    try JSONEncoder().encode(VideoInfo(durationMs:duration,width:width,height:height,frames:frames.sorted{$0.ms<$1.ms})).write(to:sides[1].appendingPathComponent("video.json"))
+   }
   }
   try finish(draft,root:work,dest:folder)
   try discardParked(item,permanently:true);return folder

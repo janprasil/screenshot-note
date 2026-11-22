@@ -8,6 +8,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  let cloudSettings=CloudSettings()
  var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
+ let recording=RecordingController();var stopEntry:NSMenuItem?;var recordEntry:NSMenuItem?
+ /// Okno prohlížeče v popředí při startu záznamu; kontext se po stopu žádá od něj.
+ private var recordingBrowser:[String:Any]?
+ /// Hotové video čeká na kontext a doručení do konceptu; snímek ani nový záznam zatím ne.
+ private var deliveringRecording=false
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
@@ -47,6 +52,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let icon=NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
    icon?.size=NSSize(width:18,height:18);icon?.isTemplate=true;entry.image=icon
    if symbol=="folder"{folderEntry=entry}
+   if symbol=="square.and.pencil"{addRecordingItems(to:menu)}
    menu.addItem(entry)
    if symbol=="icloud" {
     // Odložené položky fronty jsou vidět i bez otevřeného okna cloudu.
@@ -55,7 +61,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;parked.image=mark;parkedEntry=parked;menu.addItem(parked)
    }
   }
-  updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in self?.capture(full:id == 2)}
+  updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in if id == 3{self?.toggleRecording()}else{self?.capture(full:id == 2)}}
+  recording.onChange={[weak self] in self?.updateRecordingState()}
+  recording.onFinish={[weak self] result in self?.recordingFinished(result)}
   let errors=CommandLine.arguments.contains("--preview-test") ? [] : hotkeys.register();if !errors.isEmpty{DispatchQueue.main.async{showError(errors.joined(separator:"\n"))}}
   DistributedNotificationCenter.default().addObserver(self,selector:#selector(external(_:)),name:NSNotification.Name("cz.janprasil.screenshotnote.capture"),object:nil)
   if CommandLine.arguments.contains("--preview-test"){previewTest()}
@@ -91,6 +99,78 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }
  }
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
+ /// Menu bar: Zastavit záznam (jen během záznamu) a podmenu Nahrát video s cílem a odpočtem.
+ func addRecordingItems(to menu:NSMenu) {
+  func icon(_ symbol:String)->NSImage?{let image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular));image?.size=NSSize(width:18,height:18);image?.isTemplate=true;return image}
+  let stop=NSMenuItem(title:L("Zastavit záznam"),action:#selector(stopRecording),keyEquivalent:"");stop.target=self;stop.image=icon("stop.circle");stop.isHidden=true
+  menu.insertItem(stop,at:0);stopEntry=stop
+  let entry=NSMenuItem(title:L("Nahrát video"),action:nil,keyEquivalent:"");entry.image=icon("record.circle")
+  let sub=NSMenu()
+  for (title,target) in [(L("Celá obrazovka"),RecordingTarget.screen),(L("Okno v popředí"),.window),(L("Vybraná oblast…"),.region)] {
+   let item=NSMenuItem(title:title,action:#selector(recordFromMenu(_:)),keyEquivalent:"");item.target=self;item.representedObject=target.rawValue;sub.addItem(item)
+  }
+  sub.addItem(.separator())
+  for seconds in RecordingLimits.countdowns {
+   let item=NSMenuItem(title:LF("Odpočet %d s",seconds),action:#selector(chooseCountdown(_:)),keyEquivalent:"");item.target=self;item.tag=seconds;sub.addItem(item)
+  }
+  entry.submenu=sub;menu.addItem(entry);recordEntry=entry
+ }
+ @objc func recordFromMenu(_ sender:NSMenuItem){startRecording(RecordingTarget(rawValue:sender.representedObject as? String ?? "") ?? .screen)}
+ @objc func chooseCountdown(_ sender:NSMenuItem){recordingCountdown=sender.tag}
+ @objc func stopRecording(){recording.stop()}
+ /// Zkratka záznamu: spustí naposledy použitý cíl, během záznamu nebo odpočtu ho zastaví.
+ func toggleRecording(){if recording.state != .idle{recording.stop()}else{startRecording(RecordingTarget(rawValue:UserDefaults.standard.string(forKey:"recordingTarget") ?? "") ?? .screen)}}
+ func startRecording(_ target:RecordingTarget) {
+  guard !capturing,!browsingSavedSessions,recording.state == .idle,!deliveringRecording else{return}
+  UserDefaults.standard.set(target.rawValue,forKey:"recordingTarget")
+  composer?.collapseCompact()
+  recordingBrowser=browserCaptureTarget()
+  recording.start(target,output:fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-\(UUID().uuidString).mp4"))
+ }
+ func updateRecordingState() {
+  let active=recording.state != .idle
+  stopEntry?.isHidden = !active;recordEntry?.isEnabled = !active
+  if recording.state == .recording{let seconds=Int(recording.elapsed);stopEntry?.title=LF("Zastavit záznam (%@)",videoDuration(seconds*1000))}
+  else{stopEntry?.title=L("Zastavit záznam")}
+  let symbol=recording.state == .recording ? "record.circle.fill":active ? "timer":"camera.viewfinder"
+  item.button?.image=NSImage(systemSymbolName:symbol,accessibilityDescription:"Screenshot Note")
+  item.button?.contentTintColor=recording.state == .recording ? .systemRed:nil
+ }
+ /// Hotový záznam: poster jako obrázek položky, video a snímky vedle něj, kontext prohlížeče za celou dobu.
+ func recordingFinished(_ result:Result<RecordingResult,Error>?) {
+  guard let result else{composer?.expandCompact();return}
+  let recorded:RecordingResult
+  switch result{case .failure(let error):composer?.expandCompact();showError(error.localizedDescription);return;case .success(let value):recorded=value}
+  // Záznam čeká v dočasné složce; do konceptu se přesune až při doručení, kdy se cíl ověří znovu.
+  let holding=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-recording-"+UUID().uuidString,isDirectory:true)
+  let poster=holding.appendingPathComponent(UUID().uuidString+".png")
+  do{try fm.createDirectory(at:holding,withIntermediateDirectories:true);try storeRecording(recorded,poster:poster)}
+  catch{try? fm.removeItem(at:recorded.video);try? fm.removeItem(at:holding);composer?.expandCompact();showError(error.localizedDescription);return}
+  let topic=composer?.draft.topic ?? (try? readDraft(draftRoot))?.topic
+  let folder=topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
+  let window=recorded.durationMs+(recordingCountdown+5)*1000
+  let browser=recordingBrowser;recordingBrowser=nil
+  let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
+  deliveringRecording=true
+  let deliver={(files:CaptureContextFiles?) in
+   self.deliveringRecording=false
+   defer{try? fm.removeItem(at:holding)}
+   let attached=files.map{(try? $0.write(besides:poster)) != nil} ?? false
+   do {
+    let active=self.composer
+    var draft:Draft;let root:URL
+    if let active{active.snapshotFields();draft=active.draft;root=active.root}else{let copy=try self.workingCopy();draft=copy.0;root=copy.1}
+    let target=root.appendingPathComponent(poster.lastPathComponent)
+    do{for (source,side) in zip([poster]+contextSidecars(poster)+videoSidecars(poster),[target]+contextSidecars(target)+videoSidecars(target)) where fm.fileExists(atPath:source.path){try fm.moveItem(at:source,to:side)}}
+    catch{removeAnnotatedImage(target);if active == nil{try? fm.removeItem(at:root)};throw error}
+    if let active {
+     guard active.appendCapturedImage(target.lastPathComponent,context:attached) else{removeAnnotatedImage(target);active.expandCompact();return}
+     active.snapshotFields();self.autosave(active.draft,root:root);active.expandCompact();active.window.makeKeyAndOrderFront(nil)
+    }else{let before=draft;draft.images.append(target.lastPathComponent);if attached{draft.contexts=(draft.contexts ?? [:]).merging([target.lastPathComponent:target.lastPathComponent+".context.json"]){$1}};self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
+   }catch{self.composer?.expandCompact();showError(error.localizedDescription)}
+  }
+  if let context{context.wait(upTo:1,deliver)}else{deliver(nil)}
+ }
  @objc func openCloudSettings(){cloudSettings.show()}
  @objc func openParked(){Task{@MainActor in FolderDialogs.resolveParked()}}
  @objc func preferences(){settings.show()}
@@ -155,7 +235,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   do{try fm.createDirectory(at:folder,withIntermediateDirectories:true);if !NSWorkspace.shared.open(folder){showError(L("Složku se nepodařilo otevřít: ")+path)}}catch{showError(error.localizedDescription)}
  }
 
- @objc func quit(){if composer != nil || capturing{showError(L("Nejprve ulož nebo zavři rozpracované okno."));return};NSApp.terminate(nil)}
+ @objc func quit(){if composer != nil || capturing || recording.state != .idle || deliveringRecording{showError(L("Nejprve ulož nebo zavři rozpracované okno."));return};NSApp.terminate(nil)}
  func workingCopy() throws -> (Draft,URL){
   var draft=try readDraft(draftRoot)
   // Rozpracovaná relace navázaná na smazanou nebo přesunutou uloženou relaci.
@@ -176,7 +256,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   session=root;return(draft,root)
  }
  @objc func resume(){
-  if let composer=composer{composer.reveal();return};guard !capturing else{return}
+  if let composer=composer{composer.reveal();return};guard !capturing,recording.state == .idle,!deliveringRecording else{return}
   do{
    let(draft,root)=try workingCopy()
    if !draft.images.isEmpty || !draft.comment.isEmpty || !(draft.title ?? "").isEmpty{present(draft,root:root);return}
@@ -204,7 +284,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let active=composer
   let fromOpenComposer = fromComposer || active != nil
   func restoreComposerSize(){if fromOpenComposer{active?.expandCompact()}}
-  guard !capturing && !browsingSavedSessions else{return}
+  // Během záznamu (i jeho dokončení) se snímek nepořizuje, oba by doručily vlastní koncept.
+  guard !capturing && !browsingSavedSessions && recording.state == .idle && !deliveringRecording else{return}
   active?.collapseCompact()
   if !CGPreflightScreenCaptureAccess(){restoreComposerSize();_ = CGRequestScreenCaptureAccess();showError(L("Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť snímání znovu."));NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!);return}
   let screens=NSScreen.screens

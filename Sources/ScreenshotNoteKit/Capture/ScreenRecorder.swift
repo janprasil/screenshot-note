@@ -71,14 +71,14 @@ struct KeyFrameSelector<Frame> {
 }
 
 /// Výsledek záznamu v pracovní složce: MP4, poster (první snímek) a klíčové snímky s časem.
-struct RecordingResult {var video:URL;var durationMs:Int;var width:Int;var height:Int;var poster:CGImage;var frames:[(ms:Int,image:CGImage)]}
+struct RecordingResult {var video:URL;var durationMs:Int;var width:Int;var height:Int;var poster:CGImage;var frames:[(ms:Int,image:CGImage)];var startedAt:Date? = nil}
 
 /// Záznam obrazovky, okna nebo oblasti do MP4 (H.264, 10 fps, ~1,2 Mbit/s).
 final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked Sendable {
  private let queue=DispatchQueue(label:"cz.janprasil.screenshotnote.recording")
  private let writer:AVAssetWriter;private let input:AVAssetWriterInput
  private var stream:SCStream?;private var start:CMTime?;private var selector=KeyFrameSelector<CGImage>()
- private var failure:Error?;private var stopped=false
+ private var failure:Error?;private var stopped=false;private var startedAt:Date?
  private static let images=CIContext(options:[.cacheIntermediates:false])
  let output:URL;let width:Int;let height:Int
  /// Volá se na hlavním vlákně při chybě streamu.
@@ -117,6 +117,8 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
   if start == nil {
    guard writer.startWriting() else{failure=writer.error;return}
    writer.startSession(atSourceTime:time);start=time
+   // Skutečný čas prvního snímku pro časovou osu kontextu z prohlížeče.
+   startedAt=Date().addingTimeInterval(-(CMClockGetTime(CMClockGetHostTimeClock())-time).seconds)
   }
   guard let start else{return}
   let ms=Int(((time-start).seconds*1000).rounded())
@@ -138,7 +140,7 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
  /// Ukončí záznam; délka je čas od prvního snímku do zastavení (nejvýš 60 s).
  func finish()async throws->RecordingResult {
   try? await stream?.stopCapture()
-  let (start,failure,frames)=queue.sync{stopped=true;return (self.start,self.failure,selector.frames)}
+  let (start,failure,frames,startedAt)=queue.sync{stopped=true;return (self.start,self.failure,selector.frames,self.startedAt)}
   guard let start,let first=frames.first,writer.status == .writing else{
    if writer.status == .writing{writer.cancelWriting()};try? FileManager.default.removeItem(at:output)
    throw failure ?? NSError(domain:"ScreenshotNote",code:41,userInfo:[NSLocalizedDescriptionKey:L("Záznam neobsahuje žádný snímek.")])
@@ -149,7 +151,7 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
   await writer.finishWriting()
   guard writer.status == .completed else{try? FileManager.default.removeItem(at:output);throw writer.error ?? failure ?? NSError(domain:"ScreenshotNote",code:42)}
   let duration=Int(((CMTimeMaximum(end,start+CMTime(value:1,timescale:RecordingLimits.fps))-start).seconds*1000).rounded())
-  return RecordingResult(video:output,durationMs:duration,width:width,height:height,poster:first.frame,frames:frames.map{($0.ms,$0.frame)})
+  return RecordingResult(video:output,durationMs:duration,width:width,height:height,poster:first.frame,frames:frames.map{($0.ms,$0.frame)},startedAt:startedAt)
  }
  func cancel() {
   Task{try? await stream?.stopCapture();queue.sync{stopped=true};if writer.status == .writing{writer.cancelWriting()};try? FileManager.default.removeItem(at:output)}
@@ -160,6 +162,8 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
 struct VideoInfo:Codable,Equatable {
  struct Frame:Codable,Equatable{var file:String;var ms:Int}
  var durationMs:Int;var width:Int;var height:Int;var frames:[Frame]
+ /// Začátek záznamu (epoch ms); starší videa ho nemají.
+ var startedAtMs:Int64? = nil
 }
 /// Video položky leží vedle posteru: `<poster>.mp4` a složka `<poster>.frames/` s PNG snímky a video.json.
 func videoSidecars(_ image:URL)->[URL]{[image.appendingPathExtension("mp4"),image.appendingPathExtension("frames")]}
@@ -184,7 +188,7 @@ func storeRecording(_ result:RecordingResult,poster:URL)throws {
  try? fm.removeItem(at:sides[1]);try fm.createDirectory(at:sides[1],withIntermediateDirectories:true)
  var frames:[VideoInfo.Frame]=[]
  for (offset,frame) in result.frames.enumerated(){let name="\(offset+1).png";try writePNG(frame.image,to:sides[1].appendingPathComponent(name));frames.append(.init(file:name,ms:frame.ms))}
- try JSONEncoder().encode(VideoInfo(durationMs:result.durationMs,width:result.width,height:result.height,frames:frames)).write(to:sides[1].appendingPathComponent("video.json"),options:.atomic)
+ try JSONEncoder().encode(VideoInfo(durationMs:result.durationMs,width:result.width,height:result.height,frames:frames,startedAtMs:result.startedAt.map{Int64(($0.timeIntervalSince1970*1000).rounded())})).write(to:sides[1].appendingPathComponent("video.json"),options:.atomic)
 }
 func writePNG(_ image:CGImage,to url:URL)throws {
  guard let target=CGImageDestinationCreateWithURL(url as CFURL,UTType.png.identifier as CFString,1,nil) else{throw NSError(domain:"ScreenshotNote",code:43)}
@@ -201,7 +205,7 @@ func remoteVideoInfo(_ attachments:[RemoteNote.Image.Attachment],downloaded:Set<
    let ms=item.media?.timestamp_ms,(0...60500).contains(ms) else{return nil}
   return .init(file:"\(number).png",ms:ms)
  }.sorted{$0.ms<$1.ms}
- return VideoInfo(durationMs:duration,width:width,height:height,frames:frames)
+ return VideoInfo(durationMs:duration,width:width,height:height,frames:frames,startedAtMs:video.started_at_ms)
 }
 /// Název v assets/ je obsazený i cizím videem (`.mp4`, `.frames`), ne jen obrázkem.
 func assetStemTaken(_ assets:URL,_ stem:String)->Bool{["png","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(stem+"."+$0).path)}}

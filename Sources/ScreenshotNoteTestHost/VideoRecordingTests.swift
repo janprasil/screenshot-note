@@ -64,10 +64,13 @@ import AppKit
  let image=CGContext(data:nil,width:8,height:6,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
  let movie=root.appendingPathComponent("raw.mp4");try Data([0,0,0,8]).write(to:movie)
  let poster=root.appendingPathComponent("A.png")
- try storeRecording(RecordingResult(video:movie,durationMs:4200,width:8,height:6,poster:image,frames:[(0,image),(2100,image)]),poster:poster)
+ try storeRecording(RecordingResult(video:movie,durationMs:4200,width:8,height:6,poster:image,frames:[(0,image),(2100,image)],startedAt:Date(timeIntervalSince1970:1_800_000_000.25)),poster:poster)
  let sides=videoSidecars(poster)
  assert(fm.fileExists(atPath:poster.path) && fm.fileExists(atPath:sides[0].path) && !fm.fileExists(atPath:movie.path))
- assert(readVideoInfo(sides[1])==VideoInfo(durationMs:4200,width:8,height:6,frames:[.init(file:"1.png",ms:0),.init(file:"2.png",ms:2100)]))
+ assert(readVideoInfo(sides[1])==VideoInfo(durationMs:4200,width:8,height:6,frames:[.init(file:"1.png",ms:0),.init(file:"2.png",ms:2100)],startedAtMs:1_800_000_000_250))
+ // Starší video.json bez začátku záznamu se načte.
+ let legacyInfo=try JSONDecoder().decode(VideoInfo.self,from:Data("{\"durationMs\":1,\"width\":1,\"height\":1,\"frames\":[]}".utf8))
+ assert(legacyInfo.startedAtMs==nil)
  assert(fm.fileExists(atPath:sides[1].appendingPathComponent("2.png").path))
  // Kopie a odebrání položky berou video s sebou.
  let copy=root.appendingPathComponent("B.png");try fm.copyItem(at:poster,to:copy);try copyAnnotationSidecar(from:poster,to:copy)
@@ -83,10 +86,10 @@ import AppKit
  assert(screenshotsWithContext(["S-1.png","S-2.png"],["Popis 1","Popis 2"],assets:assets).screenshots==videoParity)
  // Stažení z cloudu: MP4, snímky podle času, video.json a hash pro index; bez videa se smaže.
  let mp4=Data([0,0,0,24]),frame=Data([137,80,78,71])
- let attachments:[RemoteNote.Image.Attachment]=[.init(kind:"frame-2",bytes:4,sha256:"",path:"",media:.init(timestamp_ms:900)),.init(kind:"video",bytes:4,sha256:"",path:"",media:.init(duration_ms:5000,width:640,height:360)),
+ let attachments:[RemoteNote.Image.Attachment]=[.init(kind:"frame-2",bytes:4,sha256:"",path:"",media:.init(timestamp_ms:900)),.init(kind:"video",bytes:4,sha256:"",path:"",media:.init(duration_ms:5000,width:640,height:360,started_at_ms:1_800_000_000_000)),
   .init(kind:"frame-1",bytes:4,sha256:"",path:"",media:.init(timestamp_ms:0)),.init(kind:"frame-3",bytes:4,sha256:"",path:"",media:.init(timestamp_ms:50))]
  let remote=remoteVideoInfo(attachments,downloaded:["video","frame-1","frame-2"])!
- assert(remote==VideoInfo(durationMs:5000,width:640,height:360,frames:[.init(file:"1.png",ms:0),.init(file:"2.png",ms:900)]))
+ assert(remote==VideoInfo(durationMs:5000,width:640,height:360,frames:[.init(file:"1.png",ms:0),.init(file:"2.png",ms:900)],startedAtMs:1_800_000_000_000))
  assert(remoteVideoInfo(attachments.filter{$0.kind != "video"},downloaded:["frame-1"])==nil)
  let synced=root.appendingPathComponent("synced",isDirectory:true);try fm.createDirectory(at:synced,withIntermediateDirectories:true)
  let remoteJSON=try JSONEncoder().encode(remote)
@@ -115,7 +118,7 @@ import AppKit
  assert(CloudAttachment(index:1,kind:"har",bytes:1,sha256:"").filename=="1.har" && CloudAttachment(index:1,kind:"context",bytes:1,sha256:"").contentType=="application/json")
  assert(["context","har","video","frame-1","frame-12"].allSatisfy(CloudAttachment.validKind) && !["frame-13","frame-0","poster","mp4"].contains(where:CloudAttachment.validKind))
  // Starší job bez nových polí se načte beze změny.
- let sized=CloudAttachment(index:1,kind:"video",bytes:1,sha256:"a",durationMs:4200,width:640,height:360)
+ let sized=CloudAttachment(index:1,kind:"video",bytes:1,sha256:"a",durationMs:4200,width:640,height:360,startedAtMs:1_800_000_000_000)
  let roundTrip=try JSONDecoder().decode(CloudAttachment.self,from:JSONEncoder().encode(sized))
  assert(roundTrip==sized)
  let legacy=try JSONDecoder().decode(CloudAttachment.self,from:Data("{\"index\":1,\"kind\":\"har\",\"bytes\":1,\"sha256\":\"x\"}".utf8))

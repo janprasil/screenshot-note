@@ -44,7 +44,7 @@ struct RemoteNote:Codable,Equatable {
   /// Přílohy kontextu z prohlížeče; prázdný seznam je nil, aby se otisk relací bez kontextu nezměnil.
   /// media: video {duration_ms,width,height}, snímek {timestamp_ms}; kontext ho nemá.
   struct Attachment:Codable,Equatable{
-   struct Media:Codable,Equatable{var duration_ms:Int?=nil;var width:Int?=nil;var height:Int?=nil;var timestamp_ms:Int?=nil}
+   struct Media:Codable,Equatable{var duration_ms:Int?=nil;var width:Int?=nil;var height:Int?=nil;var timestamp_ms:Int?=nil;var started_at_ms:Int64?=nil}
    let kind:String;let bytes:Int;let sha256:String;let path:String;var media:Media?=nil
   }
   var attachments:[Attachment]? = nil

@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 enum RecordingLimits {
  static let fps:Int32=10
  static let maxSide=1280
- static let bitrate=1_200_000
+ // 1 Mbit/s: 60 s se i s režií kontejneru vejde do 8 MiB limitu webu.
+ static let bitrate=1_000_000
  static let maxDuration:TimeInterval=60
  static let maxFrames=12
  static let countdowns=[3,5,10]
@@ -170,6 +171,10 @@ func readVideoInfo(_ frames:URL)->VideoInfo? {
   (1...Int(RecordingLimits.maxDuration*1000+500)).contains(info.durationMs),info.frames.count<=RecordingLimits.maxFrames,
   info.frames.allSatisfy({$0.file.range(of:"^([1-9]|1[0-2])\\.png$",options:.regularExpression) != nil && (0...60500).contains($0.ms)}) else{return nil}
  return info
+}
+/// Video z assets/ do pracovní složky vedle převzatého posteru.
+func importAssetVideo(assets:URL,image:String,to destination:URL)throws {
+ for (source,side) in zip(assetVideoFiles(assets,image),videoSidecars(destination)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try fm.copyItem(at:source,to:side)}
 }
 /// Uloží výsledek záznamu vedle posteru v pracovní složce.
 func storeRecording(_ result:RecordingResult,poster:URL)throws {

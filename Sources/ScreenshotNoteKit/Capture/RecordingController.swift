@@ -12,7 +12,7 @@ func displaySourceRect(_ rect:CGRect,screen:CGRect)->CGRect {
 final class RegionSelector:NSWindow {
  private var origin:NSPoint?;private var completion:((CGRect?)->Void)?
  private let selection=CAShapeLayer()
- static func choose(on screen:NSScreen,_ completion:@escaping (CGRect?)->Void) {
+ @discardableResult static func choose(on screen:NSScreen,_ completion:@escaping (CGRect?)->Void)->RegionSelector {
   let window=RegionSelector(contentRect:screen.frame,styleMask:.borderless,backing:.buffered,defer:false)
   window.completion=completion;window.level = .screenSaver;window.isOpaque=false;window.backgroundColor=NSColor.black.withAlphaComponent(0.25)
   window.ignoresMouseEvents=false;window.isReleasedWhenClosed=false;window.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
@@ -21,7 +21,10 @@ final class RegionSelector:NSWindow {
   view.layer?.addSublayer(window.selection);window.contentView=view
   window.setFrame(screen.frame,display:true);NSApp.activate(ignoringOtherApps:true);window.makeKeyAndOrderFront(nil)
   NSCursor.crosshair.push()
+  return window
  }
+ /// Zrušení zvenku (zkratka během výběru): bez volání completion.
+ func cancel(){guard completion != nil else{return};completion=nil;NSCursor.pop();orderOut(nil)}
  override var canBecomeKey:Bool{true}
  override func mouseDown(with event:NSEvent){origin=event.locationInWindow}
  override func mouseDragged(with event:NSEvent){guard let origin else{return};selection.path=CGPath(rect:rect(origin,event.locationInWindow),transform:nil)}
@@ -31,7 +34,7 @@ final class RegionSelector:NSWindow {
  }
  override func keyDown(with event:NSEvent){if event.keyCode==53{finish(nil)}else{super.keyDown(with:event)}}
  private func rect(_ a:NSPoint,_ b:NSPoint)->CGRect{CGRect(x:min(a.x,b.x),y:min(a.y,b.y),width:abs(a.x-b.x),height:abs(a.y-b.y))}
- private func finish(_ result:CGRect?){NSCursor.pop();orderOut(nil);let done=completion;completion=nil;done?(result)}
+ private func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;NSCursor.pop();orderOut(nil);done(result)}
 }
 
 /// Odpočet uprostřed obrazovky; okno se do záznamu nedostane (filtr vynechá vlastní aplikaci).
@@ -59,9 +62,9 @@ final class CountdownOverlay {
 /// Záznam: výběr cíle, odpočet, start a stop (zkratkou, z menu baru nebo po 60 s).
 /// Volá se jen z hlavního vlákna (menu, zkratka, časovače).
 final class RecordingController {
- enum State {case idle,preparing,counting,recording}
+ enum State {case idle,preparing,counting,recording,finishing}
  private(set) var state:State = .idle
- private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var limit:Timer?;private var ticker:Timer?
+ private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelector?;private var limit:Timer?;private var ticker:Timer?
  private(set) var startedAt:Date?
  /// Změna stavu pro menu bar (ikona, položka Zastavit).
  var onChange:(()->Void)?
@@ -77,12 +80,14 @@ final class RecordingController {
   let front=target == .window ? frontWindowID():nil
   state = .preparing;onChange?()
   let proceed={(region:CGRect?) in
+   // Zastavení během výběru oblasti už stav vrátilo.
+   guard self.state == .preparing else{return}
    if target == .region && region == nil{self.reset();self.onFinish?(nil);return}
    self.state = .counting;self.onChange?()
    let overlay=CountdownOverlay();self.countdown=overlay
    overlay.run(seconds:recordingCountdown,on:screen){Task{@MainActor in await self.begin(target,screen:screen,region:region,window:front,output:output)}}
   }
-  if target == .region{RegionSelector.choose(on:screen,proceed)}else{proceed(nil)}
+  if target == .region{selector=RegionSelector.choose(on:screen){[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
  }
 
  private func begin(_ target:RecordingTarget,screen:NSScreen,region:CGRect?,window:CGWindowID?,output:URL)async {
@@ -117,15 +122,16 @@ final class RecordingController {
  /// Zastaví záznam nebo zruší odpočet.
  func stop() {
   switch state {
-  case .counting,.preparing:countdown?.close();countdown=nil;reset();onFinish?(nil)
+  case .counting,.preparing:countdown?.close();countdown=nil;selector?.cancel();selector=nil;reset();onFinish?(nil)
   case .recording:
    guard let recorder else{reset();return}
-   self.recorder=nil;limit?.invalidate();ticker?.invalidate()
+   // Další stop během dokončení se ignoruje; nový záznam jde až po doručení výsledku.
+   self.recorder=nil;state = .finishing;limit?.invalidate();ticker?.invalidate();onChange?()
    Task{@MainActor in
     let result=await Result{try await recorder.finish()}
     self.reset();self.onFinish?(result)
    }
-  case .idle:break
+  case .idle,.finishing:break
   }
  }
  private func reset(){state = .idle;startedAt=nil;limit?.invalidate();ticker?.invalidate();limit=nil;ticker=nil;onChange?()}

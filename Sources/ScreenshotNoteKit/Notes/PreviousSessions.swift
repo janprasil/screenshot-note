@@ -265,6 +265,7 @@ func workingDraft(from session:PreviousSession,topic:Topic,root:URL,queuedEdit:(
    let destination=root.appendingPathComponent(name);try fm.copyItem(at:assets.appendingPathComponent(image),to:destination);images.append(name)
    try copyAnnotationSidecar(from:assets.appendingPathComponent(image),to:destination);target.imported[name]=image;notes[name]=session.imageNotes[image]
    if try importAssetContext(assets:assets,image:image,to:destination){contexts[name]=name+".context.json"}
+   try importAssetVideo(assets:assets,image:image,to:destination)
   }
  }catch{for name in images{removeAnnotatedImage(root.appendingPathComponent(name))};throw error}
  var draft=Draft(images:images,comment:session.comment,title:session.title,topic:topic,previous:target,imageNotes:notes)

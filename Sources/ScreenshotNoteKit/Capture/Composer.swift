@@ -249,7 +249,7 @@ final class Composer:NSObject,NSWindowDelegate {
     let name=UUID().uuidString+".png";let target=root.appendingPathComponent(name);try data.write(to:target,options:.withoutOverwriting);importedNames.append(name);try copyAnnotationSidecar(from:source,to:target);imported[name]=image;notes[name]=chosen.imageNotes[image]
     if try importAssetContext(assets:assets,image:image,to:target){contexts[name]=name+".context.json"}
     // Video zůstane u položky i po úpravě posteru.
-    for (source,side) in zip(assetVideoFiles(assets,image),videoSidecars(target)) where fm.fileExists(atPath:source.path){try fm.copyItem(at:source,to:side)}
+    try importAssetVideo(assets:assets,image:image,to:target)
    }
   }catch{for name in importedNames{removeAnnotatedImage(root.appendingPathComponent(name))};showError(error.localizedDescription);restorePreviousSelection();return}
   draft.images=importedNames+fresh;draft.imageNotes=notes;draft.contexts=contexts.isEmpty ? nil:contexts;var target=chosen.target;target.imported=imported;draft.previous=target;draft.removedContexts=nil

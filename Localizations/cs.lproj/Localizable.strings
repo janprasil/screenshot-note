@@ -580,3 +580,4 @@
 "Záznam videa (start/stop)" = "Záznam videa (start/stop)";
 "Záznam videa se nepodařilo připravit." = "Záznam videa se nepodařilo připravit.";
 "Záznam začne za %d s" = "Záznam začne za %d s";
+"Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.";

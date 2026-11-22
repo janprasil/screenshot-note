@@ -276,6 +276,10 @@ final class CloudLibrary {
    }
    // Video nové položky: MP4 a klíčové snímky s časem; nezávisí na politice kontextu z prohlížeče.
    let video = videoSidecars(root.appendingPathComponent(filename))
+   // Video nad limit cloudu nezahodíme potichu: uložení selže a koncept zůstane.
+   if index >= (base?.count ?? 0), readVideoInfo(video[1]) != nil, let size = try? video[0].resourceValues(forKeys:[.fileSizeKey]).fileSize, size > CloudAttachment.videoLimit {
+    throw CloudFailure(LF("Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.", index + 1))
+   }
    if index >= (base?.count ?? 0), let info = readVideoInfo(video[1]), let mp4 = try? boundedData(video[0], max: CloudAttachment.videoLimit) {
     try mp4.write(to: staging.appendingPathComponent("\(index + 1).mp4"), options: .atomic)
     let videoHash = sessionFingerprint(mp4)

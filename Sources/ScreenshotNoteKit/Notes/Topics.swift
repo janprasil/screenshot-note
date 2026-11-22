@@ -5,6 +5,8 @@ struct Topic:Codable,Equatable {
  var cloudFolderID:UUID? = nil;var cloudOwnerID:UUID? = nil;var cloudOrigin:String? = nil
  // Šablona celého společného souboru; nil znamená výchozí.
  var combinedTemplate:String? = nil
+ // Šablony komentáře a obrázku; nil znamená vestavěnou.
+ var commentTemplate:String? = nil;var imageTemplate:String? = nil
  // Dřívější cloudová složka po odhlášení; slouží k nabídce znovupropojení.
  var formerCloudFolderID:UUID? = nil;var formerCloudOwnerID:UUID? = nil;var formerCloudOrigin:String? = nil
  // Jen pro cloudovou složku na tomto Macu: false = smazání z disku jde do Koše bez dotazu.
@@ -127,7 +129,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  private(set) var pencil:AppButton!;let star=StarButton();private let nameShell=AdaptiveInputBackground(frame:.zero);private let nameClick=NSClickGestureRecognizer()
  private var fileLabel:NSTextField!;private(set) var syncCaption:NSTextField!
  let name=CenteredTextField(),detail=CenteredTextField(),folder=CenteredTextField(),file=CenteredTextField()
- var template=defaultMarkdownTemplate;var fileTemplate:String?
+ var template=defaultMarkdownTemplate;var fileTemplate:String?;var commentTemplate:String?;var imageTemplate:String?
  var pendingDefault=false
  // Nová složka dostane kopii výchozích šablon.
  var defaults=TemplateDefaults.shared
@@ -200,7 +202,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
-  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy()
+  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy()
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
  }
@@ -253,7 +255,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   syncButton.needsDisplay=true
  }
  @objc func addTopic(){
-  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;contextPolicy=ContextPolicy();table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
+  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;commentTemplate=defaults.comment;imageTemplate=defaults.image;contextPolicy=ContextPolicy();table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
   name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();beginNameEdit()
  }
  @objc func syncSelected(){
@@ -284,19 +286,27 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  }
  /// Výchozí šablony pro nové složky; s účtem se ukládají na server.
  @objc func editDefaults(){
-  var values=[defaults.effectiveSession,defaults.effectiveFile];var selected=0
-  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:[(L("Šablona relace"),values[0],sessionTemplateHint),(L("Šablona souboru"),values[1],fileTemplateHint)],selected:selected,apply:L("Uložit")){
+  var values=[defaults.effectiveSession,defaults.effectiveFile,defaults.comment ?? defaultCommentTemplate,defaults.image ?? defaultImageTemplate];var selected=0
+  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:[(L("Šablona relace"),values[0],sessionTemplateHint),(L("Šablona souboru"),values[1],fileTemplateHint),(L("Komentář"),values[2],commentTemplateHint),(L("Obrázek"),values[3],imageTemplateHint)],selected:selected,apply:L("Uložit")){
    values=edited
    guard TemplateDefaults.valid(session:values[0],file:values[1]) else{selected=["{title}","{screenshots}","{text}"].allSatisfy{values[0].contains($0)} ? 1:0;showError(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."));continue}
+   if let problem=itemTemplateProblem(values[2],values[3]){selected=problem.0;showError(problem.1);continue}
    let chosen=values
-   Task{@MainActor in do{try await self.defaults.save(session:chosen[0],file:chosen[1]);self.showStatus(L("Výchozí šablony byly uloženy."))}catch{showError(error.localizedDescription)}}
+   Task{@MainActor in do{try await self.defaults.save(session:chosen[0],file:chosen[1],comment:chosen[2],image:chosen[3]);self.showStatus(L("Výchozí šablony byly uloženy."))}catch{showError(error.localizedDescription)}}
    break
   }
   window.makeKeyAndOrderFront(nil)
  }
+ /// Chyba šablon položek pro editor: index záložky (komentář 2, obrázek 3) a text.
+ private func itemTemplateProblem(_ comment:String,_ image:String)->(Int,String)? {
+  if !checkItemTemplate("comment",comment).valid{return (2,LF("Šablona komentáře musí mít 1–%ld znaků.",itemTemplateMaxLength))}
+  if !checkItemTemplate("image",image).valid{return (3,L("Šablona obrázku musí obsahovat {image}."))}
+  return nil
+ }
  /// Potvrzení změny šablony u existujících relací složky.
- private func confirmTemplateChange(_ original:Topic,template:String?,file:String?)->Bool {
-  guard (original.markdownTemplate ?? defaultMarkdownTemplate) != (template ?? defaultMarkdownTemplate) || (original.combinedTemplate ?? defaultCombinedTemplate) != (file ?? defaultCombinedTemplate) else{return true}
+ private func confirmTemplateChange(_ original:Topic,template:String?,file:String?,comment:String?=nil,image:String?=nil)->Bool {
+  guard (original.markdownTemplate ?? defaultMarkdownTemplate) != (template ?? defaultMarkdownTemplate) || (original.combinedTemplate ?? defaultCombinedTemplate) != (file ?? defaultCombinedTemplate)
+   || original.commentTemplate != comment || original.imageTemplate != image else{return true}
   let count=indexedSessionCount(original);guard count>0,!isExportingDesign else{return true}
   let alert=NSAlert();alert.messageText=LP(count,"Šablona se použije na %ld relaci ve složce %@.","Šablona se použije na všechny %ld relace ve složce %@.","Šablona se použije na všech %ld relací ve složce %@.",count,original.name)
   alert.addButton(withTitle:L("Použít"));alert.addButton(withTitle:L("Zrušit"))
@@ -367,21 +377,21 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  }
  @objc func chooseFolder(){let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;if !folder.stringValue.isEmpty{panel.directoryURL=URL(fileURLWithPath:folder.stringValue)};if panel.runModal() == .OK,let url=panel.url{folder.stringValue=url.path}}
  @objc func editTemplate(){
-  let sessionHint=sessionTemplateHint,sessionError=L("Šablona musí obsahovat {title}, {screenshots} a {text}.")
+  let sessionError=L("Šablona musí obsahovat {title}, {screenshots} a {text}.")
   func validSession(_ value:String)->Bool{["{title}","{screenshots}","{text}"].allSatisfy{value.contains($0)}}
-  if mode.indexOfSelectedItem==0 {
-   var value=template
-   while let edited=MarkdownEditor().run(value,title:L("Šablona Markdownu"),hint:sessionHint,apply:L("Použít šablonu")){
-    value=edited;if validSession(value){template=value;break};showError(sessionError)
-   }
-  } else {
-   var values=[template,fileTemplate ?? defaultCombinedTemplate];var selected=0
-   while let edited=MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),values[0],sessionHint),(L("Šablona souboru"),values[1],fileTemplateHint)],selected:selected,apply:L("Použít šablonu")){
-    values=edited
-    if !validSession(values[0]){selected=0;showError(sessionError);continue}
-    if !validCombinedTemplate(values[1]){selected=1;showError(L("Šablona souboru musí obsahovat {sessions} právě jednou."));continue}
-    template=values[0];fileTemplate=values[1]==defaultCombinedTemplate ? nil:values[1];break
-   }
+  // Záložky: relace, soubor (jen společný soubor), komentář a obrázek.
+  let combined=mode.indexOfSelectedItem==1,offset=combined ? 1:0
+  var values=[template]+(combined ? [fileTemplate ?? defaultCombinedTemplate]:[])+[commentTemplate ?? defaultCommentTemplate,imageTemplate ?? defaultImageTemplate];var selected=0
+  var tabs=[(L("Šablona relace"),values[0],sessionTemplateHint)]
+  if combined{tabs.append((L("Šablona souboru"),values[1],fileTemplateHint))}
+  tabs+=[(L("Komentář"),values[1+offset],commentTemplateHint),(L("Obrázek"),values[2+offset],imageTemplateHint)]
+  while let edited=MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:tabs.enumerated().map{($0.element.0,values[$0.offset],$0.element.2)},selected:selected,apply:L("Použít šablonu")){
+   values=edited
+   if !validSession(values[0]){selected=0;showError(sessionError);continue}
+   if combined,!validCombinedTemplate(values[1]){selected=1;showError(L("Šablona souboru musí obsahovat {sessions} právě jednou."));continue}
+   if let problem=itemTemplateProblem(values[1+offset],values[2+offset]){selected=problem.0-1+offset;showError(problem.1);continue}
+   template=values[0];if combined{fileTemplate=values[1]==defaultCombinedTemplate ? nil:values[1]}
+   commentTemplate=values[1+offset]==defaultCommentTemplate ? nil:values[1+offset];imageTemplate=values[2+offset]==defaultImageTemplate ? nil:values[2+offset];break
   }
   window.makeKeyAndOrderFront(nil)
  }
@@ -403,7 +413,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    }
    var changed=original;changed.name=title;changed.detail=detail.stringValue;changed.combined=mode.indexOfSelectedItem==1;changed.combinedFile=filename
    changed.markdownTemplate=original.markdownTemplate==nil && template==defaultMarkdownTemplate ? nil:template;changed.combinedTemplate=fileTemplate
-   guard confirmTemplateChange(original,template:changed.markdownTemplate,file:changed.combinedTemplate) else{return}
+   changed.commentTemplate=commentTemplate;changed.imageTemplate=imageTemplate
+   guard confirmTemplateChange(original,template:changed.markdownTemplate,file:changed.combinedTemplate,comment:changed.commentTemplate,image:changed.imageTemplate) else{return}
    do{if original.folder != path{try CloudFolders.shared.setFolder(original,path:path)}}catch{showError(error.localizedDescription);return}
    changed.folder=path
    guard changed != (list.first{$0.id==editingID}.map{var value=$0;value.folder=path;return value}) else{list=Topics.all;reloadTable();showStatus(L("Konfigurace byla uložena."));refreshCloud();return}
@@ -417,17 +428,18 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    return
   }
   var topic=Topic(id:editingID ?? UUID().uuidString,name:title,detail:detail.stringValue,folder:path,combined:mode.indexOfSelectedItem==1,combinedFile:filename,markdownTemplate:template,combinedTemplate:fileTemplate)
+  topic.commentTemplate=commentTemplate;topic.imageTemplate=imageTemplate
   topic.contextPolicy=contextPolicy==ContextPolicy() ? nil:contextPolicy
   let previous=list.first{$0.id==topic.id && $0.cloudFolderID==nil}
   if let previous{topic.formerCloudFolderID=previous.formerCloudFolderID;topic.formerCloudOwnerID=previous.formerCloudOwnerID;topic.formerCloudOrigin=previous.formerCloudOrigin}
-  if let previous,!confirmTemplateChange(previous,template:topic.markdownTemplate,file:topic.combinedTemplate){return}
+  if let previous,!confirmTemplateChange(previous,template:topic.markdownTemplate,file:topic.combinedTemplate,comment:topic.commentTemplate,image:topic.imageTemplate){return}
   var updated=list.filter{$0.cloudFolderID==nil}
   if let i=updated.firstIndex(where:{$0.id==topic.id}){updated[i]=topic}else{updated.append(topic)}
   let defaultValue=pendingDefault ? topic.id:(UserDefaults.standard.string(forKey:"defaultTopic") ?? Topics.defaultTopic.id)
   do {
    try Topics.save(updated,defaultID:defaultValue);list=Topics.all;editingID=topic.id;reloadTable();load(topic);showStatus(L("Konfigurace byla uložena."))
    // Změněná šablona se použije na všechny relace složky.
-   if let previous,previous.markdownTemplate != topic.markdownTemplate || previous.combinedTemplate != topic.combinedTemplate || (topic.combined && (previous.name != topic.name || previous.detail != topic.detail)) {
+   if let previous,previous.markdownTemplate != topic.markdownTemplate || previous.combinedTemplate != topic.combinedTemplate || previous.imageTemplate != topic.imageTemplate || (topic.combined && (previous.name != topic.name || previous.detail != topic.detail)) {
     let result=rerenderFolder(topic,previous:previous)
     if result.edited>0{showStatus(LP(result.edited,"%ld relace byla ručně upravena, nová verze je uložená vedle (_template).","%ld relace byly ručně upraveny, nová verze je uložená vedle (_template).","%ld relací bylo ručně upraveno, nová verze je uložená vedle (_template).",result.edited),warning:true)}
    }

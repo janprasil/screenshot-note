@@ -437,7 +437,7 @@
 "Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají." = "The session “%@” can’t be restored in the cloud: in a team folder only its author or an admin can restore it. Local files stay.";
 "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce." = "Deletions in folder %@ stay on this Mac only: other members’ sessions in a team folder can be moved to the Trash only by their author or an admin.";
 "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@." = "Folder %@ is no longer available. The draft session will be saved to the default folder %@.";
-"Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}" = "Variables: {title}, {screenshots}, {text}, {comments}, {author}, {context}";
+"Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}, {issues}" = "Variables: {title}, {screenshots}, {text}, {comments}, {author}, {context}, {issues}";
 "Týmová složka %@: %@" = "Team folder %@: %@";
 "Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru." = "Only the author or an admin can edit the session “%@” in a team folder. Your edit stays in the local file only.";
 "Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci." = "Only the author or an admin can add screenshots to another member’s session in a team folder. Save them as a new session.";
@@ -559,3 +559,8 @@
 "Sbalit na jeden řádek" = "Collapse to one line";
 "Přidat komentář" = "Add comment";
 "Upravit komentář" = "Edit comment";
+"Obrázek" = "Image";
+"Šablona obrázku musí obsahovat {image}." = "The image template must contain {image}.";
+"Šablona komentáře musí mít 1–%ld znaků." = "The comment template must have 1–%ld characters.";
+"Proměnné: {text}, {name}, {date} (podle jazyka aplikace)" = "Variables: {text}, {name}, {date} (in the app language)";
+"Proměnné: {image} (povinná), {description}, {comments}, {number}, {context}, {elements}" = "Variables: {image} (required), {description}, {comments}, {number}, {context}, {elements}";

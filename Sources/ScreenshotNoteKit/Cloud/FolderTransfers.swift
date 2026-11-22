@@ -61,7 +61,7 @@ final class FolderTransfers {
    try fm.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
    defer{try? fm.removeItem(at:root)}
    var draft=try workingDraft(from:session,topic:source,root:root)
-   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;draft.topic=frozen;draft.previous=nil
+   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;frozen.commentTemplate=source.commentTemplate;frozen.imageTemplate=source.imageTemplate;draft.topic=frozen;draft.previous=nil
    try library.enqueue(draft,root:root,sessionID:entry.id,folders:folders.topics)
    await Task.yield()
   }
@@ -144,6 +144,9 @@ enum FolderDialogs {
     // Nová cloudová složka převezme nastavení lokální složky.
     if let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.detail.isEmpty,!moved.combined,moved.markdownTemplate==nil,moved.combinedTemplate==nil {
      var settings=moved;settings.detail=source.detail;settings.combined=source.combined;settings.combinedFile=source.combinedFile;settings.markdownTemplate=source.markdownTemplate;settings.combinedTemplate=source.combinedTemplate
+     // Šablony položek jen místo zděděných výchozích; vlastní šablony cílové složky zůstanou.
+     if moved.commentTemplate==nil || moved.commentTemplate==TemplateDefaults.shared.comment{settings.commentTemplate=source.commentTemplate}
+     if moved.imageTemplate==nil || moved.imageTemplate==TemplateDefaults.shared.image{settings.imageTemplate=source.imageTemplate}
      if settings != moved{_ = try? await CloudFolders.shared.update(settings)}
     }
    }catch{showError(error.localizedDescription)}

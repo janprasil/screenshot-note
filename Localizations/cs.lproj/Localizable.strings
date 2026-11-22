@@ -437,7 +437,7 @@
 "Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají." = "Relaci „%@“ nelze obnovit v cloudu: v týmové složce ji smí obnovit jen autor nebo správce. Místní soubory zůstávají.";
 "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce." = "Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce.";
 "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@." = "Složka %@ už není dostupná. Rozpracovaná relace se uloží do výchozí složky %@.";
-"Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}" = "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}";
+"Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}, {issues}" = "Proměnné: {title}, {screenshots}, {text}, {comments}, {author}, {context}, {issues}";
 "Týmová složka %@: %@" = "Týmová složka %@: %@";
 "Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru." = "Relaci „%@“ v týmové složce smí upravit jen autor nebo správce. Úprava zůstala jen v místním souboru.";
 "Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci." = "Do cizí relace v týmové složce smí snímky přidat jen autor nebo správce. Ulož je jako novou relaci.";
@@ -559,3 +559,8 @@
 "Sbalit na jeden řádek" = "Sbalit na jeden řádek";
 "Přidat komentář" = "Přidat komentář";
 "Upravit komentář" = "Upravit komentář";
+"Obrázek" = "Obrázek";
+"Šablona obrázku musí obsahovat {image}." = "Šablona obrázku musí obsahovat {image}.";
+"Šablona komentáře musí mít 1–%ld znaků." = "Šablona komentáře musí mít 1–%ld znaků.";
+"Proměnné: {text}, {name}, {date} (podle jazyka aplikace)" = "Proměnné: {text}, {name}, {date} (podle jazyka aplikace)";
+"Proměnné: {image} (povinná), {description}, {comments}, {number}, {context}, {elements}" = "Proměnné: {image} (povinná), {description}, {comments}, {number}, {context}, {elements}";

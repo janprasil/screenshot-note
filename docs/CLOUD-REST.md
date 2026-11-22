@@ -138,6 +138,12 @@ new fields are additive and behind server flags `TEAMS_ENABLED` / `SHARING_ENABL
   variable `{author}` (single braces, like `{title}`) renders the name, empty when
   unknown. Built-in templates do not include it, so older app versions never print
   it literally; the template editor hint lists it.
+- Session detail carries `comment_template`, `image_template` (from the folder, null =
+  built-in) and `issues: [{url, label, title}]`; they render exactly like the web export
+  (`ItemTemplates.swift` mirrors `lib/item-templates.ts`, parity fixture in both test suites).
+  Folders and `/account/templates` send `comment_template`/`image_template` only when the
+  server listed both keys; older servers reject unknown keys. `cloudRenderVersion` bumps
+  re-render downloaded sessions once (new `{date}` and image comments).
 
 ### Copy link
 

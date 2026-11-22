@@ -7,21 +7,38 @@ private struct RemoteFolder:Decodable {
  let description:String?;let combined:Bool?;let combined_file:String?;let markdown_template:String?;let combined_template:String?
  // Týmy: starší server pole neposílá a složka je osobní.
  var owner_id:UUID? = nil;var owner_kind:String? = nil;var owner_name:String? = nil;var role:String? = nil
+ // Šablony položek; items říká, že je server zná (starší server neposílá klíče a cizí odmítne).
+ var comment_template:String? = nil;var image_template:String? = nil;var items=false
+ enum CodingKeys:String,CodingKey{case id,name,revision,description,combined,combined_file,markdown_template,combined_template,owner_id,owner_kind,owner_name,role,comment_template,image_template}
+ init(from decoder:Decoder)throws {
+  let c=try decoder.container(keyedBy:CodingKeys.self)
+  id=try c.decode(UUID.self,forKey:.id);name=try c.decode(String.self,forKey:.name);revision=try c.decode(String.self,forKey:.revision)
+  description=try c.decodeIfPresent(String.self,forKey:.description);combined=try c.decodeIfPresent(Bool.self,forKey:.combined);combined_file=try c.decodeIfPresent(String.self,forKey:.combined_file)
+  markdown_template=try c.decodeIfPresent(String.self,forKey:.markdown_template);combined_template=try c.decodeIfPresent(String.self,forKey:.combined_template)
+  owner_id=try c.decodeIfPresent(UUID.self,forKey:.owner_id);owner_kind=try c.decodeIfPresent(String.self,forKey:.owner_kind);owner_name=try c.decodeIfPresent(String.self,forKey:.owner_name);role=try c.decodeIfPresent(String.self,forKey:.role)
+  comment_template=try c.decodeIfPresent(String.self,forKey:.comment_template);image_template=try c.decodeIfPresent(String.self,forKey:.image_template)
+  items=c.contains(.comment_template) && c.contains(.image_template)
+ }
  func record(owner account:UUID,origin:String,library:UUID?=nil)->CloudFolderRecord {
   var value=CloudFolderRecord(id:id,name:name,owner:owner_id ?? library ?? account,origin:origin,revision:revision,description:description,combined:combined,combinedFile:combined_file,markdownTemplate:markdown_template,combinedTemplate:combined_template)
-  value.accountID=account;value.ownerKind=owner_kind;value.ownerName=owner_name;value.role=role;return value
+  value.accountID=account;value.ownerKind=owner_kind;value.ownerName=owner_name;value.role=role
+  if items{value.commentTemplate=comment_template;value.imageTemplate=image_template;value.itemTemplates=true}
+  return value
  }
 }
 private struct FolderSettingsBody:Encodable {
  let name:String;let description:String;let combined:Bool;let combined_file:String;let markdown_template:String?;let combined_template:String?;let revision:String?
  var owner_id:UUID? = nil
- enum CodingKeys:String,CodingKey{case name,description,combined,combined_file,markdown_template,combined_template,revision,owner_id}
+ // Jen když server šablony položek zná; nil = beze změny.
+ var items:(comment:String?,image:String?)? = nil
+ enum CodingKeys:String,CodingKey{case name,description,combined,combined_file,markdown_template,combined_template,revision,owner_id,comment_template,image_template}
  // Prázdné šablony a revize se posílají jako null.
  func encode(to encoder:Encoder)throws {
   var c=encoder.container(keyedBy:CodingKeys.self)
   try c.encode(name,forKey:.name);try c.encode(description,forKey:.description);try c.encode(combined,forKey:.combined);try c.encode(combined_file,forKey:.combined_file)
   try c.encode(markdown_template,forKey:.markdown_template);try c.encode(combined_template,forKey:.combined_template);try c.encode(revision,forKey:.revision)
   if let owner_id{try c.encode(owner_id.uuidString.lowercased(),forKey:.owner_id)}
+  if let items{try c.encode(items.comment,forKey:.comment_template);try c.encode(items.image,forKey:.image_template)}
  }
 }
 private struct RemoteNoteList:Decodable {
@@ -130,6 +147,7 @@ final class CloudFolders {
   // Týmovou složku mohou mít dva účty; její lokální kopie má v ID i účet.
   var topic=Topic(id:"former-cloud:"+(record.isTeam ? record.account.uuidString.lowercased()+":":"")+record.id.uuidString.lowercased(),name:record.name,detail:record.description ?? "",folder:record.folder,combined:record.combined ?? false,combinedFile:record.combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:record.markdownTemplate,combinedTemplate:record.combinedTemplate)
   topic.formerCloudFolderID=record.id;topic.formerCloudOwnerID=record.owner;topic.formerCloudOrigin=record.origin
+  topic.commentTemplate=record.commentTemplate;topic.imageTemplate=record.imageTemplate
   return topic
  }
  // Lokální složky dříve přesunuté do cloudu se stejným adresářem nahradí nová lokální kopie.
@@ -257,12 +275,15 @@ final class CloudFolders {
   let file=URL(fileURLWithPath:session.target.path),directory=file.deletingLastPathComponent(),lower=id.uuidString.lowercased(),index=SessionIndex.shared
   let title=session.title.trimmingCharacters(in:.whitespacesAndNewlines),heading=title.isEmpty ? "Screenshot":title,template=source.markdownTemplate ?? defaultMarkdownTemplate
   let path="/api/v1/sessions/"+lower,assets=directory.appendingPathComponent("assets")
-  let note=RemoteNote(id:id,title:heading,comment:session.comment,template:template,captions:session.images.map{session.imageNotes[$0] ?? ""},images:session.images.indices.map{.init(index:$0+1,path:path+"/images/\($0+1)")})
+  var note=RemoteNote(id:id,title:heading,comment:session.comment,template:template,captions:session.images.map{session.imageNotes[$0] ?? ""},images:session.images.indices.map{.init(index:$0+1,path:path+"/images/\($0+1)")})
+  // Otisk odpovídá souboru vykreslenému šablonami zdrojové složky.
+  note.comment_template=source.commentTemplate;note.image_template=source.imageTemplate
   let local=index.records(file:file).first{$0.id==session.target.session && !$0.isCloud}
   var record=SessionRecord(id:lower,file:SessionIndex.key(file),start:session.target.start,length:session.target.length,hash:sessionFingerprint(Data(session.target.original.utf8)),heading:firstLine(session.target.original),title:heading,comment:session.comment,template:template,images:session.images,notes:session.imageNotes,combined:source.combined,footer:local?.footer ?? "",files:[:],seen:0,base:SessionIndex.key(base),folder:target.cloudFolderID?.uuidString.lowercased(),owner:target.cloudOwnerID?.uuidString.lowercased(),origin:target.cloudOrigin)
   // Změna během přesunu: bez otisku serveru se cloudová verze zapíše vedle jako _cloud.
   record.digest=changed ? nil:sessionFingerprint((try? JSONEncoder.sorted.encode(note)) ?? Data())
   record.shas=session.images.map{(try? cloudImage(assets.appendingPathComponent($0))).map(sessionFingerprint) ?? ""}
+  record.render=cloudRenderVersion;record.imageTemplate=source.imageTemplate
   var hashes:[String:String]=[:];for image in session.images{hashes["assets/"+image]=fileHash(assets.appendingPathComponent(image))}
   if source.combined{record.note=note;record.stem=uniqueStem(readableSessionName(heading,created:Date()),base:base);record.files=hashes}
   else{hashes[file.lastPathComponent]=fileHash(file);record.files=hashes}
@@ -285,7 +306,7 @@ final class CloudFolders {
   for r in SessionIndex.shared.all where r.isCloud && r.id==id.uuidString.lowercased() && r.stem==nil && r.trashed != true {
    let file=URL(fileURLWithPath:r.file)
    guard fileHash(file)==r.files[file.lastPathComponent],r.images.count==fields.captions.count else{continue}
-   let screenshots=screenshotsMarkdown(r.images,fields.captions.map(escapeServerMarkdown))
+   let screenshots=renderImageBlocks(zip(r.images,fields.captions.map(escapeServerMarkdown)).map{ImageBlock(name:$0.0,caption:$0.1)},template:r.imageTemplate)
    try? Data(renderSessionTemplate(r.template,title:serverTitle(fields.title),screenshots:screenshots,text:escapeServerMarkdown(fields.comment),author:serverTitle(r.author ?? "")).utf8).write(to:file,options:.atomic);writeSessionTag(file,r.id)
   }
  }
@@ -330,7 +351,9 @@ final class CloudFolders {
   activate(c)
   guard let record=records.first(where:{matches($0,topic) && $0.unavailable != true}) else{throw CloudFailure.invalid}
   guard record.topic.canManageCloudFolder else{throw Self.forbidden}
-  let body=try JSONEncoder().encode(FolderSettingsBody(name:topic.name,description:topic.detail,combined:topic.combined,combined_file:topic.combinedFile,markdown_template:topic.markdownTemplate,combined_template:topic.combinedTemplate,revision:record.revision))
+  var settings=FolderSettingsBody(name:topic.name,description:topic.detail,combined:topic.combined,combined_file:topic.combinedFile,markdown_template:topic.markdownTemplate,combined_template:topic.combinedTemplate,revision:record.revision)
+  if record.itemTemplates==true{settings.items=(topic.commentTemplate,topic.imageTemplate)}
+  let body=try JSONEncoder().encode(settings)
   let data:Data
   do{data=try await send(endpoint,"/api/v1/folders/"+id.uuidString.lowercased(),"PUT",c.token,body)}
   catch let failure as CloudFailure where failure.status==409 && (failure.code=="folder_conflict" || failure.code==nil) {
@@ -703,7 +726,7 @@ final class CloudFolders {
    if ((fm.enumerator(at:directory,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles])?.allObjects as? [URL]) ?? []).allSatisfy({(try? $0.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile != true}){try? fm.removeItem(at:directory)}
    var files=[target.lastPathComponent:sessionFingerprint(Data(output.utf8))];for name in names.values{files["assets/"+name]=fileHash(assets.appendingPathComponent(name))}
    var notes:[String:String]=[:];for (old,name) in names{notes[name]=record.notes[old]}
-   record.file=SessionIndex.key(target);record.images=record.images.map{names[$0] ?? $0};record.notes=notes;record.files=files;record.flat=true;record.inode=nil
+   record.file=SessionIndex.key(target);record.images=record.images.map{names[$0] ?? $0};record.notes=notes;record.imageComments=record.imageComments.map{Dictionary($0.map{(names[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})};record.files=files;record.flat=true;record.inode=nil
    record.length=(output as NSString).length;record.hash=sessionFingerprint(Data(output.utf8));record.heading=firstLine(output)
    index.put(record);writeSessionTag(target,record.id)
   }
@@ -765,6 +788,7 @@ final class CloudFolders {
    // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
    next.images=next.images.map{renamed[$0] ?? $0}
    next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
+   next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
    for (old,new) in renamed{if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}}
    let markdown=URL(fileURLWithPath:next.file),key=markdown.lastPathComponent
    if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {
@@ -927,11 +951,11 @@ final class CloudFolders {
   func present(_ r:SessionRecord)->Bool{!r.files.isEmpty && r.files.keys.allSatisfy{fm.fileExists(atPath:self.fileURL(r,$0,base:base).path)}}
   // Beze změny na serveru se nic nestahuje.
   // Změněná revize (úprava, komentář, šablona) znamená nové vykreslení i beze změny updated_at.
-  if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,present(saved){return}
+  if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){return}
   let (note,stamp,digest)=try await fetchNote(id,endpoint:endpoint,token:token)
   let created=stamp?.created_at ?? item.created_at
   if record==nil{record=migrateSeparate(id,note:note,created:created,topic:topic,base:base,endpoint:endpoint,owner:owner)}
-  if var saved=record,saved.digest==digest,present(saved) {
+  if var saved=record,saved.digest==digest,saved.render==cloudRenderVersion,present(saved) {
    saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision
    if saved != record{index.put(saved)};return
   }
@@ -944,7 +968,7 @@ final class CloudFolders {
   func finished(_ file:URL,_ body:String,_ names:[String],_ files:[String:String])->SessionRecord {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)
    next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created;next.digest=digest;next.shas=shas;next.revision=stamp?.revision?.value
-   next.file=SessionIndex.key(file);next.files=files;next.flat=true;return next
+   next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names);return next
   }
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
@@ -966,7 +990,7 @@ final class CloudFolders {
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
    if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
-    var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;index.put(same);return
+    var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;same.render=cloudRenderVersion;same.imageTemplate=note.image_template;same.imageComments=cloudImageComments(note,images:names);index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
@@ -986,7 +1010,7 @@ final class CloudFolders {
    }
    let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);index.put(kept);return
+   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date()),base:base)
@@ -1030,7 +1054,7 @@ final class CloudFolders {
    var record=index.cloud(item.id,base:base)
    if let saved=record,saved.stem==nil{record=nil}
    if let saved=record,saved.trashed==true{record=restoreCombined(saved,base:base)}
-   if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,present(saved){sections.append((saved,order));continue}
+   if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){sections.append((saved,order));continue}
    let fetched:(RemoteNote,RemoteNoteStamp?,String)
    do{fetched=try await fetchNote(item.id,endpoint:endpoint,token:token)}
    catch {
@@ -1041,7 +1065,7 @@ final class CloudFolders {
    let (note,stamp,digest)=fetched
    let created=stamp?.created_at ?? item.created_at
    if record==nil{record=migrateCombined(item.id,created:created,topic:topic,base:base,endpoint:endpoint,owner:owner)}
-   if var saved=record,saved.digest==digest,present(saved) {
+   if var saved=record,saved.digest==digest,saved.render==cloudRenderVersion,present(saved) {
     saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision;index.put(saved);sections.append((saved,order));continue
    }
    let data:[Data]
@@ -1072,9 +1096,12 @@ final class CloudFolders {
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
+   // Metadata čtení patří bloku v souboru; nová se zapíšou až s novým blokem.
+   next.render=cloudRenderVersion;next.imageTemplate=record?.imageTemplate ?? note.image_template;next.imageComments=record.map{$0.imageComments} ?? cloudImageComments(note,images:names)
    if let saved=record{next.start=saved.start;next.length=saved.length;next.hash=saved.hash;next.heading=saved.heading;next.footer=saved.footer}
    // Obsahově shodná relace (jen nové porovnání) se nebere jako změna.
-   let same=record.map{$0.note.map{old in old.title==note.title && old.comment==note.comment && old.captions==note.captions && old.template==note.template && (!note.template.contains("{author}") || old.author==note.author)} ?? false && $0.shas==next.shas} ?? false
+   let same=record.map{$0.note.map{old in old.title==note.title && old.comment==note.comment && old.captions==note.captions && old.template==note.template && (!note.template.contains("{author}") || old.author==note.author)
+    && old.comments==note.comments && old.comment_template==note.comment_template && old.image_template==note.image_template && old.issues==note.issues} ?? false && $0.render==cloudRenderVersion && $0.shas==next.shas} ?? false
    index.put(next);sections.append((next,order));if !same{refreshed.insert(next.id)}
   }
   for item in trashed {
@@ -1116,6 +1143,7 @@ final class CloudFolders {
     // Bloky z ručně upraveného hlavního souboru se dál hlídají v něm a drží svou pozici.
     var next=record;next.combined=true
     if record.file==mainKey && (covered || SessionIndex.key(target) != mainKey){index.put(next);continue}
+    if let note=next.note{next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:next.images)}
     next.file=SessionIndex.key(target);next.start=start;next.length=(body as NSString).length;next.hash=sessionFingerprint(Data(body.utf8))
     next.heading=firstLine(body);next.footer=footer;index.put(next)
    }
@@ -1148,6 +1176,7 @@ final class CloudFolders {
   let data=try await request(endpoint,path,token,CloudTransport.jsonLimit)
   var note=try JSONDecoder().decode(FolderEnvelope<RemoteNote>.self,from:data).data
   if note.comments?.isEmpty==true{note.comments=nil}
+  if note.issues?.isEmpty==true{note.issues=nil}
   note=Self.normalizedAttachments(note,path:path)
   let stamp=(try? JSONDecoder().decode(FolderEnvelope<RemoteNoteStamp>.self,from:data))?.data
   guard note.id==id,(1...30).contains(note.images.count),note.captions.count==note.images.count,

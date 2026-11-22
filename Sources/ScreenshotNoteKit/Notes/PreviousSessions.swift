@@ -112,10 +112,12 @@ func rewriteImageLinks(_ text:String,order:[String],rename:[String:String]=[:])-
  return output
 }
 /// Název, komentář, obrázky a popisky z bloku podle šablony.
-func parsedSession(_ template:String,_ body:String)->(String,String,[String],[String:String])? {
+/// comments: vykreslené komentáře obrázků cloudové relace (z popisků se vynechají).
+func parsedSession(_ template:String,_ body:String,imageTemplate:String?=nil,comments:[String:String]?=nil)->(String,String,[String],[String:String])? {
  guard let values=extractTemplateValues(template,from:body),let screenshotText=values["{screenshots}"] else{return nil}
  let source=screenshotText as NSString,matches=imageLinks(screenshotText);var images:[String]=[],notes:[String:String]=[:]
- for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;notes[name]=stripContextCallout(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))).trimmingCharacters(in:.newlines))}
+ for(i,match) in matches.enumerated(){let name=linkName(match,in:source);images.append(name);let end=i+1<matches.count ? matches[i+1].range.location:source.length;let start=i>0 ? NSMaxRange(matches[i-1].range):0
+  notes[name]=imageCaption(source.substring(with:NSRange(location:NSMaxRange(match.range),length:end-NSMaxRange(match.range))),before:source.substring(with:NSRange(location:start,length:match.range.location-start)),template:imageTemplate,next:i+1<matches.count ? i+2:nil,comments:comments?[name],previous:i>0 ? comments?[images[i-1]]:nil,following:i+1<matches.count ? comments?[linkName(matches[i+1],in:source)]:nil,first:i==0)}
  return (values["{title}"] ?? "",values["{text}"] ?? "",images,notes)
 }
 private let separator="\n\n---\n\n"
@@ -129,7 +131,7 @@ func sessionSegments(_ ns:NSString)->[NSRange] {
  }
 }
 /// Hledá blok podle šablony; začátek i konec zkouší na hranicích řádků kolem kotvy.
-func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,footer:String="")->(NSRange,(String,String,[String],[String:String]))? {
+func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,footer:String="",imageTemplate:String?=nil,comments:[String:String]?=nil)->(NSRange,(String,String,[String],[String:String]))? {
  var starts:[Int]=[]
  if let anchor {
   var position=anchor
@@ -155,7 +157,7 @@ func fuzzyBlock(_ template:String,_ ns:NSString,segment:NSRange,anchor:Int?,foot
  }
  for start in starts{for end in ends where end>start {
   let range=NSRange(location:start,length:end-start)
-  if let values=parsedSession(template,ns.substring(with:range)){return (range,values)}
+  if let values=parsedSession(template,ns.substring(with:range),imageTemplate:imageTemplate,comments:comments){return (range,values)}
  }}
  return nil
 }
@@ -182,14 +184,14 @@ func locateSession(_ record:SessionRecord,in ns:NSString,avoid:[NSRange])->(NSRa
  if !record.combined {
   let whole=NSRange(location:0,length:ns.length)
   guard free(whole) else{return nil}
-  return fuzzyBlock(record.template,ns,segment:whole,anchor:nil,footer:record.footer)
+  return fuzzyBlock(record.template,ns,segment:whole,anchor:nil,footer:record.footer,imageTemplate:record.imageTemplate,comments:record.imageComments)
  }
  for image in record.images {
   anchors+=imageLinkRanges(image,in:ns).map(\.location)
  }
  let segments=sessionSegments(ns)
  for anchor in anchors {
-  guard let segment=segments.first(where:{NSLocationInRange(anchor,$0)}),let found=fuzzyBlock(record.template,ns,segment:segment,anchor:anchor,footer:record.footer),free(found.0),
+  guard let segment=segments.first(where:{NSLocationInRange(anchor,$0)}),let found=fuzzyBlock(record.template,ns,segment:segment,anchor:anchor,footer:record.footer,imageTemplate:record.imageTemplate,comments:record.imageComments),free(found.0),
         found.1.2.contains(where:{record.images.contains($0)}) else{continue}
   return found
  }
@@ -236,7 +238,7 @@ func extractTemplateValues(_ template:String,from body:String)->[String:String]?
 }
 private func extractTemplateValues(_ template:String,from body:String,comments:Bool)->[String:String]?{
  let template=template.replacingOccurrences(of:"\u{0}",with:"{comments}")
- let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context)\\}")
+ let expression=try! NSRegularExpression(pattern:"\\{(?:title|screenshots|text|comments|author|context|issues)\\}")
  let source=template as NSString;let matches=expression.matches(in:template,range:NSRange(location:0,length:source.length));var pattern="\\A",offset=0;var keys:[String]=[]
  for match in matches{pattern+=NSRegularExpression.escapedPattern(for:source.substring(with:NSRange(location:offset,length:match.range.location-offset)))+(source.substring(with:match.range)=="{context}" ? contextSummaryPattern:"(.*?)");keys.append(source.substring(with:match.range));offset=NSMaxRange(match.range)}
  pattern+=NSRegularExpression.escapedPattern(for:source.substring(from:offset));if !template.hasSuffix("\n"){pattern+="\\n"};pattern+="\\z"

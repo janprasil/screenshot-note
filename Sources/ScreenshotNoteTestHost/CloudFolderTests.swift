@@ -125,6 +125,7 @@ import AppKit
  try await templateTests()
  try await flatLayoutTests()
  try await editAndCommentTests()
+ try itemTemplateTests()
  try await staleDraftTests()
  try await markdownLinkTests()
  try await teamFolderTests()

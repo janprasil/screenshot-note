@@ -303,7 +303,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
          try CloudLibrary.shared.enqueueEdit(stored,root:draftRoot,sessionID:id,base:shas,original:original,revision:revision,draftBase:stored.cloudBase)
         } else {
          // Doplnění posílá aktuální šablonu složky, server ji zapíše z manifestu.
-         var current=stored;if let folder=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==topic.cloudFolderID}){current.topic?.markdownTemplate=folder.markdownTemplate}
+         var current=stored;if let folder=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==topic.cloudFolderID}){current.topic?.markdownTemplate=folder.markdownTemplate;current.topic?.commentTemplate=folder.commentTemplate;current.topic?.imageTemplate=folder.imageTemplate}
          // Revize a texty stažené verze chrání úpravy z webu před přepsáním.
          let downloaded=CloudFolders.shared.editBase(id,topic:topic)
          try CloudLibrary.shared.enqueue(current,root:draftRoot,sessionID:id,base:shas,revision:downloaded?.1,original:downloaded?.0)

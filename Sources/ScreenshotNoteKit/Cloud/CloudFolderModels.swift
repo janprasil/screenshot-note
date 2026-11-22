@@ -12,6 +12,9 @@ struct CloudFolderRecord:Codable {
  // Nastavení ze serveru; starší soubory je nemají.
  var revision:String? = nil;var description:String? = nil;var combined:Bool? = nil;var combinedFile:String? = nil
  var markdownTemplate:String? = nil;var combinedTemplate:String? = nil
+ var commentTemplate:String? = nil;var imageTemplate:String? = nil
+ // Server zná šablony položek; jinak se neposílají.
+ var itemTemplates:Bool? = nil
  // Složka zmizela z webu a čeká na rozhodnutí uživatele.
  var remoteDeleted:Bool? = nil
  // Místní nastavení Macu, na server se neposílá.
@@ -23,9 +26,9 @@ struct CloudFolderRecord:Codable {
  var unavailable:Bool? = nil
  var account:UUID{accountID ?? owner}
  var isTeam:Bool{owner != account || ownerKind==LibraryKind.team.rawValue}
- enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable;case accountID="account"}
+ enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable;case accountID="account"}
  var topic:Topic {
-  var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes
+  var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes;value.commentTemplate=commentTemplate;value.imageTemplate=imageTemplate
   if isTeam{value.cloudTeam=true;value.cloudOwnerName=ownerName;value.cloudRole=role}
   return value
  }
@@ -49,6 +52,10 @@ struct RemoteNote:Codable,Equatable {
  var comments:[Comment]? = nil
  // Starší server autora neposílá; nil nemění otisk relace.
  var author:CloudAuthor? = nil
+ /// Odkaz na issue pro {issues}; label počítá server.
+ struct Issue:Codable,Equatable{let url:String;let label:String;let title:String?}
+ // Šablony položek ze složky (nil = vestavěná) a odkazy; starší server je neposílá.
+ var comment_template:String? = nil;var image_template:String? = nil;var issues:[Issue]? = nil
 }
 
 /// Revize jako řetězec, i když ji server pošle jako číslo.
@@ -58,19 +65,24 @@ struct FlexibleString:Decodable {
 }
 
 /// Markdown cloudové relace bez skrytých značek; obrázky podle zadaných názvů v assets/.
-func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[String:Data]]=[:])->String {
+/// Vykreslení je stejné jako webový export (lib/markdown.ts), navíc s kontextem z prohlížeče.
+func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[String:Data]]=[:],language:String=AppLanguage.current,timeZone:TimeZone = .current)->String {
+ let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at,image_index:$0.image_index)}
+ func list(_ items:[RemoteNote.Comment])->String{renderCommentList(items,template:note.comment_template,language:language,timeZone:timeZone)}
  // Stažený kontext dostane stejný callout s odkazy do assets/ jako lokální export.
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
- let screenshots=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->String in
-  var text=imageMarkdown(pair.0,offset+1)+(pair.1.isEmpty ? "":"\n\n"+pair.1)
+ let blocks=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->ImageBlock in
+  var block=ImageBlock(name:pair.0,caption:pair.1,comments:list(comments.filter{$0.image_index==offset+1}))
   if let side=contexts[offset+1],let data=side["context"],let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=side["har"] != nil
-   text+="\n\n"+contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
+   block.context=contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))
   }
-  return text
- }.joined(separator:"\n\n")
- let comments=(note.comments ?? []).map{RemoteNote.Comment(author_name:$0.author_name.map(serverTitle),body:escapeServerMarkdown($0.body),created_at:$0.created_at,image_index:$0.image_index)}
-  return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:screenshots,text:escapeServerMarkdown(note.comment),comments:renderComments(comments),author:serverTitle(note.author?.name ?? ""),context:sessionContextMarkdown(items))
+  return block
+ }
+ // Komentář obrázku mimo rozsah obrázků (starší data) zůstane u relace.
+ let sessionComments=list(comments.filter{($0.image_index ?? 0)<1 || ($0.image_index ?? 0)>names.count})
+ return renderSessionTemplate(note.template,title:serverTitle(note.title),screenshots:renderImageBlocks(blocks,template:note.image_template),text:escapeServerMarkdown(note.comment),
+  comments:sessionComments,author:serverTitle(note.author?.name ?? ""),context:sessionContextMarkdown(items),issues:renderIssueList(note.issues ?? []))
 }
 
 /// Kontext uložený v assets/ podle čísla snímku (pro společný soubor, kde se skládá z disku).

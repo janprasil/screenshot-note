@@ -12,7 +12,7 @@ func serverMarkdownTests() throws {
  var local=cloud;local.cloudFolderID=nil
  assert(combinedFolderText(local)==(cloud.name,cloud.detail))
  // Zpětný apostrof ve jménu autora neukončí code span, obrázek zůstane uvnitř.
- let comments=renderComments([RemoteNote.Comment(author_name:"Eve` ![p](https://evil.test/p.png) `",body:"Ahoj",created_at:nil)])
+ let comments=renderCommentList([RemoteNote.Comment(author_name:"Eve` ![p](https://evil.test/p.png) `",body:"Ahoj",created_at:nil)],template:nil)
  let author=comments.components(separatedBy:"\n")[1]
  assert(author.hasPrefix("`Eve' ![p](https://evil.test/p.png) '`"),author)
  print("PASS: cloud folder names and descriptions are escaped and author names cannot leave their code span")

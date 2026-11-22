@@ -7,7 +7,7 @@ let commentPlaceholders=["date","name","text"]
 let imagePlaceholders=["image","description","comments","number","context","elements"]
 let itemTemplateMaxLength=5000
 /// Verze vykreslení cloudových relací; zvýšení je jednou přerenderuje.
-let cloudRenderVersion=2
+let cloudRenderVersion=3
 
 private let monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 /// {date}: cs `22. 11. 2026 14:05`, jinak `Nov 22, 2026, 14:05`.
@@ -147,9 +147,10 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
  if prefix.contains("{description}") || prefix.contains("{elements}") {
   let previous=paragraphPattern(suffix.components(separatedBy:"\n\n"),imageAtEnd:false,capture:false)
   let own=paragraphPattern(prefix.components(separatedBy:"\n\n"),imageAtEnd:true)
-  let source=before.isEmpty ? "":before+"\n\n"
+  // Text před odkazem končí tím, čím šablona před {image} (prázdné řádky jsou oříznuté).
+  let source=before+String(prefix.reversed().prefix{$0=="\n"})
   let regex=try? NSRegularExpression(pattern:"\\A(?:"+previous.pattern+"\\n\\n)?"+own.pattern+"\\z")
-  values.merge(captures(regex,own.keys,in:"\n\n"+source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}
+  values.merge(captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}
  }
  // Pole za obrázkem; konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).
  var text=after

@@ -725,7 +725,7 @@ final class CloudFolders {
    if ((fm.enumerator(at:directory,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles])?.allObjects as? [URL]) ?? []).allSatisfy({(try? $0.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile != true}){try? fm.removeItem(at:directory)}
    var files=[target.lastPathComponent:sessionFingerprint(Data(output.utf8))];for name in names.values{files["assets/"+name]=fileHash(assets.appendingPathComponent(name))}
    var notes:[String:String]=[:];for (old,name) in names{notes[name]=record.notes[old]}
-   record.file=SessionIndex.key(target);record.images=record.images.map{names[$0] ?? $0};record.notes=notes;record.files=files;record.flat=true;record.inode=nil
+   record.file=SessionIndex.key(target);record.images=record.images.map{names[$0] ?? $0};record.notes=notes;record.imageComments=record.imageComments.map{Dictionary($0.map{(names[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})};record.files=files;record.flat=true;record.inode=nil
    record.length=(output as NSString).length;record.hash=sessionFingerprint(Data(output.utf8));record.heading=firstLine(output)
    index.put(record);writeSessionTag(target,record.id)
   }
@@ -787,6 +787,7 @@ final class CloudFolders {
    // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
    next.images=next.images.map{renamed[$0] ?? $0}
    next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
+   next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
    for (old,new) in renamed{if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}}
    let markdown=URL(fileURLWithPath:next.file),key=markdown.lastPathComponent
    if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {

@@ -64,5 +64,9 @@ import Foundation
  var shifted=plainComments;shifted.comments=[RemoteNote.Comment(author_name:"Eva",body:"K prvnímu",created_at:"2026-03-05T08:07:00Z",image_index:1)]
  let shiftedRead=parsedSession(shifted.template,cloudSessionBody(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:shifted.image_template,comments:cloudImageComments(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(shiftedRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik" && shiftedRead?.3["S-1.png"]=="Popis 1",String(describing:shiftedRead))
+ // Popis na stejném řádku před obrázkem.
+ let inline="**{description}** {image}"
+ let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)
+ assert(inlineRead?.3["a.png"]=="Jedna" && inlineRead?.3["b.png"]=="Dvě",String(describing:inlineRead))
  print("PASS: image template paragraphs, {elements} split, template checks and caption parsing with a custom image template")
 }

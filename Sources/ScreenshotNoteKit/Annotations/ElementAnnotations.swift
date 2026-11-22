@@ -65,7 +65,12 @@ private func codeSpan(_ value:String)->String{
  return fence+pad+value+pad+fence
 }
 /// Komentář je text uživatele; obrázkový odkaz v něm se escapuje, jinak by ho znovuotevření bralo jako snímek.
-private func safeNote(_ value:String)->String{let note=flattened(value,limit:2000);return imageLinks(note).isEmpty ? note:escapedMarkdown(note)}
+/// Víceřádkový komentář pokračuje odsazenými řádky téže položky seznamu.
+private func safeNote(_ value:String)->String{
+ let limited=value.count>2000 ? String(value.prefix(1999))+"…":value
+ let lines=limited.components(separatedBy:.newlines).map{line->String in let text=line.split(whereSeparator:{$0.isWhitespace}).joined(separator:" ");return imageLinks(text).isEmpty ? text:escapedMarkdown(text)}
+ return lines.reduce(into:[String]()){if !($1.isEmpty && ($0.last?.isEmpty ?? true)){$0.append($1)}}.joined(separator:"\n").trimmingCharacters(in:.newlines).replacingOccurrences(of:"\n",with:"\n  ")
+}
 /// Řádky `- **[1] Element** `selector` „name“: popis` a `- **[2] Rámeček**: komentář` seřazené podle čísla; anotace mimo ořez vynechá.
 func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->String{
  marks.compactMap{mark->(Int,String)? in
@@ -145,19 +150,27 @@ extension DrawingView:NSTextFieldDelegate {
   guard marks.indices.contains(index) else{return}
   commitElementNote()
   let element=marks[index].tool == .element
-  let field=NSTextField(frame:.zero);field.placeholderString=element ? L("Popis elementu · Enter potvrdí, Esc zruší výběr"):L("Komentář k objektu · Enter potvrdí, prázdný ho odebere");field.stringValue=marks[index].noteText;field.font = .systemFont(ofSize:13);field.focusRingType = .none;field.bezelStyle = .roundedBezel;field.delegate=self
-  elementField=field;elementFieldIndex=index;addSubview(field);updateElementField();window?.makeFirstResponder(field)
+  let box=NoteEditorBox(placeholder:element ? L("Popis elementu · Enter potvrdí, Esc zruší výběr"):L("Komentář k objektu · Enter potvrdí, prázdný ho odebere"),value:marks[index].noteText)
+  box.field.delegate=self
+  box.onConfirm={[weak self] in self?.confirmElementNote()}
+  box.onCancel={[weak self] in self?.cancelNote()}
+  box.onResize={[weak self] in self?.updateElementField()}
+  noteButton?.removeFromSuperview();noteButton=nil
+  noteBox=box;elementField=box.field;elementFieldIndex=index;addSubview(box);updateElementField();window?.makeFirstResponder(box.editor)
  }
  func updateElementField(){
-  guard let field=elementField,let i=elementFieldIndex,marks.indices.contains(i) else{return}
-  let rect=displayRect(marks[i].bounds.intersection(viewport).isNull ? marks[i].bounds:marks[i].bounds.intersection(viewport)),width=min(max(220,rect.width),max(220,bounds.width-8))
-  var y=rect.minY-30;if y<bounds.minY+4{y=min(rect.maxY+6,bounds.maxY-30)}
-  field.frame=NSRect(x:max(bounds.minX+4,min(rect.minX,bounds.maxX-width-4)),y:y,width:width,height:24)
+  guard let box=noteBox,let i=elementFieldIndex,marks.indices.contains(i) else{return}
+  let rect=noteAnchorRect(marks[i])
+  let width=min(max(box.expanded ? 360:280,rect.width),max(240,bounds.width-8)),height=box.frame.height
+  var y=rect.minY-height-6;if y<bounds.minY+4{y=min(rect.maxY+6,bounds.maxY-height-4)}
+  box.frame=NSRect(x:max(bounds.minX+4,min(rect.minX,bounds.maxX-width-4)),y:max(bounds.minY+4,y),width:width,height:height)
  }
  func dropElementField(){
-  guard let field=elementField else{return}
-  closingElementNote=true;field.removeFromSuperview();elementField=nil;elementFieldIndex=nil;closingElementNote=false;window?.makeFirstResponder(self)
+  guard elementField != nil || noteBox != nil else{return}
+  closingElementNote=true;noteBox?.removeFromSuperview();noteBox=nil;elementField=nil;elementFieldIndex=nil;closingElementNote=false;window?.makeFirstResponder(self);updateNoteButton()
  }
+ /// Esc: komentář tvaru jen zavře, u elementu zruší rozpracovaný výběr.
+ func cancelNote(){if let i=elementFieldIndex,marks.indices.contains(i),marks[i].tool != .element{dropElementField()}else{cancelActiveElement()}}
  /// Enter potvrdí popis; výběr zůstává aktivní pro opakovaný klik na rodiče.
  func confirmElementNote(){commitElementNote();activeElement?.confirmed=true}
  /// Plocha anotace Element pro výběr: okraj a odznak, aby šlo vybrat i anotace pod ní.
@@ -167,8 +180,8 @@ extension DrawingView:NSTextFieldDelegate {
   return rect.insetBy(dx:-band,dy:-band).contains(point) && !rect.insetBy(dx:band,dy:band).contains(point)
  }
  func commitElementNote(){
-  guard !closingElementNote,let field=elementField,let i=elementFieldIndex else{return}
-  let value=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+  guard !closingElementNote,let box=noteBox,let i=elementFieldIndex else{return}
+  let value=box.value.trimmingCharacters(in:.whitespacesAndNewlines)
   dropElementField()
   if marks.indices.contains(i),marks[i].tool == .element,marks[i].text != value{snapshot();marks[i].text=value;changed?()}
   // Komentář tvaru dostane další číslo; prázdný číslo odebere a ostatní se přečíslují.
@@ -178,15 +191,15 @@ extension DrawingView:NSTextFieldDelegate {
    else{if marks[i].number == nil{marks[i].number=nextElementNumber};marks[i].comment=value}
    changed?()
   }
+  updateNoteButton()
   needsDisplay=true
  }
  func control(_ control:NSControl,textView:NSTextView,doCommandBy selector:Selector)->Bool{
   guard control === elementField else{return false}
   if selector==#selector(NSResponder.insertNewline(_:)){confirmElementNote();return true}
-  if selector==#selector(NSResponder.cancelOperation(_:)){if let i=elementFieldIndex,marks.indices.contains(i),marks[i].tool != .element{dropElementField()}else{cancelActiveElement()};return true}
+  if selector==#selector(NSResponder.cancelOperation(_:)){cancelNote();return true}
   return false
  }
- func controlTextDidEndEditing(_ notification:Notification){if (notification.object as AnyObject?) === elementField{commitElementNote()}}
 
  /// Pravé tlačítko na anotaci: komentář i u textu, kde dvojklik upravuje samotný text.
  override func menu(for event:NSEvent)->NSMenu?{

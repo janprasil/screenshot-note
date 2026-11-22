@@ -272,7 +272,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let active=composer
   let fromOpenComposer = fromComposer || active != nil
   func restoreComposerSize(){if fromOpenComposer{active?.expandCompact()}}
-  guard !capturing && !browsingSavedSessions else{return}
+  // Během záznamu (i jeho dokončení) se snímek nepořizuje, oba by doručily vlastní koncept.
+  guard !capturing && !browsingSavedSessions && recording.state == .idle else{return}
   active?.collapseCompact()
   if !CGPreflightScreenCaptureAccess(){restoreComposerSize();_ = CGRequestScreenCaptureAccess();showError(L("Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť snímání znovu."));NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!);return}
   let screens=NSScreen.screens

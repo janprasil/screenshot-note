@@ -197,7 +197,9 @@ final class CloudFolders {
    add(markdown)
    // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
    let flat=record.flat==true || SessionIndex.key(parent)==key
-   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}}
+   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}
+    // Video: MP4 a soubory ve složce snímků patří relaci.
+    let video=assetVideoFiles(directory,image);add(video[0]);for file in regularFiles(video[1]){add(file)}}
    if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
   }
   for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}
@@ -1253,7 +1255,10 @@ final class CloudFolders {
    }
    // Video: `<název>.mp4` a `<název>.frames/` (N.png + video.json) vedle posteru.
    let video=assetVideoFiles(assets,name),key=prefix+video[0].lastPathComponent
-   if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
+   // Místně změněné MP4 (jiný hash než při posledním stažení) se nepřepíše ani nesmaže.
+   let edited=fm.fileExists(atPath:video[0].path) && fileHash(video[0]) != previous[key]
+   if edited{if let hash=previous[key] ?? fileHash(video[0]){files[key]=hash}}
+   else if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
     if fileHash(video[0]) != sessionFingerprint(mp4){try replaceFile(video[0],with:mp4,in:assets)}
     // Snímky se porovnají i obsahem; stejný čas a název neznamená stejný obrázek.
     let current=info.frames.allSatisfy{frame in (try? Data(contentsOf:video[1].appendingPathComponent(frame.file))) == contexts[position+1]?["frame-"+frame.file.replacingOccurrences(of:".png",with:"")]}

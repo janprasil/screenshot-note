@@ -93,6 +93,12 @@ import AppKit
  let written=try CloudFolders.shared.writeContextAttachments([1:["video":mp4,"video.json":remoteJSON,"frame-1":frame,"frame-2":frame]],names:["1.png"],assets:synced)
  assert(written==["assets/1.mp4":sessionFingerprint(mp4)])
  assert(readVideoInfo(synced.appendingPathComponent("1.frames"))==remote && fm.fileExists(atPath:synced.appendingPathComponent("1.frames/2.png").path))
+ // Místně změněné MP4 se při dalším syncu nepřepíše ani nesmaže.
+ try Data([9,9]).write(to:synced.appendingPathComponent("1.mp4"))
+ let kept=try CloudFolders.shared.writeContextAttachments([:],names:["1.png"],assets:synced,previous:written)
+ let local=try Data(contentsOf:synced.appendingPathComponent("1.mp4"))
+ assert(kept==written && local==Data([9,9]))
+ try mp4.write(to:synced.appendingPathComponent("1.mp4"))
  _ = try CloudFolders.shared.writeContextAttachments([:],names:["1.png"],assets:synced,previous:written)
  assert(!fm.fileExists(atPath:synced.appendingPathComponent("1.mp4").path) && !fm.fileExists(atPath:synced.appendingPathComponent("1.frames").path))
  print("PASS: recording files beside the poster, copy/remove with the item, assets rendering and cloud download of MP4 and frames")

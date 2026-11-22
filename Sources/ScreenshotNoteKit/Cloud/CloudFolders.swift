@@ -715,7 +715,7 @@ final class CloudFolders {
    let stem=flatStem(guid ? readableSessionName(record.title,created:parseServerDate(record.created) ?? Date()):directory.lastPathComponent,base:base)
    var output=text,names:[String:String]=[:]
    for (i,image) in record.images.enumerated() {
-    let name=uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.values.contains($0+".png")}+".png"
+    let name=uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.values.contains($0+".png")}+".png"
     names[image]=name
    }
    output=rewriteImageLinks(output,order:record.images,rename:names)
@@ -1004,7 +1004,7 @@ final class CloudFolders {
    let flat=isRoot(saved,base),markdown=URL(fileURLWithPath:saved.file),stem=markdown.deletingPathExtension().lastPathComponent
    let folderAssets=flat ? assets:saved.directory.appendingPathComponent("assets")
    var names:[String]=[]
-   for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:folderAssets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png":"\(i+1).png"))}
+   for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){assetStemTaken(folderAssets,$0) || names.contains($0+".png")}+".png":"\(i+1).png"))}
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
    if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
@@ -1026,13 +1026,15 @@ final class CloudFolders {
     else if hash==sessionFingerprint(bytes){links.append(name)}
     else{links.append(try writeGeneratedCopy(bytes,to:folderAssets.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.png")).lastPathComponent)}
    }
-   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links).utf8)
+   // Kopie nese i video a kontext stažené ke svým obrázkům; cizí nebo upravené soubory zůstanou.
+   let sides=try writeContextAttachments(contexts,names:links,assets:folderAssets,previous:saved.files)
+   let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:contexts).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;index.put(kept);return
+   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){a,_ in a};index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date()),base:base)
-  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png")}
+  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
   let body=cloudSessionBody(note,images:names,contexts:contexts),markdown=base.appendingPathComponent(stem+".md")
   var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
   for (name,bytes) in zip(names,data){try bytes.write(to:assets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
@@ -1098,7 +1100,7 @@ final class CloudFolders {
    let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date()),base:base)
    var names=Array((record?.images ?? []).prefix(data.count)),files=record?.files ?? [:]
    for (i,bytes) in data.enumerated() {
-    if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){fm.fileExists(atPath:assets.appendingPathComponent($0+".png").path) || names.contains($0+".png")}+".png")}
+    if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
     let url=assets.appendingPathComponent(names[i]),existing=try? boundedData(url,max:52428800)
     // Místně upravený obrázek zůstává; převzatý originál, ze kterého server vznikl, se nepřepisuje.
     let source=existing != nil && record?.shas?.indices.contains(i)==true && record?.shas?[i]==sessionFingerprint(bytes) && existing.map(sessionFingerprint)==files["assets/"+names[i]]

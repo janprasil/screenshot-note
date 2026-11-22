@@ -275,12 +275,13 @@ final class Composer:NSObject,NSWindowDelegate {
    note.expandedTitle=L("Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
    note.frame=NSRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2);note.collapsedFrame=note.frame;button.addHoverAction(note)
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
-   let context=draft.contexts?[image] != nil ? contextBadge(image,index:i):nil
+   let video=videoSidecars(root.appendingPathComponent(image)),info=fm.fileExists(atPath:video[0].path) ? readVideoInfo(video[1]):nil
+   // S videem dostane odznak kontextu užší místo, přehrání má vždy 84 bodů.
+   let context=draft.contexts?[image] != nil ? contextBadge(image,index:i,maxWidth:info == nil ? 188:96):nil
    if let context{thumbnails.addSubview(context)}
-   // Video: délka nad posterem, vedle odznaku kontextu.
-   if let info=readVideoInfo(videoSidecars(root.appendingPathComponent(image))[1]),fm.fileExists(atPath:videoSidecars(root.appendingPathComponent(image))[0].path) {
+   if let info {
     let x=CGFloat(i)*238+4+(context.map{$0.frame.width+6} ?? 0)
-    let badge=styledButton(videoDuration(info.durationMs),symbol:"play.rectangle",frame:NSRect(x:x,y:198,width:min(84,192-(x-CGFloat(i)*238)),height:24),target:self,action:#selector(playVideo(_:)))
+    let badge=styledButton(videoDuration(info.durationMs),symbol:"play.rectangle",frame:NSRect(x:x,y:198,width:84,height:24),target:self,action:#selector(playVideo(_:)))
     badge.tag=i;badge.toolTip=LF("Video %@ – přehrát",videoDuration(info.durationMs));badge.setAccessibilityLabel(badge.toolTip);thumbnails.addSubview(badge)
    }
   }
@@ -330,11 +331,11 @@ final class Composer:NSObject,NSWindowDelegate {
  @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);contextSummaries[name]=nil;removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
  /// Odznak kontextu z prohlížeče: počet chyb a selhaných requestů, kliknutím nabídka s odebráním.
  @objc func playVideo(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};NSWorkspace.shared.open(videoSidecars(root.appendingPathComponent(draft.images[sender.tag]))[0])}
- private func contextBadge(_ image:String,index:Int)->AppButton {
+ private func contextBadge(_ image:String,index:Int,maxWidth:CGFloat=188)->AppButton {
   if contextSummaries[image]==nil{contextSummaries[image]=(try? boundedData(root.appendingPathComponent(image).appendingPathExtension("context.json"),max:maxContextBytes)).flatMap(ContextSummary.init)}
   let summary=contextSummaries[image] ?? nil
   let title=summary.map(contextBadgeTitle) ?? L("Kontext")
-  let width=min(188,(title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width+39)
+  let width=min(maxWidth,(title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width+39)
   let badge=styledButton(title,symbol:"ladybug",frame:NSRect(x:CGFloat(index)*238+4,y:198,width:width,height:24),target:self,action:#selector(showContextMenu(_:)));badge.tag=index
   badge.toolTip=L("Kontext z prohlížeče")+(summary.map{": "+$0.counts} ?? "");badge.setAccessibilityLabel(badge.toolTip)
   return badge

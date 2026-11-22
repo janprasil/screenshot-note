@@ -203,3 +203,5 @@ func remoteVideoInfo(_ attachments:[RemoteNote.Image.Attachment],downloaded:Set<
  }.sorted{$0.ms<$1.ms}
  return VideoInfo(durationMs:duration,width:width,height:height,frames:frames)
 }
+/// Název v assets/ je obsazený i cizím videem (`.mp4`, `.frames`), ne jen obrázkem.
+func assetStemTaken(_ assets:URL,_ stem:String)->Bool{["png","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(stem+"."+$0).path)}}

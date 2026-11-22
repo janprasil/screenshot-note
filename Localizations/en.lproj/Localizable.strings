@@ -554,3 +554,8 @@
 "Text" = "Text";
 "Komentář…" = "Comment…";
 "Odebrat komentář" = "Remove comment";
+"Rozbalit na víceřádkový Markdown" = "Expand to multi-line Markdown";
+"Potvrdit komentář (Enter, v rozbaleném ⌘Enter)" = "Confirm comment (Enter, ⌘Enter when expanded)";
+"Sbalit na jeden řádek" = "Collapse to one line";
+"Přidat komentář" = "Add comment";
+"Upravit komentář" = "Edit comment";

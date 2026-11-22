@@ -38,11 +38,11 @@ final class AnnotationTextView:NSTextView {
 final class DrawingView:NSView,NSTextViewDelegate {
  let image:NSImage
  var marks:[Mark]=[];var pending:Mark?;var selected:Int?;var viewport:NSRect
- var tool:Tool = .select{didSet{if tool != .element{hoverElement=nil;activeElement=nil};window?.invalidateCursorRects(for:self);needsDisplay=true}};var color:NSColor = .systemRed;var thickness:CGFloat=4
+ var tool:Tool = .select{didSet{updateNoteButton();if tool != .element{hoverElement=nil;activeElement=nil};window?.invalidateCursorRects(for:self);needsDisplay=true}};var color:NSColor = .systemRed;var thickness:CGFloat=4
  var bold=false;var italic=false;var underline=false;var fontSize:CGFloat=28
  var changed:(()->Void)?;var dragStart:NSPoint?;var dragOriginal:[NSPoint]?;var cropStart:NSPoint?;var cropPreview:NSRect?
  var history:[([Mark],NSRect)]=[];var inline:NSTextView?;var editingIndex:Int?;var closingText=false;var transformDrag:AnnotationTransformDrag?
- var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:ActiveElement?;var firstElementNumber=1;var elementField:NSTextField?;var elementFieldIndex:Int?;var closingElementNote=false;var trackingArea:NSTrackingArea?
+ var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:ActiveElement?;var firstElementNumber=1;var elementField:NSTextField?;var noteBox:NoteEditorBox?;var noteButton:NSButton?;var elementFieldIndex:Int?;var closingElementNote=false;var trackingArea:NSTrackingArea?
  override var acceptsFirstResponder:Bool{true}
  override var mouseDownCanMoveWindow:Bool{false}
  var toolCursor:NSCursor{tool == .text ? .iBeam:(tool == .select ? .arrow:(tool == .element ? .pointingHand:.crosshair))}
@@ -54,13 +54,13 @@ final class DrawingView:NSView,NSTextViewDelegate {
  override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
  init(image:NSImage,frame:NSRect){self.image=image;viewport=NSRect(origin:.zero,size:image.size);super.init(frame:frame)}
  required init?(coder:NSCoder){fatalError()}
- override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);updateInline();updateElementField();needsDisplay=true;window?.invalidateCursorRects(for:self)}
+ override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);updateInline();updateElementField();updateNoteButton();needsDisplay=true;window?.invalidateCursorRects(for:self)}
  var imageRect:NSRect{let scale=min(bounds.width/viewport.width,bounds.height/viewport.height);let size=NSSize(width:viewport.width*scale,height:viewport.height*scale);return NSRect(x:(bounds.width-size.width)/2,y:(bounds.height-size.height)/2,width:size.width,height:size.height)}
  var scale:CGFloat{imageRect.width/viewport.width}
  func point(_ event:NSEvent)->NSPoint{let p=convert(event.locationInWindow,from:nil),r=imageRect;return NSPoint(x:max(viewport.minX,min(viewport.maxX,(p.x-r.minX)/scale+viewport.minX)),y:max(viewport.minY,min(viewport.maxY,(p.y-r.minY)/scale+viewport.minY)))}
  func displayRect(_ rect:NSRect)->NSRect{let r=imageRect;return NSRect(x:r.minX+(rect.minX-viewport.minX)*scale,y:r.minY+(rect.minY-viewport.minY)*scale,width:rect.width*scale,height:rect.height*scale)}
  func snapshot(){history.append((marks,viewport));if history.count>40{history.removeFirst()}}
- func undoChange(){finishText();guard let last=history.popLast() else{return};marks=last.0;viewport=last.1;selected=nil;activeElement=nil;needsDisplay=true;changed?()}
+ func undoChange(){finishText();defer{updateNoteButton()};guard let last=history.popLast() else{return};marks=last.0;viewport=last.1;selected=nil;activeElement=nil;needsDisplay=true;changed?()}
  func paint(_ mark:Mark){guard let first=mark.points.first,let last=mark.points.last else{return}
   NSGraphicsContext.saveGraphicsState();defer{NSGraphicsContext.restoreGraphicsState()}
   if mark.rotation != 0{let center=mark.bounds;let transform=NSAffineTransform();transform.translateX(by:center.midX,yBy:center.midY);transform.rotate(byRadians:mark.rotation);transform.translateX(by:-center.midX,yBy:-center.midY);transform.concat()}
@@ -82,7 +82,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   if mark.tool != .element,let number=mark.number{paintBadge(number,at:mark.badgeAnchor,mark:mark)}
  }
  override func draw(_ dirtyRect:NSRect){AppPalette.canvas.setFill();bounds.fill();let r=imageRect;NSGraphicsContext.saveGraphicsState();r.clip();let t=NSAffineTransform();t.translateX(by:r.minX,yBy:r.minY);t.scale(by:scale);t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for(i,mark) in marks.enumerated(){if i != editingIndex{paint(mark)}};if let mark=pending{paint(mark)};NSGraphicsContext.restoreGraphicsState()
-  drawElementHover();drawSelectionHandles()
+  drawElementHover();drawSelectionHandles();drawNoteIndicators()
   if let rect=cropPreview{AppPalette.accent.setStroke();let p=NSBezierPath(rect:displayRect(rect));p.lineWidth=2;p.stroke()}
  }
  func hit(_ p:NSPoint)->Int?{let tolerance=max(6/scale,3);return marks.indices.reversed().first{index in let mark=marks[index],r=mark.bounds;let p=mark.unrotatedPoint(p);if mark.tool == .text{return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p)}
@@ -91,7 +91,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
    if mark.tool == .rectangle {return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p) && !r.insetBy(dx:tolerance,dy:tolerance).contains(p)}
    for j in 1..<mark.points.count{let a=mark.points[j-1],b=mark.points[j],dx=b.x-a.x,dy=b.y-a.y;let t=max(0,min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/max(0.001,dx*dx+dy*dy)));if hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<=max(tolerance,mark.width){return true}};return false
   }}
- func choose(_ index:Int?){selected=index;if let i=index{let m=marks[i];color=m.color;thickness=m.width;fontSize=m.fontSize;bold=m.bold;italic=m.italic;underline=m.underline};needsDisplay=true;window?.invalidateCursorRects(for:self);changed?()}
+ func choose(_ index:Int?){defer{updateNoteButton()};selected=index;if let i=index{let m=marks[i];color=m.color;thickness=m.width;fontSize=m.fontSize;bold=m.bold;italic=m.italic;underline=m.underline};needsDisplay=true;window?.invalidateCursorRects(for:self);changed?()}
  override func mouseDown(with event:NSEvent){finishText();window?.makeFirstResponder(self);if tool == .select && beginTransform(with:event){return};guard imageRect.contains(convert(event.locationInWindow,from:nil)) else{choose(nil);return};let p=point(event)
   if tool == .element {elementClick(p,parent:event.modifierFlags.contains(.option));return}
   if tool == .select {let index=hit(p);choose(index);if let i=index{if event.clickCount==2 && marks[i].tool == .text{startText(i);return};if marks[i].tool == .element{if event.clickCount==2{startElementNote(i)};return};if event.clickCount==2{startElementNote(i);return};dragStart=p;dragOriginal=marks[i].points;snapshot()};return}
@@ -104,7 +104,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   if let i=selected,let start=dragStart,let original=dragOriginal{marks[i].points=original.map{NSPoint(x:$0.x+p.x-start.x,y:$0.y+p.y-start.y)};needsDisplay=true;return}
   guard var mark=pending else{return};if mark.tool == .pen{mark.points.append(p)}else{mark.points[1]=p};pending=mark;needsDisplay=true
  }
- override func mouseUp(with event:NSEvent){if let mark=pending{marks.append(mark);pending=nil;tool = .select;choose(marks.count-1)};if let rect=cropPreview{applyCrop(rect)};cropStart=nil;cropPreview=nil;dragStart=nil;dragOriginal=nil
+ override func mouseUp(with event:NSEvent){defer{updateNoteButton()};if let mark=pending{marks.append(mark);pending=nil;tool = .select;choose(marks.count-1)};if let rect=cropPreview{applyCrop(rect)};cropStart=nil;cropPreview=nil;dragStart=nil;dragOriginal=nil
   if transformDrag != nil {
    transformDrag=nil
    let p=convert(event.locationInWindow,from:nil)
@@ -124,7 +124,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  func updateSelected(){if let i=selected,marks.indices.contains(i){snapshot();marks[i].color=color;marks[i].width=thickness;marks[i].fontSize=fontSize;marks[i].bold=bold;marks[i].italic=italic;marks[i].underline=underline;updateInline()};needsDisplay=true}
  func startText(_ index:Int){
   guard marks.indices.contains(index),marks[index].tool == .text else{return}
-  snapshot();editingIndex=index
+  snapshot();editingIndex=index;updateNoteButton()
   let edit=AnnotationTextView(frame:.zero);edit.isRichText=false;edit.allowsUndo=true;edit.drawsBackground=false;edit.backgroundColor = .clear;edit.focusRingType = .none
   edit.textContainerInset = .zero;edit.textContainer?.lineFragmentPadding=0;edit.textContainer?.widthTracksTextView=false;edit.textContainer?.containerSize=NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
   edit.isHorizontallyResizable=false;edit.isVerticallyResizable=false;edit.isAutomaticQuoteSubstitutionEnabled=false;edit.isAutomaticDashSubstitutionEnabled=false
@@ -262,6 +262,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   guard canvas != nil,canvas.tool == .element || canvas.elementField != nil,let event=NSApp.currentEvent,event.type == .keyDown,event.keyCode==code else{return false}
   if code==53,let i=canvas.elementFieldIndex,canvas.marks.indices.contains(i),canvas.marks[i].tool != .element{canvas.dropElementField();return true}
   if code==53,canvas.activeElement != nil || canvas.elementField != nil{canvas.cancelActiveElement();return true}
+  // V rozbaleném Markdownu Enter vloží řádek, potvrzuje ⌘Enter.
+  if code==36 || code==76,let box=canvas.noteBox,box.expanded,!event.modifierFlags.contains(.command){box.textView.insertNewline(nil);return true}
   if code==36 || code==76,canvas.elementField != nil{canvas.confirmElementNote();return true}
   return false
  }

@@ -85,13 +85,13 @@ import AppKit
   exported(3,NSRect(x:900,y:700,width:50,height:50),selector:"#out"),exported(5,button.rect,selector:"![[assets/a.png]]",tag:"![[assets/b.png]]"),exported(4,button.rect,selector:"img[alt=\"![x](assets/evil.png)\"]",tag:"img",name:"![y](assets/z.png)"),
   Mark(tool:.rectangle,points:[.zero,NSPoint(x:5,y:5)],color:.red,width:2,text:"",bold:false,italic:false,underline:false,fontSize:14)]
  let lines=elementMarkdownLines(marks,crop:NSRect(x:0,y:0,width:500,height:500))
- let expected="- **[1] Element** `button[data-testid=\"save\"]` „Uložit“: Klik nic neudělá\n- **[2] Element** ``a`b`` „Hello world“\n- **[4] Element** `img` „\\!\\[y\\]\\(assets/z.png\\)“\n- **[5] Element**"
+ let expected="- **[1] Element** `button[data-testid=\"save\"]` „Uložit“: Klik nic\n  neudělá\n- **[2] Element** ``a`b`` „Hello world“\n- **[4] Element** `img` „\\!\\[y\\]\\(assets/z.png\\)“\n- **[5] Element**"
  try check(lines==expected,"element lines:\n\(lines)")
  try check(imageLinks(lines).isEmpty,"page text cannot create image links")
  try JSONEncoder().encode(AnnotationDocument(base:Data(),marks:marks,crop:NSRect(x:0,y:0,width:500,height:500))).write(to:annotationSidecar(image))
  try check(captionWithElements("Popisek",image:image)=="Popisek\n\n"+expected && captionWithElements("",image:image)==expected,"caption with elements")
  try check(captionWithElements("Jen text",image:folder.appendingPathComponent("missing.png"))=="Jen text","caption without annotations")
- try check(captionWithElements("",image:image,pageData:false)=="- **[1] Element**: Klik nic neudělá\n- **[2] Element**\n- **[4] Element**\n- **[5] Element**","cloud caption without page data")
+ try check(captionWithElements("",image:image,pageData:false)=="- **[1] Element**: Klik nic\n  neudělá\n- **[2] Element**\n- **[4] Element**\n- **[5] Element**","cloud caption without page data")
  // Komentáře tvarů: společná řada čísel s elementy, prázdný komentář číslo odebere, ostatní se přečíslují.
  let notes=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
  func shape(_ tool:Tool,_ rect:NSRect)->Mark{Mark(tool:tool,points:[rect.origin,NSPoint(x:rect.maxX,y:rect.maxY)],color:.red,width:3,text:"",bold:false,italic:false,underline:false,fontSize:14)}
@@ -109,6 +109,15 @@ import AppKit
  try check(highestElementNumber(in:"- **[9] Krok**\n- **[2] Šipka**: y")==2,"user list items do not shift numbering")
  notes.marks[0].comment="viz ![x](assets/a.png)";try check(imageLinks(elementMarkdownLines(notes.marks,crop:nil)).isEmpty,"comment cannot create an image link")
  let rendered=notes.png();try check(rendered != nil,"export with comment badges renders")
+ // Víceřádkový Markdown: další řádky odsazené pod položkou, prázdné řádky sloučené.
+ notes.marks[0].comment="První řádek\n\n\n- bod\n**tučně**";notes.marks[0].number=2
+ try check(elementMarkdownLines([notes.marks[0]],crop:nil)=="- **[2] Rámeček**: První řádek\n  \n  - bod\n  **tučně**","multi-line comment stays inside its list item")
+ // Pole komentáře: rozbalení přenese text, potvrzení vezme rozbalený obsah.
+ notes.marks[0].comment="Jeden řádek";notes.startElementNote(0);try check(notes.noteBox?.expanded==false,"single-line comment opens collapsed");notes.noteBox?.field.stringValue="Krátce";notes.noteBox?.toggleExpanded()
+ try check(notes.noteBox?.expanded==true && notes.noteBox?.markdown=="Krátce","expanding keeps the text")
+ notes.noteBox?.markdown="Řádek 1\nŘádek 2";notes.confirmElementNote()
+ try check(notes.marks[0].comment=="Řádek 1\nŘádek 2" && notes.noteBox==nil,"expanded comment is saved")
+ notes.choose(0);try check(notes.noteButton==nil && notes.noteButtonTitle(notes.marks[0])==L("Upravit komentář") && notes.noteButtonTitle(notes.marks[1])==L("Přidat komentář"),"comment button title follows the comment")
  // Úprava popisu existujícího elementu jde vrátit.
  let undoCanvas=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
  undoCanvas.marks=[exported(1,button.rect,selector:"#b",note:"Původní")];undoCanvas.startElementNote(0);undoCanvas.elementField?.stringValue="Nový";undoCanvas.commitElementNote()

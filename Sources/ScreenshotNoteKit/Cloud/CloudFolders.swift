@@ -375,7 +375,7 @@ final class CloudFolders {
   next.folder=updated[index].folder;next.migratedLocalIDs=updated[index].migratedLocalIDs;next.confirmLocalDeletes=updated[index].confirmLocalDeletes
   next.ownerKind=record.ownerKind;next.ownerName=next.ownerName ?? record.ownerName;next.role=next.role ?? record.role
   // Uložení nastavení AI název nevrací; drží se poslední známý stav.
-  next.aiTitle=next.aiTitle ?? record.aiTitle
+  next.aiTitle=next.aiTitle ?? updated[index].aiTitle
   if let name=next.combinedFile,!validCombinedFile(name){next.combinedFile=nil}
   updated[index]=next;try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
   return next.topic

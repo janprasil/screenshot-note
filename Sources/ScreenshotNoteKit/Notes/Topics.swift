@@ -352,12 +352,14 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   if enable,!confirmAITitle(){aiTitleToggle.state = .off;return}
   aiTitleToggle.isEnabled=false
   Task{@MainActor in
-   defer{aiTitleToggle.isEnabled=editingManaged}
+   // Výsledek patří složce, která požadavek spustila; jiná vybraná složka se jen překreslí.
    do {
     let setting=try await CloudFolders.shared.aiTitle(topic,enable:enable)
-    list=Topics.all;aiTitleToggle.state=setting.enabled ? .on:.off
+    list=Topics.all
+    guard editingID==topic.id else{updateContext();return}
     showStatus(setting.enabled ? LF("AI názvy jsou zapnuté. Tento měsíc zbývá %ld z %ld.",max(0,setting.limit-setting.used),setting.limit):L("AI názvy jsou vypnuté."))
-   } catch {aiTitleToggle.state=enable ? .off:.on;showError(error.localizedDescription)}
+   } catch {if editingID==topic.id{showError(error.localizedDescription)}}
+   updateContext()
   }
  }
  /// Před zapnutím AI názvu: co se posílá, komu, že do USA a že jde vypnout.

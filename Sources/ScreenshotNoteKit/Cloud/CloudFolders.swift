@@ -1257,7 +1257,8 @@ final class CloudFolders {
    let video=assetVideoFiles(assets,name),key=prefix+video[0].lastPathComponent
    // Místně změněné MP4 (jiný hash než při posledním stažení) se nepřepíše ani nesmaže.
    let edited=fm.fileExists(atPath:video[0].path) && fileHash(video[0]) != previous[key]
-   if edited{if let hash=previous[key] ?? fileHash(video[0]){files[key]=hash}}
+   // Cizí MP4 bez záznamu v indexu se nepřebírá (sync ho nikdy nepřepíše ani nesmaže).
+   if edited{if let hash=previous[key]{files[key]=hash}}
    else if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
     if fileHash(video[0]) != sessionFingerprint(mp4){try replaceFile(video[0],with:mp4,in:assets)}
     // Snímky se porovnají i obsahem; stejný čas a název neznamená stejný obrázek.

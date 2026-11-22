@@ -50,11 +50,13 @@ final class CountdownOverlay {
   back.addSubview(label);panel.contentView=back;panel.orderFrontRegardless();window=panel
   back.setAccessibilityLabel(LF("Záznam začne za %d s",seconds))
   var left=seconds
-  timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] timer in
+  let tick=Timer(timeInterval:1,repeats:true){[weak self] timer in
    left-=1
    if left>0{label.stringValue="\(left)";return}
    timer.invalidate();self?.close();done()
   }
+  // Odpočet běží i při otevřeném menu baru.
+  RunLoop.main.add(tick,forMode:.common);timer=tick
  }
  func close(){timer?.invalidate();timer=nil;window?.orderOut(nil);window=nil}
 }

@@ -138,30 +138,38 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  /// Hotový záznam: poster jako obrázek položky, video a snímky vedle něj, kontext prohlížeče za celou dobu.
  func recordingFinished(_ result:Result<RecordingResult,Error>?) {
-  let active=composer
-  guard let result else{active?.expandCompact();return}
+  guard let result else{composer?.expandCompact();return}
   let recorded:RecordingResult
-  switch result{case .failure(let error):active?.expandCompact();showError(error.localizedDescription);return;case .success(let value):recorded=value}
-  do {
-   var draft:Draft;let root:URL
-   if let active{active.snapshotFields();draft=active.draft;root=active.root}else{let copy=try workingCopy();draft=copy.0;root=copy.1}
-   let poster=root.appendingPathComponent(UUID().uuidString+".png")
-   do{try storeRecording(recorded,poster:poster)}catch{try? fm.removeItem(at:recorded.video);if active == nil{try? fm.removeItem(at:root)};throw error}
-   let folder=draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
-   let window=recorded.durationMs+(recordingCountdown+5)*1000
-   let browser=recordingBrowser;recordingBrowser=nil
-   let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
-   deliveringRecording=true
-   let deliver={(files:CaptureContextFiles?) in
-    self.deliveringRecording=false
-    let attached=files.map{(try? $0.write(besides:poster)) != nil} ?? false
+  switch result{case .failure(let error):composer?.expandCompact();showError(error.localizedDescription);return;case .success(let value):recorded=value}
+  // Záznam čeká v dočasné složce; do konceptu se přesune až při doručení, kdy se cíl ověří znovu.
+  let holding=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-recording-"+UUID().uuidString,isDirectory:true)
+  let poster=holding.appendingPathComponent(UUID().uuidString+".png")
+  do{try fm.createDirectory(at:holding,withIntermediateDirectories:true);try storeRecording(recorded,poster:poster)}
+  catch{try? fm.removeItem(at:recorded.video);try? fm.removeItem(at:holding);composer?.expandCompact();showError(error.localizedDescription);return}
+  let topic=composer?.draft.topic ?? (try? readDraft(draftRoot))?.topic
+  let folder=topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
+  let window=recorded.durationMs+(recordingCountdown+5)*1000
+  let browser=recordingBrowser;recordingBrowser=nil
+  let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
+  deliveringRecording=true
+  let deliver={(files:CaptureContextFiles?) in
+   self.deliveringRecording=false
+   defer{try? fm.removeItem(at:holding)}
+   let attached=files.map{(try? $0.write(besides:poster)) != nil} ?? false
+   do {
+    let active=self.composer
+    var draft:Draft;let root:URL
+    if let active{active.snapshotFields();draft=active.draft;root=active.root}else{let copy=try self.workingCopy();draft=copy.0;root=copy.1}
+    let target=root.appendingPathComponent(poster.lastPathComponent)
+    do{for (source,side) in zip([poster]+contextSidecars(poster)+videoSidecars(poster),[target]+contextSidecars(target)+videoSidecars(target)) where fm.fileExists(atPath:source.path){try fm.moveItem(at:source,to:side)}}
+    catch{removeAnnotatedImage(target);if active == nil{try? fm.removeItem(at:root)};throw error}
     if let active {
-     guard active.appendCapturedImage(poster.lastPathComponent,context:attached) else{removeAnnotatedImage(poster);active.expandCompact();return}
+     guard active.appendCapturedImage(target.lastPathComponent,context:attached) else{removeAnnotatedImage(target);active.expandCompact();return}
      active.snapshotFields();self.autosave(active.draft,root:root);active.expandCompact();active.window.makeKeyAndOrderFront(nil)
-    }else{let before=draft;draft.images.append(poster.lastPathComponent);if attached{draft.contexts=(draft.contexts ?? [:]).merging([poster.lastPathComponent:poster.lastPathComponent+".context.json"]){$1}};self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
-   }
-   if let context{context.wait(upTo:1,deliver)}else{deliver(nil)}
-  }catch{active?.expandCompact();showError(error.localizedDescription)}
+    }else{let before=draft;draft.images.append(target.lastPathComponent);if attached{draft.contexts=(draft.contexts ?? [:]).merging([target.lastPathComponent:target.lastPathComponent+".context.json"]){$1}};self.autosave(draft,root:root);self.present(draft,root:root,baseline:before)}
+   }catch{self.composer?.expandCompact();showError(error.localizedDescription)}
+  }
+  if let context{context.wait(upTo:1,deliver)}else{deliver(nil)}
  }
  @objc func openCloudSettings(){cloudSettings.show()}
  @objc func openParked(){Task{@MainActor in FolderDialogs.resolveParked()}}

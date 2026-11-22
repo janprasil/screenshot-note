@@ -13,7 +13,7 @@ struct Draft: Codable { var images: [String]; var comment: String; var title: St
 /// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
 func draftSignature(_ draft:Draft,root:URL)->String {
  var parts=[draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",draft.comment]
- for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image);if let hash=fileHash(annotationSidecar(root.appendingPathComponent(image))){parts.append(hash)};if draft.contexts?[image] != nil{parts.append("context")}}
+ for image in draft.images{parts.append(draft.imageNotes?[image] ?? "");parts.append(fileHash(root.appendingPathComponent(image)) ?? image);if let hash=fileHash(annotationSidecar(root.appendingPathComponent(image))){parts.append(hash)};if draft.contexts?[image] != nil{parts.append("context")};if let hash=fileHash(videoSidecars(root.appendingPathComponent(image))[0]){parts.append(hash)}}
  if let removed=draft.removedContexts,!removed.isEmpty{parts.append(removed.sorted().joined(separator:"/"))}
  return sessionFingerprint(Data(parts.joined(separator:"\u{0}").utf8))
 }
@@ -92,16 +92,20 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
    for (source,target) in zip(contextSidecars(root.appendingPathComponent(image)),assetContextFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
    adjustContextCapture(assetContextFiles(assets,filename)[0],annotations:annotationSidecar(root.appendingPathComponent(image)))
   }
+  // Video jde vždy (není to kontext z prohlížeče): `<název>.mp4` a `<název>.frames/` vedle posteru.
+  func copyVideo(_ image:String,as filename:String)throws{
+   for (source,target) in zip(videoSidecars(root.appendingPathComponent(image)),assetVideoFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
+  }
   for (index, image) in draft.images.enumerated() {
    if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){
-    try copyContext(image,as:originalName);imageNames.append(originalName);continue
+    try copyContext(image,as:originalName);try copyVideo(image,as:originalName);imageNames.append(originalName);continue
    }
    // Název musí být volný pro obrázek i pro oba soubory kontextu.
-   let base=uniqueName(name+"-\(index+1)"){candidate in ["png","context.json","har"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}
+   let base=uniqueName(name+"-\(index+1)"){candidate in ["png","context.json","har","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}
    let target = assets.appendingPathComponent(base+".png")
    let filename = target.lastPathComponent
    try fm.copyItem(at:root.appendingPathComponent(image), to:target); copied.append(target)
-   try copyContext(image,as:filename);imageNames.append(filename)
+   try copyContext(image,as:filename);try copyVideo(image,as:filename);imageNames.append(filename)
   }
   // Anotace Element se vypíšou pod popisek obrázku a zůstanou v něm i pro přerenderování.
   // Bez kontextu (odebraný nebo vypnutý politikou) jdou ven jen čísla a popisy, ne data stránky.
@@ -115,7 +119,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   // Markdown nenese žádné skryté značky; identitu drží index a xattr.
   let content=body,index=SessionIndex.shared,length=(content as NSString).length
   var hashes:[String:String]=[:]
-  for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));if removedContext[name] != nil{continue};for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}}}
+  for name in imageNames{hashes["assets/"+name]=fileHash(assets.appendingPathComponent(name));if removedContext[name] != nil{continue};for (file,suffix) in zip(assetContextFiles(assets,name),[".context.json",".har"]){if let hash=fileHash(file){hashes["assets/"+(name as NSString).deletingPathExtension+suffix]=hash}};if let hash=fileHash(assetVideoFiles(assets,name)[0]){hashes["assets/"+(name as NSString).deletingPathExtension+".mp4"]=hash}}
   var record=SessionRecord(id:previous?.session ?? UUID().uuidString,file:SessionIndex.key(markdown),start:0,length:length,hash:sessionFingerprint(Data(content.utf8)),heading:firstLine(content),title:title,comment:draft.comment,template:template,images:imageNames,notes:notes,combined:false,footer:"",files:hashes,seen:0)
   record.imageTemplate=draft.topic?.imageTemplate
   if let previous=previous {

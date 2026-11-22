@@ -27,9 +27,9 @@ struct Mark:Codable {
 }
 struct AnnotationDocument:Codable{var base:Data;var marks:[Mark];var crop:NSRect}
 func annotationSidecar(_ image:URL)->URL{image.appendingPathExtension("annotations.json")}
-// Kopíruje i kontext z prohlížeče, který leží v pracovní složce vedle obrázku.
-func copyAnnotationSidecar(from:URL,to:URL)throws{for (side,target) in zip([annotationSidecar(from)]+contextSidecars(from),[annotationSidecar(to)]+contextSidecars(to)) where FileManager.default.fileExists(atPath:side.path){try FileManager.default.copyItem(at:side,to:target)}}
-func removeAnnotatedImage(_ image:URL){for url in [image,annotationSidecar(image)]+contextSidecars(image){try? FileManager.default.removeItem(at:url)}}
+// Kopíruje i kontext z prohlížeče a video, které leží v pracovní složce vedle obrázku.
+func copyAnnotationSidecar(from:URL,to:URL)throws{for (side,target) in zip([annotationSidecar(from)]+contextSidecars(from)+videoSidecars(from),[annotationSidecar(to)]+contextSidecars(to)+videoSidecars(to)) where FileManager.default.fileExists(atPath:side.path){try FileManager.default.copyItem(at:side,to:target)}}
+func removeAnnotatedImage(_ image:URL){for url in [image,annotationSidecar(image)]+contextSidecars(image)+videoSidecars(image){try? FileManager.default.removeItem(at:url)}}
 
 final class AnnotationTextView:NSTextView {
  override var mouseDownCanMoveWindow:Bool{false}

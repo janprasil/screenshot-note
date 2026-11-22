@@ -144,9 +144,12 @@ final class PendingCaptureContext:@unchecked Sendable {
  private let lock=NSLock();private var done=false;private var files:CaptureContextFiles?
  private var waiters:[(CaptureContextFiles?)->Void]=[]
  /// Složka s vypnutým kontextem request vůbec nepošle.
- static func start(topic:Topic?,bridge:BrowserBridge = .shared,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
+ /// `windowMs` u videa pokryje celou dobu záznamu; mapa elementů k videu nepatří.
+ static func start(topic:Topic?,bridge:BrowserBridge = .shared,windowMs:Int?=nil,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
   guard let policy=topic?.effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
-  return PendingCaptureContext(bridge:bridge,target:target,policy:policy.protocolJSON)
+  var json=policy.protocolJSON
+  if let windowMs{json["windowMs"]=windowMs;json["includeElements"]=false}
+  return PendingCaptureContext(bridge:bridge,target:target,policy:json,timeout:windowMs == nil ? 30:5)
  }
  /// Deadline pokrývá i interaktivní výběr výřezu; po snímku se čeká jen `wait(upTo:)`.
  init(bridge:BrowserBridge,target:[String:Any]?,policy:[String:Any]?=nil,timeout:TimeInterval=30){
@@ -255,6 +258,8 @@ func screenshotsWithContext(_ names:[String],_ captions:[String],assets:URL,with
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
  let blocks=zip(names,captions).enumerated().map{(offset,pair)->ImageBlock in
   var block=ImageBlock(name:pair.0,caption:pair.1)
+  let video=assetVideoFiles(assets,pair.0)
+  if fm.fileExists(atPath:video[0].path),let info=readVideoInfo(video[1]){block.videoMs=info.durationMs}
   let files=assetContextFiles(assets,pair.0)
   if !excluded.contains(pair.0),let data=try? boundedData(files[0],max:maxContextBytes),let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=fm.fileExists(atPath:files[1].path)

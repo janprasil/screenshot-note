@@ -20,7 +20,9 @@ struct Shortcut:Codable {
  }
  static func load(_ id:Int)->Shortcut {
   if let d=UserDefaults.standard.data(forKey:"shortcut\(id)"),let s=try? JSONDecoder().decode(Shortcut.self,from:d){return s}
-  return Shortcut(key:id == 1 ? 21:20,modifiers:UInt32(controlKey|optionKey|shiftKey),name:id == 1 ? "4":"3")
+  // 1 oblast (⌃⌥⇧4), 2 celá obrazovka (⌃⌥⇧3), 3 záznam videa start/stop (⌃⌥⇧5).
+  let key:[Int:(UInt32,String)]=[1:(21,"4"),2:(20,"3"),3:(23,"5")]
+  return Shortcut(key:key[id]?.0 ?? 23,modifiers:UInt32(controlKey|optionKey|shiftKey),name:key[id]?.1 ?? "5")
  }
 }
 
@@ -39,13 +41,13 @@ final class Hotkeys {
   },1,&type,Unmanaged.passUnretained(self).toOpaque(),&handler)
  }
  func register()->[String]{for r in refs{UnregisterEventHotKey(r)};refs=[];registered=[];if let monitor{NSEvent.removeMonitor(monitor);self.monitor=nil};var errors:[String]=[]
-  for id in 1...2 {let s=Shortcut.load(id);var ref:EventHotKeyRef?;let status=RegisterEventHotKey(s.key,s.modifiers,EventHotKeyID(signature:0x53434E54,id:UInt32(id)),GetApplicationEventTarget(),0,&ref)
+  for id in 1...3 {let s=Shortcut.load(id);var ref:EventHotKeyRef?;let status=RegisterEventHotKey(s.key,s.modifiers,EventHotKeyID(signature:0x53434E54,id:UInt32(id)),GetApplicationEventTarget(),0,&ref)
    if status == noErr,let ref=ref {refs.append(ref);registered.insert(id)} else {errors.append(LF("Zkratka %@ je již obsazená. Změň ji v nastavení.",s.display))}
   }
   monitor=NSEvent.addLocalMonitorForEvents(matching:.keyDown){[weak self] event in
    guard let self,NSApp.keyWindow is ScreenshotPanel else{return event}
    if let button=NSApp.keyWindow?.firstResponder as? ShortcutButton,button.recording{return event}
-   guard let id=(1...2).first(where:{self.registered.contains($0) && Shortcut.load($0).matches(event)}) else{return event}
+   guard let id=(1...3).first(where:{self.registered.contains($0) && Shortcut.load($0).matches(event)}) else{return event}
    if !event.isARepeat{self.trigger(id)}
    return nil
   }

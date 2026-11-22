@@ -55,12 +55,13 @@ func renderCommentList(_ comments:[RemoteNote.Comment],template:String?,language
 }
 
 /// Jeden obrázek pro {screenshots}; popisek a komentáře jsou připravené pro Markdown.
-struct ImageBlock{var name:String;var caption:String;var context:String="";var comments:String=""}
+/// videoMs: položka je video, {image} odkazuje poster na `<název>.mp4` (web renderImageList).
+struct ImageBlock{var name:String;var caption:String;var context:String="";var comments:String="";var videoMs:Int?=nil}
 func renderImageBlocks(_ images:[ImageBlock],template:String?)->String {
  let source=template ?? defaultImageTemplate,separate=source.contains("{elements}")
  return images.enumerated().map{(offset,image) in
   let parts=separate ? splitElements(image.caption):(image.caption,"")
-  return renderParagraphs(source,["image":imageMarkdown(image.name,offset+1),"description":parts.0,"comments":image.comments,"number":String(offset+1),"context":image.context,"elements":parts.1])
+  return renderParagraphs(source,["image":image.videoMs.map{videoMarkdown(image.name,durationMs:$0)} ?? imageMarkdown(image.name,offset+1),"description":parts.0,"comments":image.comments,"number":String(offset+1),"context":image.context,"elements":parts.1])
  }.joined(separator:"\n\n")
 }
 

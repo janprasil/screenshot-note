@@ -961,7 +961,7 @@ final class CloudFolders {
   }
   let data=try await images(note,topic:topic,endpoint:endpoint,token:token),shas=data.map(sessionFingerprint)
   let contexts=try await contextAttachments(note,topic:topic,endpoint:endpoint,token:token)
-  func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har")}
+  func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har") || key.hasSuffix(".mp4")}
   guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
   try Topics.validateDestination(topic,folder:base,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
   let assets=base.appendingPathComponent("assets");try fm.createDirectory(at:assets,withIntermediateDirectories:true)
@@ -1092,7 +1092,7 @@ final class CloudFolders {
    }
    // Přílohy kontextu i ve společném souboru; index relace nese jejich hashe.
    let sides=try writeContextAttachments(contexts,names:names,assets:assets,previous:record?.files ?? [:])
-   files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har")}.merging(sides){a,_ in a}
+   files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har") && !$0.key.hasSuffix(".mp4")}.merging(sides){a,_ in a}
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
@@ -1187,12 +1187,12 @@ final class CloudFolders {
   currentConnection()?.token==token && account?.0==currentConnection()?.ownerID && account?.1==topic.cloudOrigin &&
    records.contains(where:{matches($0,topic) && $0.folder==topic.folder && $0.unavailable != true && $0.remoteDeleted != true})
  }
- /// Platné přílohy kontextu; neznámé nebo nesedící záznamy se zahodí, prázdný seznam je nil.
+ /// Platné přílohy kontextu a videa; neznámé nebo nesedící záznamy se zahodí, prázdný seznam je nil.
  static func normalizedAttachments(_ source:RemoteNote,path:String)->RemoteNote {
   var note=source
   note.images=note.images.map{image in
    var copy=image
-   let valid=(image.attachments ?? []).filter{["context","har"].contains($0.kind) && (1...CloudAttachment.limit).contains($0.bytes) && $0.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
+   let valid=(image.attachments ?? []).filter{CloudAttachment.validKind($0.kind) && (1...CloudAttachment(index:1,kind:$0.kind,bytes:0,sha256:"").sizeLimit).contains($0.bytes) && $0.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
     && $0.path==path+"/attachments/\(image.index)/\($0.kind)"}
    copy.attachments=valid.isEmpty ? nil:Array(Dictionary(valid.map{($0.kind,$0)},uniquingKeysWith:{a,_ in a}).values).sorted{$0.kind<$1.kind}
    return copy
@@ -1207,11 +1207,14 @@ final class CloudFolders {
     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
     // Chybějící nebo poškozená příloha neblokuje stažení relace; dočasná chyba ho zopakuje později.
     let data:Data
-    do{data=try await request(endpoint,item.path,token,CloudAttachment.limit+1)}
+    do{data=try await request(endpoint,item.path,token,CloudAttachment(index:1,kind:item.kind,bytes:0,sha256:"").sizeLimit+1)}
     catch let failure as CloudFailure where failure.status==404{continue}
     guard data.count==item.bytes,sessionFingerprint(data)==item.sha256 else{continue}
     result[image.index,default:[:]][item.kind]=data
    }
+   // Metadata videa jako video.json do složky snímků (časy z media).
+   if result[image.index]?["video"] != nil,let json=remoteVideoInfo(image.attachments ?? [],downloaded:Set(result[image.index]?.keys.map{$0} ?? [])).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
+   else{result[image.index]?["video"]=nil}
   }
   return result
  }
@@ -1232,8 +1235,29 @@ final class CloudFolders {
     // Smazat jen přílohu staženou dřív z cloudu; místní soubor zůstává.
     } else if previous[key] != nil,fm.fileExists(atPath:target.path){try fm.removeItem(at:target)}
    }
+   // Video: `<název>.mp4` a `<název>.frames/` (N.png + video.json) vedle posteru.
+   let video=assetVideoFiles(assets,name),key=prefix+video[0].lastPathComponent
+   if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
+    if fileHash(video[0]) != sessionFingerprint(mp4){try replaceFile(video[0],with:mp4,in:assets)}
+    if (try? Data(contentsOf:video[1].appendingPathComponent("video.json"))) != json || !info.frames.allSatisfy({fm.fileExists(atPath:video[1].appendingPathComponent($0.file).path)}) {
+     let staging=assets.appendingPathComponent(".\(UUID().uuidString).frames",isDirectory:true)
+     try fm.createDirectory(at:staging,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+     do {
+      for frame in info.frames{guard let data=contexts[position+1]?["frame-"+frame.file.replacingOccurrences(of:".png",with:"")] else{continue};guard fm.createFile(atPath:staging.appendingPathComponent(frame.file).path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}}
+      guard fm.createFile(atPath:staging.appendingPathComponent("video.json").path,contents:json,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}
+      try? fm.removeItem(at:video[1]);try fm.moveItem(at:staging,to:video[1])
+     }catch{try? fm.removeItem(at:staging);throw error}
+    }
+    files[key]=sessionFingerprint(mp4)
+   } else if previous[key] != nil {for url in video{try? fm.removeItem(at:url)}}
   }
   return files
+ }
+ /// Soubor vzniká rovnou jako 0600 a přejmenuje se na místo.
+ private func replaceFile(_ target:URL,with data:Data,in assets:URL)throws {
+  let temporary=assets.appendingPathComponent(".\(UUID().uuidString).tmp")
+  guard fm.createFile(atPath:temporary.path,contents:data,attributes:[.posixPermissions:0o600]) else{throw CloudFailure.invalid}
+  guard rename(temporary.path,target.path)==0 else{try? fm.removeItem(at:temporary);throw CloudFailure.invalid}
  }
  @MainActor private func images(_ note:RemoteNote,topic:Topic,endpoint:CloudEndpoint,token:String)async throws->[Data] {
   var total=0;var result:[Data]=[]

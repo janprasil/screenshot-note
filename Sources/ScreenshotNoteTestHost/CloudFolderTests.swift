@@ -126,6 +126,7 @@ import AppKit
  try await flatLayoutTests()
  try await editAndCommentTests()
  try itemTemplateTests()
+ try videoRecordingTests()
  try await staleDraftTests()
  try await markdownLinkTests()
  try await teamFolderTests()

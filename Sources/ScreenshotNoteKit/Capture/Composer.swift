@@ -248,6 +248,8 @@ final class Composer:NSObject,NSWindowDelegate {
     }
     let name=UUID().uuidString+".png";let target=root.appendingPathComponent(name);try data.write(to:target,options:.withoutOverwriting);importedNames.append(name);try copyAnnotationSidecar(from:source,to:target);imported[name]=image;notes[name]=chosen.imageNotes[image]
     if try importAssetContext(assets:assets,image:image,to:target){contexts[name]=name+".context.json"}
+    // Video zůstane u položky i po úpravě posteru.
+    for (source,side) in zip(assetVideoFiles(assets,image),videoSidecars(target)) where fm.fileExists(atPath:source.path){try fm.copyItem(at:source,to:side)}
    }
   }catch{for name in importedNames{removeAnnotatedImage(root.appendingPathComponent(name))};showError(error.localizedDescription);restorePreviousSelection();return}
   draft.images=importedNames+fresh;draft.imageNotes=notes;draft.contexts=contexts.isEmpty ? nil:contexts;var target=chosen.target;target.imported=imported;draft.previous=target;draft.removedContexts=nil
@@ -273,7 +275,14 @@ final class Composer:NSObject,NSWindowDelegate {
    note.expandedTitle=L("Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
    note.frame=NSRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2);note.collapsedFrame=note.frame;button.addHoverAction(note)
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
-   if draft.contexts?[image] != nil{thumbnails.addSubview(contextBadge(image,index:i))}
+   let context=draft.contexts?[image] != nil ? contextBadge(image,index:i):nil
+   if let context{thumbnails.addSubview(context)}
+   // Video: délka nad posterem, vedle odznaku kontextu.
+   if let info=readVideoInfo(videoSidecars(root.appendingPathComponent(image))[1]),fm.fileExists(atPath:videoSidecars(root.appendingPathComponent(image))[0].path) {
+    let x=CGFloat(i)*238+4+(context.map{$0.frame.width+6} ?? 0)
+    let badge=styledButton(videoDuration(info.durationMs),symbol:"play.rectangle",frame:NSRect(x:x,y:198,width:min(84,192-(x-CGFloat(i)*238)),height:24),target:self,action:#selector(playVideo(_:)))
+    badge.tag=i;badge.toolTip=LF("Video %@ – přehrát",videoDuration(info.durationMs));badge.setAccessibilityLabel(badge.toolTip);thumbnails.addSubview(badge)
+   }
   }
   if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Přidej výřez nebo snímek celé obrazovky."),NSRect(x:8,y:102,width:720,height:24)))}
   laterButton.isEnabled=true;saveButton.isEnabled = !draft.images.isEmpty;addShotButton.isEnabled=true;updatePreviousAvailability()
@@ -320,6 +329,7 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);contextSummaries[name]=nil;removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
  /// Odznak kontextu z prohlížeče: počet chyb a selhaných requestů, kliknutím nabídka s odebráním.
+ @objc func playVideo(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};NSWorkspace.shared.open(videoSidecars(root.appendingPathComponent(draft.images[sender.tag]))[0])}
  private func contextBadge(_ image:String,index:Int)->AppButton {
   if contextSummaries[image]==nil{contextSummaries[image]=(try? boundedData(root.appendingPathComponent(image).appendingPathExtension("context.json"),max:maxContextBytes)).flatMap(ContextSummary.init)}
   let summary=contextSummaries[image] ?? nil

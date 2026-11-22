@@ -654,10 +654,12 @@ final class CloudLibrary {
   try fm.createDirectory(at:receipt.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
   try JSONEncoder().encode(CommittedUpload(owner:owner,origin:c.endpoint,id:job.sessionID,folder:job.manifest.folder_id,digest:state.manifest_digest)).write(to:receipt,options:.atomic)
   // Přílohy až po commitu a účtence; dočasná chyba nechá job ve frontě, opakování pošle znovu, stejný hash server jen potvrdí.
-  var videoRejected: String? = nil
+  var videoRejected: String? = nil, rejectedVideos = Set<Int>()
   for item in job.attachments ?? [] {
    let file = directory.appendingPathComponent(item.filename)
    guard CloudAttachment.validKind(item.kind), !item.isContext || cloudAttachmentAllowed(directory, index: item.index, folder: job.manifest.folder_id) else { continue }
+   // Snímky k odmítnutému videu server nepřijme (409); job se hned odloží.
+   if item.kind.hasPrefix("frame-"), rejectedVideos.contains(item.index) { continue }
    guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= item.sizeLimit, sessionFingerprint(data) == item.sha256 else { continue }
    var headers = ["Content-Type":item.contentType,"x-bytes":String(item.bytes),"x-sha256":item.sha256]
    if let ms = item.timestampMs, let video = item.video { headers["x-timestamp-ms"] = String(ms); headers["x-video-sha256"] = video }
@@ -667,7 +669,7 @@ final class CloudLibrary {
    } catch let failure as CloudFailure where [400,402,403,404,413,415].contains(failure.status) || failure.code=="session_trashed" {
     // Odmítnutá příloha relaci neblokuje; snímky jsou už v cloudu, uživatel dostane hlášku.
     lastError=item.isContext ? LF("Kontext snímku %ld se do cloudu nenahrál: %@",item.index,failure.message):LF("Video položky %ld se do cloudu nenahrálo: %@",item.index,failure.message)
-    if item.kind == "video" { videoRejected = lastError }
+    if item.kind == "video" { videoRejected = lastError; rejectedVideos.insert(item.index) }
    }
   }
   // Odmítnuté video je jediná kopie záznamu; job se odloží, místo aby se smazal.

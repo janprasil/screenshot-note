@@ -1096,7 +1096,8 @@ final class CloudFolders {
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
-   next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names)
+   // Metadata čtení patří bloku v souboru; nová se zapíšou až s novým blokem.
+   next.render=cloudRenderVersion;next.imageTemplate=record?.imageTemplate ?? note.image_template;next.imageComments=record.map{$0.imageComments} ?? cloudImageComments(note,images:names)
    if let saved=record{next.start=saved.start;next.length=saved.length;next.hash=saved.hash;next.heading=saved.heading;next.footer=saved.footer}
    // Obsahově shodná relace (jen nové porovnání) se nebere jako změna.
    let same=record.map{$0.note.map{old in old.title==note.title && old.comment==note.comment && old.captions==note.captions && old.template==note.template && (!note.template.contains("{author}") || old.author==note.author)
@@ -1142,6 +1143,7 @@ final class CloudFolders {
     // Bloky z ručně upraveného hlavního souboru se dál hlídají v něm a drží svou pozici.
     var next=record;next.combined=true
     if record.file==mainKey && (covered || SessionIndex.key(target) != mainKey){index.put(next);continue}
+    if let note=next.note{next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:next.images)}
     next.file=SessionIndex.key(target);next.start=start;next.length=(body as NSString).length;next.hash=sessionFingerprint(Data(body.utf8))
     next.heading=firstLine(body);next.footer=footer;index.put(next)
    }

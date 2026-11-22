@@ -115,7 +115,8 @@ private func paragraphPattern(_ paragraphs:[String],imageAtEnd:Bool,capture:Bool
   }
   piece+=NSRegularExpression.escapedPattern(for:ns.substring(from:offset))
   if index==required{pattern+=piece;continue}
-  let placeholderOnly = !matches.isEmpty && token.stringByReplacingMatches(in:paragraph,range:NSRange(location:0,length:ns.length),withTemplate:"").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty
+  // {number} se vykreslí vždy, jeho odstavec tedy nechybí.
+  let placeholderOnly = !matches.isEmpty && !paragraph.contains("{number}") && token.stringByReplacingMatches(in:paragraph,range:NSRange(location:0,length:ns.length),withTemplate:"").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty
   let part=imageAtEnd ? piece+"\\n\\n":"\\n\\n"+piece
   pattern+=placeholderOnly ? "(?:"+part+")?":part
  }

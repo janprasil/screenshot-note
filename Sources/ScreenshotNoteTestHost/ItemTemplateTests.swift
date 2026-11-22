@@ -94,6 +94,9 @@ import Foundation
  echoLine.comments=[RemoteNote.Comment(author_name:"Eva",body:"echo",created_at:"2026-03-05T08:07:00Z",image_index:1)]
  let echoLineRead=parsedSession(echoLine.template,cloudSessionBody(echoLine,images:["S-1.png"],language:"cs",timeZone:utc),imageTemplate:echoLine.image_template,comments:cloudImageComments(echoLine,images:["S-1.png"],language:"cs",timeZone:utc))
  assert(echoLineRead?.3["S-1.png"]=="First\necho\nLast",String(describing:echoLineRead))
+ let numbered="{image}\n\n{description}\n\n{number}"
+ let numberedRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Caption"),ImageBlock(name:"b.png",caption:"Dvě")],template:numbered),text:"X"),imageTemplate:numbered)
+ assert(numberedRead?.3["a.png"]=="Caption" && numberedRead?.3["b.png"]=="Dvě",String(describing:numberedRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

@@ -64,6 +64,10 @@ import Foundation
  var shifted=plainComments;shifted.comments=[RemoteNote.Comment(author_name:"Eva",body:"K prvnímu",created_at:"2026-03-05T08:07:00Z",image_index:1)]
  let shiftedRead=parsedSession(shifted.template,cloudSessionBody(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:shifted.image_template,comments:cloudImageComments(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(shiftedRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik" && shiftedRead?.3["S-1.png"]=="Popis 1",String(describing:shiftedRead))
+ // Anotace prvního obrázku nepatří k popisu druhého.
+ let around="{description}\n\n{image}\n\n{elements}"
+ let aroundRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna\n\n- **[1] Kresba**: x"),ImageBlock(name:"b.png",caption:"Dvě")],template:around),text:"X"),imageTemplate:around)
+ assert(aroundRead?.3["a.png"]=="Jedna\n\n- **[1] Kresba**: x" && aroundRead?.3["b.png"]=="Dvě",String(describing:aroundRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

@@ -150,7 +150,8 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
   // Text před odkazem končí tím, čím šablona před {image} (prázdné řádky jsou oříznuté).
   let source=before+String(prefix.reversed().prefix{$0=="\n"})
   let regex=try? NSRegularExpression(pattern:"\\A(?:"+previous.pattern+"\\n\\n)?"+own.pattern+"\\z")
-  values.merge(captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}
+  // Oříznutý začátek: generované odstavce předchozího obrázku začínají prázdným řádkem.
+  values.merge(captures(regex,own.keys,in:"\n\n"+source) ?? captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}
  }
  // Pole za obrázkem; konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).
  var text=after
@@ -161,7 +162,9 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
  }
  if suffix.contains("{description}") || suffix.contains("{elements}") {
   let own=paragraphPattern(suffix.components(separatedBy:"\n\n"),imageAtEnd:false)
-  guard let found=captures(try? NSRegularExpression(pattern:"\\A(?:\\n\\n)?"+own.pattern+"\\s*\\z"),own.keys,in:"\n\n"+text) else{
+  // Popis před obrázkem: za polem tohoto obrázku následuje popis dalšího.
+  let rest=prefix.contains("{description}") || prefix.contains("{elements}") ? "(?:\\n\\n[\\s\\S]*)?":""
+  guard let found=captures(try? NSRegularExpression(pattern:"\\A(?:\\n\\n)?"+own.pattern+rest+"\\s*\\z"),own.keys,in:"\n\n"+text) else{
    return values.isEmpty ? stripContextCallout(text).trimmingCharacters(in:.newlines):join(values)
   }
   values.merge(found){a,_ in a}

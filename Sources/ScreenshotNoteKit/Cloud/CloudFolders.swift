@@ -743,7 +743,9 @@ final class CloudFolders {
   var moved:[String]=[],copied:[String]=[]
   for image in record.images where fm.fileExists(atPath:assets.appendingPathComponent(image).path) && !fm.fileExists(atPath:trash.appendingPathComponent(image).path) {
    let target=trash.appendingPathComponent(image);try? fm.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
-   if own.contains(image){if (try? fm.moveItem(at:assets.appendingPathComponent(image),to:target)) != nil{moved.append(image)}}
+   if own.contains(image){if (try? fm.moveItem(at:assets.appendingPathComponent(image),to:target)) != nil{moved.append(image)
+    // Video jde s posterem, aby se po obnovení dalo přejmenovat spolu s ním.
+    for (source,side) in zip(assetVideoFiles(assets,image),assetVideoFiles(trash,image)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}}}
    else if (try? fm.copyItem(at:assets.appendingPathComponent(image),to:target)) != nil{copied.append(image)}
   }
   return (moved,copied)
@@ -780,16 +782,23 @@ final class CloudFolders {
   var renamed:[String:String]=[:]
   for image in record.rootMoved ?? [] where fm.fileExists(atPath:trash.appendingPathComponent("assets/"+image).path) {
    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
-   let name=uniqueName(stem){fm.fileExists(atPath:assets.appendingPathComponent($0+"."+ext).path)}+"."+ext
+   let name=uniqueName(stem){candidate in [ext,"mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
    try? fm.createDirectory(at:assets,withIntermediateDirectories:true)
-   if (try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))) != nil,name != image{renamed[image]=name}
+   if (try? fm.moveItem(at:trash.appendingPathComponent("assets/"+image),to:assets.appendingPathComponent(name))) != nil {
+    for (source,side) in zip(assetVideoFiles(trash.appendingPathComponent("assets"),image),assetVideoFiles(assets,name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
+    if name != image{renamed[image]=name}
+   }
   }
   if !renamed.isEmpty {
    // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
    next.images=next.images.map{renamed[$0] ?? $0}
    next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
    next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
-   for (old,new) in renamed{if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}}
+   for (old,new) in renamed{
+    if let hash=next.files.removeValue(forKey:"assets/"+old){next.files["assets/"+new]=hash}
+    let video={(name:String)->String in "assets/"+(name as NSString).deletingPathExtension+".mp4"}
+    if let hash=next.files.removeValue(forKey:video(old)){next.files[video(new)]=hash}
+   }
    let markdown=URL(fileURLWithPath:next.file),key=markdown.lastPathComponent
    if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {
     let pristine=fileHash(markdown)==next.files[key],output=rewriteImageLinks(text,order:record.images,rename:renamed)

@@ -66,6 +66,8 @@ final class RecordingController {
  private(set) var state:State = .idle
  private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelector?;private var limit:Timer?;private var ticker:Timer?
  private(set) var startedAt:Date?
+ /// Číslo pokusu; zrušený start po await nic nenastaví.
+ private var attempt=0
  /// Změna stavu pro menu bar (ikona, položka Zastavit).
  var onChange:(()->Void)?
  /// Hotové video: výsledek, nebo chyba (zrušení = nil).
@@ -78,21 +80,23 @@ final class RecordingController {
   let screen=NSScreen.screens.first{$0.frame.contains(NSEvent.mouseLocation)} ?? NSScreen.main ?? NSScreen.screens[0]
   // Okno v popředí se určí hned, než odpočet nebo výběr oblasti změní pořadí oken.
   let front=target == .window ? frontWindowID():nil
+  attempt+=1;let current=attempt
   state = .preparing;onChange?()
   let proceed={(region:CGRect?) in
    // Zastavení během výběru oblasti už stav vrátilo.
-   guard self.state == .preparing else{return}
+   guard self.state == .preparing,self.attempt == current else{return}
    if target == .region && region == nil{self.reset();self.onFinish?(nil);return}
    self.state = .counting;self.onChange?()
    let overlay=CountdownOverlay();self.countdown=overlay
-   overlay.run(seconds:recordingCountdown,on:screen){Task{@MainActor in await self.begin(target,screen:screen,region:region,window:front,output:output)}}
+   overlay.run(seconds:recordingCountdown,on:screen){Task{@MainActor in await self.begin(target,screen:screen,region:region,window:front,output:output,attempt:current)}}
   }
   if target == .region{selector=RegionSelector.choose(on:screen){[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
  }
 
- private func begin(_ target:RecordingTarget,screen:NSScreen,region:CGRect?,window:CGWindowID?,output:URL)async {
+ private func begin(_ target:RecordingTarget,screen:NSScreen,region:CGRect?,window:CGWindowID?,output:URL,attempt current:Int)async {
+  guard state == .counting,attempt == current else{return}
   countdown=nil
-  guard state == .counting else{return}
+  let live={self.state == .counting && self.attempt == current}
   do {
    let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
    let own=content.applications.filter{$0.processID==ProcessInfo.processInfo.processIdentifier}
@@ -112,11 +116,11 @@ final class RecordingController {
    let recorder=try ScreenRecorder(output:output,width:size.width,height:size.height)
    recorder.onFailure={[weak self] _ in Task{@MainActor in self?.stop()}}
    try await recorder.begin(filter:filter,sourceRect:source)
-   guard state == .counting else{recorder.cancel();return}
+   guard live() else{recorder.cancel();return}
    self.recorder=recorder;state = .recording;startedAt=Date();onChange?()
    limit=Timer.scheduledTimer(withTimeInterval:RecordingLimits.maxDuration,repeats:false){[weak self] _ in Task{@MainActor in self?.stop()}}
    ticker=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.onChange?()}}
-  } catch {reset();onFinish?(.failure(error))}
+  } catch {guard live() else{return};reset();onFinish?(.failure(error))}
  }
 
  /// Zastaví záznam nebo zruší odpočet.
@@ -134,7 +138,7 @@ final class RecordingController {
   case .idle,.finishing:break
   }
  }
- private func reset(){state = .idle;startedAt=nil;limit?.invalidate();ticker?.invalidate();limit=nil;ticker=nil;onChange?()}
+ private func reset(){attempt+=1;state = .idle;startedAt=nil;limit?.invalidate();ticker?.invalidate();limit=nil;ticker=nil;onChange?()}
  private func recordingError(_ message:String)->NSError{NSError(domain:"ScreenshotNote",code:45,userInfo:[NSLocalizedDescriptionKey:message])}
 }
 

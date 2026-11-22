@@ -991,7 +991,7 @@ final class CloudFolders {
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
    // Starší netknutá podsložka se aktualizuje na místě; při další synchronizaci se zploští.
-   let directory=saved.directory,markdown=URL(fileURLWithPath:saved.file).lastPathComponent,names=note.images.map{"\($0.index).png"},body=cloudSessionBody(note,images:names,contexts:contexts)
+   let directory=saved.directory,markdown=URL(fileURLWithPath:saved.file).lastPathComponent,names=note.images.map{"\($0.index).png"},body=cloudSessionBody(note,images:names,contexts:contexts,assets:directory.appendingPathComponent("assets"))
    var files:[String:Data]=[markdown:Data(body.utf8)];for (name,bytes) in zip(names,data){files["assets/"+name]=bytes}
    try fm.createDirectory(at:directory.appendingPathComponent("assets"),withIntermediateDirectories:true)
    for (name,bytes) in files{try bytes.write(to:directory.appendingPathComponent(name),options:.atomic)}
@@ -1006,13 +1006,13 @@ final class CloudFolders {
    var names:[String]=[]
    for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){assetStemTaken(folderAssets,$0) || names.contains($0+".png")}+".png":"\(i+1).png"))}
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
-   if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
+   if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts,assets:folderAssets).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
     var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;same.render=cloudRenderVersion;same.imageTemplate=note.image_template;same.imageComments=cloudImageComments(note,images:names);index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
-    let body=cloudSessionBody(note,images:names,contexts:contexts);var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
+    let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets);var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
     for (name,bytes) in zip(names,data){let url=assets.appendingPathComponent(name);if fileHash(url) != sessionFingerprint(bytes){try bytes.write(to:url,options:.atomic)};files["assets/"+name]=sessionFingerprint(bytes)}
     try Data(body.utf8).write(to:markdown,options:.atomic)
     files.merge(try writeContextAttachments(contexts,names:names,assets:assets,previous:saved.files)){a,_ in a}
@@ -1037,7 +1037,7 @@ final class CloudFolders {
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date()),base:base)
   var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
-  let body=cloudSessionBody(note,images:names,contexts:contexts),markdown=base.appendingPathComponent(stem+".md")
+  let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets),markdown=base.appendingPathComponent(stem+".md")
   var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
   for (name,bytes) in zip(names,data){try bytes.write(to:assets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
   try Data(body.utf8).write(to:markdown,options:.withoutOverwriting)
@@ -1283,7 +1283,7 @@ final class CloudFolders {
     }
     files[key]=sessionFingerprint(mp4)
    } else if let hash=previous[key] {
-    if contexts[position+1]?["video.keep"] != nil{files[key]=hash}else{for url in video{try? fm.removeItem(at:url)}}
+    if contexts[position+1]?["video.keep"] != nil{if fm.fileExists(atPath:video[0].path){files[key]=hash}}else{for url in video{try? fm.removeItem(at:url)}}
    }
   }
   return files

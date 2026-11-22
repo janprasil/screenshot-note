@@ -52,9 +52,17 @@ import Foundation
  assert(reread?.3["a.png"]=="Jedna" && reread?.3["b.png"]=="Dvě",String(describing:reread))
  // Komentáře obrázku cloudové relace nejsou součástí popisku.
  let withImageComment=cloudSessionBody(note,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc)
- let cloudRead=parsedSession(defaultMarkdownTemplate,withImageComment,comments:.some(nil))
+ let cloudRead=parsedSession(defaultMarkdownTemplate,withImageComment,comments:cloudImageComments(note,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(cloudRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik" && cloudRead?.3["S-1.png"]=="Popis 1",String(describing:cloudRead))
- let customRead=parsedSession(custom.template,customBody,imageTemplate:custom.image_template,comments:.some(custom.comment_template))
+ let customRead=parsedSession(custom.template,customBody,imageTemplate:custom.image_template,comments:cloudImageComments(custom,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(customRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:customRead))
+ // Šablona komentáře bez literálů popisek nesmaže; pole po obou stranách obrázku i komentáře předchozího obrázku.
+ var plainComments=custom;plainComments.comment_template="{text}";plainComments.image_template="{description}\n\n{image}\n\n{elements}\n\n{comments}"
+ let both=cloudSessionBody(plainComments,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc)
+ let bothRead=parsedSession(plainComments.template,both,imageTemplate:plainComments.image_template,comments:cloudImageComments(plainComments,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(bothRead?.3["S-1.png"]=="Popis 1" && bothRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:bothRead))
+ var shifted=plainComments;shifted.comments=[RemoteNote.Comment(author_name:"Eva",body:"K prvnímu",created_at:"2026-03-05T08:07:00Z",image_index:1)]
+ let shiftedRead=parsedSession(shifted.template,cloudSessionBody(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:shifted.image_template,comments:cloudImageComments(shifted,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(shiftedRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik" && shiftedRead?.3["S-1.png"]=="Popis 1",String(describing:shiftedRead))
  print("PASS: image template paragraphs, {elements} split, template checks and caption parsing with a custom image template")
 }

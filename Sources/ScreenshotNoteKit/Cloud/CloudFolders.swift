@@ -282,7 +282,7 @@ final class CloudFolders {
   // Změna během přesunu: bez otisku serveru se cloudová verze zapíše vedle jako _cloud.
   record.digest=changed ? nil:sessionFingerprint((try? JSONEncoder.sorted.encode(note)) ?? Data())
   record.shas=session.images.map{(try? cloudImage(assets.appendingPathComponent($0))).map(sessionFingerprint) ?? ""}
-  record.render=cloudRenderVersion;record.imageTemplate=source.imageTemplate;record.commentTemplate=source.commentTemplate
+  record.render=cloudRenderVersion;record.imageTemplate=source.imageTemplate
   var hashes:[String:String]=[:];for image in session.images{hashes["assets/"+image]=fileHash(assets.appendingPathComponent(image))}
   if source.combined{record.note=note;record.stem=uniqueStem(readableSessionName(heading,created:Date()),base:base);record.files=hashes}
   else{hashes[file.lastPathComponent]=fileHash(file);record.files=hashes}
@@ -966,7 +966,7 @@ final class CloudFolders {
   func finished(_ file:URL,_ body:String,_ names:[String],_ files:[String:String])->SessionRecord {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)
    next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created;next.digest=digest;next.shas=shas;next.revision=stamp?.revision?.value
-   next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.commentTemplate=note.comment_template;return next
+   next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names);return next
   }
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
@@ -988,7 +988,7 @@ final class CloudFolders {
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
    if unmodified,saved.shas==shas,!flat || fileHash(markdown)==sessionFingerprint(Data(cloudSessionBody(note,images:names,contexts:contexts).utf8)),saved.title==note.title,saved.comment==note.comment,saved.template==note.template,saved.images.map({saved.notes[$0] ?? ""})==note.captions,!note.template.contains("{author}") || saved.author==note.author?.name {
     // Netknutá kopie se shoduje s cloudem; jen se zapíše otisk serveru.
-    var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;same.render=cloudRenderVersion;same.imageTemplate=note.image_template;same.commentTemplate=note.comment_template;index.put(same);return
+    var same=saved;same.files=saved.files.filter{!sidecar($0.key)}.merging(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a};same.digest=digest;same.author=note.author?.name;same.authorID=note.author?.id?.uuidString.lowercased();same.revision=stamp?.revision?.value;same.updated=stamp?.updated_at ?? item.updated_at;same.created=saved.created ?? created;same.render=cloudRenderVersion;same.imageTemplate=note.image_template;same.imageComments=cloudImageComments(note,images:names);index.put(same);return
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
@@ -1094,7 +1094,7 @@ final class CloudFolders {
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
    next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
-   next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.commentTemplate=note.comment_template
+   next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names)
    if let saved=record{next.start=saved.start;next.length=saved.length;next.hash=saved.hash;next.heading=saved.heading;next.footer=saved.footer}
    // Obsahově shodná relace (jen nové porovnání) se nebere jako změna.
    let same=record.map{$0.note.map{old in old.title==note.title && old.comment==note.comment && old.captions==note.captions && old.template==note.template && (!note.template.contains("{author}") || old.author==note.author)

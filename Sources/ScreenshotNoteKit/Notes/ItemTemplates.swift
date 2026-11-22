@@ -152,7 +152,10 @@ func imageCaption(_ after:String,before:String="",template:String?,next:Int?,com
   let regex=try? NSRegularExpression(pattern:"\\A(?:"+previous.pattern+"\\n\\n)?"+own.pattern+"\\z")
   // Oříznutý začátek: generované odstavce předchozího obrázku začínají prázdným řádkem.
   // První obrázek žádný předchozí nemá; text před ním patří celý jemu.
-  if first{values.merge(captures(try? NSRegularExpression(pattern:"\\A"+own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}}
+  if first {
+   let anchored=try? NSRegularExpression(pattern:"\\A"+own.pattern+"\\z"),lead=String(prefix.prefix{$0=="\n"})
+   values.merge(captures(anchored,own.keys,in:lead+source) ?? captures(anchored,own.keys,in:source) ?? [:]){a,_ in a}
+  }
   else{values.merge(captures(regex,own.keys,in:"\n\n"+source) ?? captures(regex,own.keys,in:source) ?? captures(try? NSRegularExpression(pattern:own.pattern+"\\z"),own.keys,in:source) ?? [:]){a,_ in a}}
  }
  // Pole za obrázkem; konec bloku obsahuje začátek dalšího obrázku (např. nadpis s {number}).

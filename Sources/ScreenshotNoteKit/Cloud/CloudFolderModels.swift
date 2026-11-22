@@ -78,7 +78,7 @@ func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[Str
  let blocks=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->ImageBlock in
   var block=ImageBlock(name:pair.0,caption:pair.1,comments:list(comments.filter{$0.image_index==offset+1}))
   // Video se staženými metadaty (video.json z contextAttachments nebo z disku).
-  if contexts[offset+1]?["video"] != nil,let json=contexts[offset+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json){block.videoMs=info.durationMs}
+  if contexts[offset+1]?["video"] != nil || contexts[offset+1]?["video.keep"] != nil,let json=contexts[offset+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json){block.videoMs=info.durationMs}
   if let side=contexts[offset+1],let data=side["context"],let summary=ContextSummary(data) {
    let base=(pair.0 as NSString).deletingPathExtension,har=side["har"] != nil
    block.context=contextCallout(summary,base:base,har:har);items.append((offset+1,summary,base,har))

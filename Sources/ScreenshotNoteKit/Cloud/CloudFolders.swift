@@ -1237,8 +1237,11 @@ final class CloudFolders {
    // Metadata videa jako video.json do složky snímků (časy z media).
    if result[image.index]?["video"] != nil,let json=remoteVideoInfo(image.attachments ?? [],downloaded:Set(result[image.index]?.keys.map{$0} ?? [])).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
    else{result[image.index]?["video"]=nil}
-   // Video na serveru je, jen se teď nestáhlo: místní kopie zůstane a stažení se zopakuje.
-   if result[image.index]?["video"] == nil,(image.attachments ?? []).contains(where:{$0.kind=="video"}){result[image.index,default:[:]]["video.keep"]=Data()}
+   // Video na serveru je, jen se teď nestáhlo: místní kopie zůstane a Markdown na ni dál odkazuje.
+   if result[image.index]?["video"] == nil,(image.attachments ?? []).contains(where:{$0.kind=="video"}) {
+    result[image.index,default:[:]]["video.keep"]=Data()
+    if let json=remoteVideoInfo(image.attachments ?? [],downloaded:[]).flatMap({try? JSONEncoder().encode($0)}){result[image.index]?["video.json"]=json}
+   }
   }
   return result
  }

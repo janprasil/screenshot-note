@@ -86,6 +86,9 @@ import Foundation
  var labeled=same;labeled.image_template="{image}\n\n{description}\n\nComment: {comments}"
  let labeledRead=parsedSession(labeled.template,cloudSessionBody(labeled,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:labeled.image_template,comments:cloudImageComments(labeled,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
  assert(labeledRead?.3["S-1.png"]=="Popis 1" && labeledRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:labeledRead))
+ var tight=same;tight.image_template="{image}\n{comments}\n\n{description}"
+ let tightRead=parsedSession(tight.template,cloudSessionBody(tight,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc),imageTemplate:tight.image_template,comments:cloudImageComments(tight,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc))
+ assert(tightRead?.3["S-2.png"]=="Popis 2\n\n- **[1] Element** `#btn`: klik",String(describing:tightRead))
  // Popis na stejném řádku před obrázkem.
  let inline="**{description}** {image}"
  let inlineRead=parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:renderImageBlocks([ImageBlock(name:"a.png",caption:"Jedna"),ImageBlock(name:"b.png",caption:"Dvě")],template:inline),text:"X"),imageTemplate:inline)

@@ -134,8 +134,9 @@ private func removing(_ comments:String?,from text:String,lead:String="",trail:S
  var search=text.endIndex
  while let range=text.range(of:comments,options:.backwards,range:text.startIndex..<search) {
   let before=text[..<range.lowerBound],after=text[range.upperBound...]
-  let starts=before.hasSuffix(lead) && (before.count==lead.count || before.dropLast(lead.count).hasSuffix("\n\n"))
-  let ends=after.hasPrefix(trail) && (after.count==trail.count || after.dropFirst(trail.count).hasPrefix("\n\n"))
+  // Hranice řádku; prázdné řádky kolem jsou v textu i rámečku oříznuté.
+  let starts=before.hasSuffix(lead) && (before.count==lead.count || before.dropLast(lead.count).hasSuffix("\n"))
+  let ends=after.hasPrefix(trail) && (after.count==trail.count || after.dropFirst(trail.count).hasPrefix("\n"))
   if starts && ends {
    var value=text;value.removeSubrange(range)
    while value.contains("\n\n\n"){value=value.replacingOccurrences(of:"\n\n\n",with:"\n\n")}
@@ -148,8 +149,8 @@ private func removing(_ comments:String?,from text:String,lead:String="",trail:S
 /// Literály kolem {comments} v jeho odstavci; nil, když tam je jiný placeholder.
 private func commentFrame(_ part:String)->(lead:String,trail:String)? {
  guard let at=part.range(of:"{comments}") else{return nil}
- let lead=String(part[..<at.lowerBound]).components(separatedBy:"\n\n").last ?? ""
- let trail=String(part[at.upperBound...]).components(separatedBy:"\n\n").first ?? ""
+ let lead=String(part[..<at.lowerBound]).components(separatedBy:"\n").last ?? ""
+ let trail=String(part[at.upperBound...]).components(separatedBy:"\n").first ?? ""
  return lead.contains("{") || trail.contains("{") ? ("",""):(lead,trail)
 }
 

@@ -11,6 +11,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  let recording=RecordingController();var stopEntry:NSMenuItem?;var recordEntry:NSMenuItem?
  /// Okno prohlížeče v popředí při startu záznamu; kontext se po stopu žádá od něj.
  private var recordingBrowser:[String:Any]?
+ /// Hotové video čeká na kontext a doručení do konceptu; snímek ani nový záznam zatím ne.
+ private var deliveringRecording=false
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
@@ -119,7 +121,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  /// Zkratka záznamu: spustí naposledy použitý cíl, během záznamu nebo odpočtu ho zastaví.
  func toggleRecording(){if recording.state != .idle{recording.stop()}else{startRecording(RecordingTarget(rawValue:UserDefaults.standard.string(forKey:"recordingTarget") ?? "") ?? .screen)}}
  func startRecording(_ target:RecordingTarget) {
-  guard !capturing,!browsingSavedSessions,recording.state == .idle else{return}
+  guard !capturing,!browsingSavedSessions,recording.state == .idle,!deliveringRecording else{return}
   UserDefaults.standard.set(target.rawValue,forKey:"recordingTarget")
   composer?.collapseCompact()
   recordingBrowser=browserCaptureTarget()
@@ -149,7 +151,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let window=recorded.durationMs+(recordingCountdown+5)*1000
    let browser=recordingBrowser;recordingBrowser=nil
    let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
+   deliveringRecording=true
    let deliver={(files:CaptureContextFiles?) in
+    self.deliveringRecording=false
     let attached=files.map{(try? $0.write(besides:poster)) != nil} ?? false
     if let active {
      guard active.appendCapturedImage(poster.lastPathComponent,context:attached) else{removeAnnotatedImage(poster);active.expandCompact();return}
@@ -223,7 +227,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   do{try fm.createDirectory(at:folder,withIntermediateDirectories:true);if !NSWorkspace.shared.open(folder){showError(L("Složku se nepodařilo otevřít: ")+path)}}catch{showError(error.localizedDescription)}
  }
 
- @objc func quit(){if composer != nil || capturing || recording.state != .idle{showError(L("Nejprve ulož nebo zavři rozpracované okno."));return};NSApp.terminate(nil)}
+ @objc func quit(){if composer != nil || capturing || recording.state != .idle || deliveringRecording{showError(L("Nejprve ulož nebo zavři rozpracované okno."));return};NSApp.terminate(nil)}
  func workingCopy() throws -> (Draft,URL){
   var draft=try readDraft(draftRoot)
   // Rozpracovaná relace navázaná na smazanou nebo přesunutou uloženou relaci.
@@ -273,7 +277,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let fromOpenComposer = fromComposer || active != nil
   func restoreComposerSize(){if fromOpenComposer{active?.expandCompact()}}
   // Během záznamu (i jeho dokončení) se snímek nepořizuje, oba by doručily vlastní koncept.
-  guard !capturing && !browsingSavedSessions && recording.state == .idle else{return}
+  guard !capturing && !browsingSavedSessions && recording.state == .idle && !deliveringRecording else{return}
   active?.collapseCompact()
   if !CGPreflightScreenCaptureAccess(){restoreComposerSize();_ = CGRequestScreenCaptureAccess();showError(L("Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť snímání znovu."));NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!);return}
   let screens=NSScreen.screens

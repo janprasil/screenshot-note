@@ -6,8 +6,8 @@ let defaultImageTemplate="{image}\n\n{description}\n\n{context}\n\n{comments}"
 let commentPlaceholders=["date","name","text"]
 let imagePlaceholders=["image","description","comments","number","context","elements"]
 let itemTemplateMaxLength=5000
-/// Verze vykreslení cloudových relací; zvýšení je jednou přerenderuje.
-let cloudRenderVersion=3
+/// Verze vykreslení cloudových relací; zvýšení je jednou přerenderuje (4: video).
+let cloudRenderVersion=4
 
 private let monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 /// {date}: cs `22. 11. 2026 14:05`, jinak `Nov 22, 2026, 14:05`.

@@ -118,8 +118,11 @@ final class RecordingController {
    try await recorder.begin(filter:filter,sourceRect:source)
    guard live() else{recorder.cancel();return}
    self.recorder=recorder;state = .recording;startedAt=Date();onChange?()
-   limit=Timer.scheduledTimer(withTimeInterval:RecordingLimits.maxDuration,repeats:false){[weak self] _ in Task{@MainActor in self?.stop()}}
-   ticker=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.onChange?()}}
+   // Běžné režimy run loopu: časovače běží i při otevřeném menu baru.
+   let limit=Timer(timeInterval:RecordingLimits.maxDuration,repeats:false){[weak self] _ in Task{@MainActor in self?.stop()}}
+   let ticker=Timer(timeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.onChange?()}}
+   for timer in [limit,ticker]{RunLoop.main.add(timer,forMode:.common)}
+   self.limit=limit;self.ticker=ticker
   } catch {guard live() else{return};reset();onFinish?(.failure(error))}
  }
 

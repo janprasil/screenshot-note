@@ -9,6 +9,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
  let recording=RecordingController();var stopEntry:NSMenuItem?;var recordEntry:NSMenuItem?
+ /// Okno prohlížeče v popředí při startu záznamu; kontext se po stopu žádá od něj.
+ private var recordingBrowser:[String:Any]?
  func applicationDidFinishLaunching(_ notification:Notification){
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
@@ -120,6 +122,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   guard !capturing,!browsingSavedSessions,recording.state == .idle else{return}
   UserDefaults.standard.set(target.rawValue,forKey:"recordingTarget")
   composer?.collapseCompact()
+  recordingBrowser=browserCaptureTarget()
   recording.start(target,output:fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-\(UUID().uuidString).mp4"))
  }
  func updateRecordingState() {
@@ -144,7 +147,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    do{try storeRecording(recorded,poster:poster)}catch{try? fm.removeItem(at:recorded.video);if active == nil{try? fm.removeItem(at:root)};throw error}
    let folder=draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
    let window=recorded.durationMs+(recordingCountdown+5)*1000
-   let context=PendingCaptureContext.start(topic:folder,windowMs:window)
+   let browser=recordingBrowser;recordingBrowser=nil
+   let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
    let deliver={(files:CaptureContextFiles?) in
     let attached=files.map{(try? $0.write(besides:poster)) != nil} ?? false
     if let active {

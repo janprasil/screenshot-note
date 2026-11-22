@@ -847,7 +847,14 @@ final class CloudFolders {
    let from=trashURL(base).appendingPathComponent("assets/"+name),to=base.appendingPathComponent("assets/"+name)
    guard fm.fileExists(atPath:from.path),!fm.fileExists(atPath:to.path) else{continue}
    try? fm.createDirectory(at:to.deletingLastPathComponent(),withIntermediateDirectories:true);try? fm.moveItem(at:from,to:to)
+   for (source,side) in zip(assetVideoFiles(trashURL(base).appendingPathComponent("assets"),name),assetVideoFiles(base.appendingPathComponent("assets"),name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
   }
+ }
+ /// Video posteru v .trash: MP4 jen netknuté (hash z indexu), složka snímků s ním.
+ private func removeTrashedVideo(_ record:SessionRecord,image:String,base:URL) {
+  let files=assetVideoFiles(trashURL(base).appendingPathComponent("assets"),image)
+  guard let hash=record.files["assets/"+(image as NSString).deletingPathExtension+".mp4"],fileHash(files[0])==hash else{return}
+  for url in files{try? fm.removeItem(at:url)}
  }
  /// Natrvalo smazaná relace zmizí z .trash, jen pokud ji nikdo neupravil.
  private func purge(_ record:SessionRecord,base:URL) {
@@ -856,13 +863,13 @@ final class CloudFolders {
    // Smaže se jen to, co se do .trash přesunulo s relací, a jen netknuté.
    let markdown=URL(fileURLWithPath:record.file)
    if SessionIndex.key(markdown).hasPrefix(SessionIndex.key(trashURL(base))+"/"),fileHash(markdown)==record.files[markdown.lastPathComponent]{try? fm.removeItem(at:markdown)}
-   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url)}}
+   for image in moved{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url)};removeTrashedVideo(record,image:image,base:base)}
    removeTrashCopies(record,base:base);index.remove(record);return
   }
   if record.stem != nil {
    if record.trashed==true {
     if let note=record.trashNote,fileHash(URL(fileURLWithPath:note))==record.trashHash{try? fm.removeItem(atPath:note)}
-    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url)}}
+    for name in record.images{let url=trashURL(base).appendingPathComponent("assets/"+name);if fileHash(url)==record.files["assets/"+name]{try? fm.removeItem(at:url)};removeTrashedVideo(record,image:name,base:base)}
    } else {var copy=record;_ = trashCombined(&copy,base:base)}
   } else {
    let directory=record.directory
@@ -1248,7 +1255,9 @@ final class CloudFolders {
    let video=assetVideoFiles(assets,name),key=prefix+video[0].lastPathComponent
    if let mp4=contexts[position+1]?["video"],let json=contexts[position+1]?["video.json"],let info=try? JSONDecoder().decode(VideoInfo.self,from:json) {
     if fileHash(video[0]) != sessionFingerprint(mp4){try replaceFile(video[0],with:mp4,in:assets)}
-    if (try? Data(contentsOf:video[1].appendingPathComponent("video.json"))) != json || !info.frames.allSatisfy({fm.fileExists(atPath:video[1].appendingPathComponent($0.file).path)}) {
+    // Snímky se porovnají i obsahem; stejný čas a název neznamená stejný obrázek.
+    let current=info.frames.allSatisfy{frame in (try? Data(contentsOf:video[1].appendingPathComponent(frame.file))) == contexts[position+1]?["frame-"+frame.file.replacingOccurrences(of:".png",with:"")]}
+    if (try? Data(contentsOf:video[1].appendingPathComponent("video.json"))) != json || !current {
      let staging=assets.appendingPathComponent(".\(UUID().uuidString).frames",isDirectory:true)
      try fm.createDirectory(at:staging,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
      do {

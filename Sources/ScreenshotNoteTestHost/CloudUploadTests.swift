@@ -117,6 +117,11 @@ import AppKit
  let first=RemoteNote.Comment(author_name:"Jan",body:"Ahoj",created_at:"2026-05-01T10:00:00Z"),second=RemoteNote.Comment(author_name:"Eva",body:"Druhý\nřádek",created_at:"2026-05-02T08:30:00.123456+00:00")
  let stamp1=format.string(from:parseServerDate(first.created_at)!),stamp2=format.string(from:parseServerDate(second.created_at)!)
  assert(renderComments([])=="" && renderComments([first])=="Ahoj\n`Jan` - `\(stamp1)`" && renderComments([first,second])=="Ahoj\n`Jan` - `\(stamp1)`\n\nDruhý\nřádek\n`Eva` - `\(stamp2)`")
+ // Komentář obrázku nese číslo snímku (jako web export); JSON bez pole dekóduje nil.
+ assert(renderComments([RemoteNote.Comment(author_name:"Eva",body:"Tady",created_at:first.created_at,image_index:2)])=="Tady\n`Eva` - `\(stamp1)` - `Screenshot 2`")
+ let imageComment=try JSONDecoder().decode(RemoteNote.Comment.self,from:Data(#"{"author_name":"A","body":"b","created_at":null,"image_index":3}"#.utf8))
+ let sessionComment=try JSONDecoder().decode(RemoteNote.Comment.self,from:Data(#"{"body":"b"}"#.utf8))
+ assert(imageComment.image_index==3 && sessionComment.image_index==nil)
  let withComments=renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:"![[assets/a.png]]",text:"X",comments:renderComments([first]))
  assert(withComments.hasSuffix("# Description\n\nX\n\nAhoj\n`Jan` - `\(stamp1)`\n"))
  assert(parsedSession(defaultMarkdownTemplate,withComments)?.1=="X" && parsedSession(defaultMarkdownTemplate,renderSessionTemplate(defaultMarkdownTemplate,title:"T",screenshots:"![[assets/a.png]]",text:"X"))?.1=="X")

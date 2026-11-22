@@ -582,3 +582,13 @@
 "Záznam začne za %d s" = "Recording starts in %d s";
 "Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "The video of item %ld is larger than 8 MB and cannot be uploaded to the cloud. Save it to a local folder or record a shorter clip.";
 "Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky." = "The video of item %ld could not be prepared for upload. Save it to a local folder.";
+"Navrhovat názvy relací pomocí AI" = "Suggest session titles with AI";
+"U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele." = "Suggests a title with AI for new sessions without one. A title you type always wins. The limit is 1,000 titles per user per month.";
+"AI názvy nastavuje vlastník nebo správce týmu." = "AI titles are set by the team owner or an admin.";
+"AI názvy jsou zapnuté. Tento měsíc zbývá %ld z %ld." = "AI titles are on. %ld of %ld left this month.";
+"AI názvy jsou vypnuté." = "AI titles are off.";
+"Navrhovat názvy relací pomocí AI?" = "Suggest session titles with AI?";
+"U nové relace bez názvu pošleme komentář, popisky snímků, titulky a adresy stránek (bez parametrů, zkrácené asi na 2 000 znaků) a nejvýš 3 zmenšené náhledy společnosti Anthropic, PBC v USA, která navrhne název. Konzole, requesty ani HAR se neposílají. Anthropic data zpracovává jako náš zpracovatel podle standardních smluvních doložek a nepoužívá je k trénování. Platí pro celou složku a jde kdykoli vypnout." = "For each new session without a title we send the comment, image captions, page titles and page addresses (without parameters, shortened to about 2,000 characters) and up to 3 small previews to Anthropic, PBC in the USA, which suggests the title. Console logs, requests and HAR files are never sent. Anthropic processes the data as our sub-processor under standard contractual clauses and does not use it for training. This applies to the whole folder and can be turned off at any time.";
+"Server zatím AI názvy relací nepodporuje." = "The server does not support AI session titles yet.";
+"AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období." = "AI session titles need an active cloud plan or trial.";
+"AI názvy relací teď nejsou dostupné. Zkus to později." = "AI session titles are not available right now. Try again later.";

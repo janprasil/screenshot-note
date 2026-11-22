@@ -317,6 +317,7 @@ func cloudFolderUnitTests()throws {
  try folders.finishTransfer(source,to:target);assert(folders.records.first{$0.id==a.id}?.migratedLocalIDs==[source.id])
  try await cloudMaterializationTests()
  try await reviewFindingTests()
+ try await aiTitleFolderTests()
  print("PASS: folder transfer stays pending without confirmed uploads, stable resumable IDs, conflict/foreign target rejection and idempotent finish")
 }
 

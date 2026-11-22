@@ -24,11 +24,14 @@ struct CloudFolderRecord:Codable {
  var ownerKind:String? = nil;var ownerName:String? = nil;var role:String? = nil
  // Tým zmizel z /me: složka je skrytá, mapování a soubory zůstávají.
  var unavailable:Bool? = nil
+ // AI návrh názvu relace bez názvu; nastavení je na serveru, starší server ho neposílá.
+ var aiTitle:Bool? = nil
  var account:UUID{accountID ?? owner}
  var isTeam:Bool{owner != account || ownerKind==LibraryKind.team.rawValue}
- enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable;case accountID="account"}
+ enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable,aiTitle;case accountID="account"}
  var topic:Topic {
   var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes;value.commentTemplate=commentTemplate;value.imageTemplate=imageTemplate
+  value.aiTitle=aiTitle
   if isTeam{value.cloudTeam=true;value.cloudOwnerName=ownerName;value.cloudRole=role}
   return value
  }

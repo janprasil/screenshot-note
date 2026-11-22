@@ -13,6 +13,8 @@ struct Topic:Codable,Equatable {
  var confirmLocalDeletes:Bool? = nil
  // Týmová složka: název týmu a role přihlášeného uživatele z katalogu.
  var cloudOwnerName:String? = nil;var cloudTeam:Bool? = nil;var cloudRole:String? = nil
+ // Cloudová složka: AI návrh názvu relace (nastavení serveru).
+ var aiTitle:Bool? = nil
  // Kontext z prohlížeče u lokální složky; nil znamená výchozí politiku.
  var contextPolicy:ContextPolicy? = nil
  /// Zobrazovaný název; týmová složka má vždy předponu týmu.
@@ -138,6 +140,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  var contextPolicy=ContextPolicy()
  let contextToggle=NSButton(checkboxWithTitle:"",target:nil,action:nil)
  private(set) var contextButton:AppButton!;private(set) var contextCaption:NSTextField!
+ // AI návrh názvu jen u cloudové složky; mění ho vlastník nebo správce, platí hned na serveru.
+ let aiTitleToggle=NSButton(checkboxWithTitle:"",target:nil,action:nil)
  let mode=NSPopUpButton()
  func show(present:Bool=true,reload:Bool=true){
   if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
@@ -173,6 +177,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   contextToggle.title=L("Přikládat kontext z prohlížeče");contextToggle.frame=NSRect(x:272,y:120,width:380,height:22);contextToggle.target=self;contextToggle.action=#selector(toggleContext);view.addSubview(contextToggle)
   contextCaption=designLabel("",NSRect(x:292,y:96,width:580,height:18),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
   contextButton=styledButton(L("Co přikládat…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
+  aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:128,width:600,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
   view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
   saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
@@ -322,6 +327,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   contextToggle.state=contextPolicy.enabled ? .on:.off;contextToggle.isEnabled=editingManaged || cloud
   contextButton.isEnabled=contextPolicy.enabled && (editingManaged || cloud)
   contextCaption.stringValue=contextPolicy.enabled ? (cloud ? LF("Nahrává se do cloudu: %@",contextPolicySummary(contextPolicy)):contextPolicySummary(contextPolicy)):L("Snímky z prohlížeče se uloží bez kontextu.")
+  // Starší server nastavení nezná (nil); přepínač se pak nezobrazí.
+  let current=list.first{$0.id==editingID}
+  aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-50
+  aiTitleToggle.state=current?.aiTitle==true ? .on:.off;aiTitleToggle.isEnabled=editingManaged
+  aiTitleToggle.toolTip=editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
   contextToggle.toolTip=cloud ? L("Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
  }
  @objc func toggleContext(){
@@ -333,6 +343,28 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let alert=NSAlert();alert.alertStyle = .warning
   alert.messageText=L("Nahrávat kontext z prohlížeče do cloudu?")
   alert.informativeText=L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.")
+  alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Zrušit"))
+  return alert.runModal() == .alertFirstButtonReturn
+ }
+ @objc func toggleAITitle(){
+  guard let topic=list.first(where:{$0.id==editingID}),topic.cloudFolderID != nil else{return}
+  let enable=aiTitleToggle.state == .on
+  if enable,!confirmAITitle(){aiTitleToggle.state = .off;return}
+  aiTitleToggle.isEnabled=false
+  Task{@MainActor in
+   defer{aiTitleToggle.isEnabled=editingManaged}
+   do {
+    let setting=try await CloudFolders.shared.aiTitle(topic,enable:enable)
+    list=Topics.all;aiTitleToggle.state=setting.enabled ? .on:.off
+    showStatus(setting.enabled ? LF("AI názvy jsou zapnuté. Tento měsíc zbývá %ld z %ld.",max(0,setting.limit-setting.used),setting.limit):L("AI názvy jsou vypnuté."))
+   } catch {aiTitleToggle.state=enable ? .off:.on;showError(error.localizedDescription)}
+  }
+ }
+ /// Před zapnutím AI názvu: co se posílá, komu, že do USA a že jde vypnout.
+ func confirmAITitle()->Bool {
+  let alert=NSAlert();alert.alertStyle = .warning
+  alert.messageText=L("Navrhovat názvy relací pomocí AI?")
+  alert.informativeText=L("U nové relace bez názvu pošleme komentář, popisky snímků, titulky a adresy stránek (bez parametrů, zkrácené asi na 2 000 znaků) a nejvýš 3 zmenšené náhledy společnosti Anthropic, PBC v USA, která navrhne název. Konzole, requesty ani HAR se neposílají. Anthropic data zpracovává jako náš zpracovatel podle standardních smluvních doložek a nepoužívá je k trénování. Platí pro celou složku a jde kdykoli vypnout.")
   alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Zrušit"))
   return alert.runModal() == .alertFirstButtonReturn
  }

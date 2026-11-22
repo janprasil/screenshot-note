@@ -303,7 +303,6 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    // Výřez vybírá appka sama (RegionSelector), aby znala jeho polohu pro mapu elementů.
    process.arguments=["-x"]+(display?.arguments ?? [])+[file.path]
    var region:CGRect?
-   let selectionScreen=capturePresentationScreen ?? NSScreen.screens[0]
    // Kontext z prohlížeče v popředí se žádá souběžně se snímkem; bez rozšíření je nil hned.
    var browser:BrowserWindow?
    let folder=draft.topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
@@ -350,7 +349,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    }
    if display != nil{run()}
    else {
-    RegionSelector.choose(on:selectionScreen,minimum:4){rect in
+    RegionSelector.choose(minimum:4){rect in
      // Escape: stejné chování jako zrušený screencapture -i (soubor nevznikne).
      guard let rect else{self.capturing=false;restoreWindows();restoreComposerSize();if active == nil{try? fm.removeItem(at:root)};return}
      region=quartzRect(rect)

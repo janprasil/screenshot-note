@@ -77,7 +77,7 @@ struct CloudAttachment: Codable, Equatable {
  /// Snímek: čas ve videu a sha256 videa, ke kterému patří.
  var timestampMs: Int? = nil; var video: String? = nil
  /// Video: délka a rozměry, aby šlo odloženou úlohu uložit lokálně i s videem.
- var durationMs: Int? = nil; var width: Int? = nil; var height: Int? = nil
+ var durationMs: Int? = nil; var width: Int? = nil; var height: Int? = nil; var startedAtMs: Int64? = nil
  var filename: String { "\(index)."+(kind=="har" ? "har":kind=="context" ? "context.json":kind=="video" ? "mp4":kind+".png") }
  var isContext: Bool { kind=="context" || kind=="har" }
  static func validKind(_ kind:String)->Bool{["context","har","video"].contains(kind) || kind.range(of:"^frame-([1-9]|1[0-2])$",options:.regularExpression) != nil}
@@ -289,7 +289,7 @@ final class CloudLibrary {
    if index >= (base?.count ?? 0), let info = readVideoInfo(video[1]), let mp4 = try? boundedData(video[0], max: CloudAttachment.videoLimit) {
     try mp4.write(to: staging.appendingPathComponent("\(index + 1).mp4"), options: .atomic)
     let videoHash = sessionFingerprint(mp4)
-    attachments.append(CloudAttachment(index:index + 1,kind:"video",bytes:mp4.count,sha256:videoHash,durationMs:info.durationMs,width:info.width,height:info.height))
+    attachments.append(CloudAttachment(index:index + 1,kind:"video",bytes:mp4.count,sha256:videoHash,durationMs:info.durationMs,width:info.width,height:info.height,startedAtMs:info.startedAtMs))
     for (offset, frame) in info.frames.prefix(RecordingLimits.maxFrames).enumerated() {
      guard let png = try? boundedData(video[1].appendingPathComponent(frame.file), max: CloudAttachment.frameLimit) else { continue }
      let item = CloudAttachment(index:index + 1,kind:"frame-\(offset + 1)",bytes:png.count,sha256:sessionFingerprint(png),timestampMs:frame.ms,video:videoHash)
@@ -663,6 +663,7 @@ final class CloudLibrary {
    guard let data = try? Data(contentsOf:file,options:.mappedIfSafe), data.count == item.bytes, data.count <= item.sizeLimit, sessionFingerprint(data) == item.sha256 else { continue }
    var headers = ["Content-Type":item.contentType,"x-bytes":String(item.bytes),"x-sha256":item.sha256]
    if let ms = item.timestampMs, let video = item.video { headers["x-timestamp-ms"] = String(ms); headers["x-video-sha256"] = video }
+   if item.kind == "video", let started = item.startedAtMs { headers["x-started-at-ms"] = String(started) }
    do {
     _ = try await CloudTransport.shared.request(endpoint,"/api/v1/sessions/\(job.sessionID.uuidString.lowercased())/attachments/\(item.index)/\(item.kind)",method:"PUT",token:c.token,file:file,
      headers:headers)
@@ -720,7 +721,7 @@ final class CloudLibrary {
    images.append(.init(index:index,bytes:image.bytes,sha256:image.sha256))
    // Přílohy jdou s novým indexem snímku.
    for item in (job.attachments ?? []) where item.index==image.index {
-    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256,timestampMs:item.timestampMs,video:item.video,durationMs:item.durationMs,width:item.width,height:item.height)
+    let moved=CloudAttachment(index:index,kind:item.kind,bytes:item.bytes,sha256:item.sha256,timestampMs:item.timestampMs,video:item.video,durationMs:item.durationMs,width:item.width,height:item.height,startedAtMs:item.startedAtMs)
     try fm.copyItem(at:directory.appendingPathComponent(item.filename),to:staging.appendingPathComponent(moved.filename));attachments.append(moved)
    }
   }
@@ -799,7 +800,7 @@ final class CloudLibrary {
      guard let ms=frame.timestampMs,fm.fileExists(atPath:item.url.appendingPathComponent(frame.filename).path) else{continue}
      let file=String(frame.kind.dropFirst(6))+".png";try fm.copyItem(at:item.url.appendingPathComponent(frame.filename),to:sides[1].appendingPathComponent(file));frames.append(.init(file:file,ms:ms))
     }
-    try JSONEncoder().encode(VideoInfo(durationMs:duration,width:width,height:height,frames:frames.sorted{$0.ms<$1.ms})).write(to:sides[1].appendingPathComponent("video.json"))
+    try JSONEncoder().encode(VideoInfo(durationMs:duration,width:width,height:height,frames:frames.sorted{$0.ms<$1.ms},startedAtMs:video.startedAtMs)).write(to:sides[1].appendingPathComponent("video.json"))
    }
   }
   try finish(draft,root:work,dest:folder)

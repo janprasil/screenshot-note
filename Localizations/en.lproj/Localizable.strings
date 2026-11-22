@@ -137,7 +137,7 @@
 "Vyjmout" = "Cut";
 "Vyplň název konfigurace a absolutní cestu ke složce." = "Enter a configuration name and an absolute folder path.";
 "Víceřádkový komentář · kliknutím otevřít Markdown editor" = "Multiline comment · click to open the Markdown editor";
-"Výběr · tažením přesunout, dvojklikem upravit text" = "Select · drag to move, double-click to edit text";
+"Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář" = "Select · drag to move, double-click to edit text or add a numbered comment";
 "Výchozí" = "Default";
 "Výchozí konfigurace pro nové relace" = "Default configuration for new sessions";
 "Výchozí · " = "Default · ";
@@ -548,3 +548,9 @@
 "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Each Chrome screenshot uploads the page address and title, the console, the request list (HAR) and the element map with texts as configured. Cookies and authorization headers are always hidden. All folder members can see the attachments on the web and in MCP. Encryption is not available yet.";
 "Zapnout" = "Turn On";
 "Kontext snímku %ld se do cloudu nenahrál: %@" = "Context of screenshot %ld was not uploaded to the cloud: %@";
+"Komentář k objektu · Enter potvrdí, prázdný ho odebere" = "Comment · Enter to confirm, empty removes it";
+"Kresba" = "Drawing";
+"Kruh" = "Circle";
+"Text" = "Text";
+"Komentář…" = "Comment…";
+"Odebrat komentář" = "Remove comment";

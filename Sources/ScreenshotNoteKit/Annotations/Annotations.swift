@@ -3,10 +3,12 @@ import AppKit
 enum Tool:Int,Codable {case pen,arrow,ellipse,rectangle,text,select,crop,element}
 struct Mark:Codable {
  var tool:Tool;var points:[NSPoint];var color:NSColor;var width:CGFloat;var text:String;var bold:Bool;var italic:Bool;var underline:Bool;var fontSize:CGFloat;var rotation:CGFloat = 0;var textWidth:CGFloat?;var textHeight:CGFloat?;var element:ElementInfo?
- enum CodingKeys:String,CodingKey {case tool,points,rgba,width,text,bold,italic,underline,fontSize,rotation,textWidth,textHeight,element}
+ /// Číslovaný komentář k tvaru (mimo Element, ten má popis v `text`).
+ var comment:String?;var number:Int?
+ enum CodingKeys:String,CodingKey {case tool,points,rgba,width,text,bold,italic,underline,fontSize,rotation,textWidth,textHeight,element,comment,number}
  init(tool:Tool,points:[NSPoint],color:NSColor,width:CGFloat,text:String,bold:Bool,italic:Bool,underline:Bool,fontSize:CGFloat,rotation:CGFloat=0){self.rotation=rotation;self.tool=tool;self.points=points;self.color=color;self.width=width;self.text=text;self.bold=bold;self.italic=italic;self.underline=underline;self.fontSize=fontSize}
- init(from decoder:Decoder)throws{let c=try decoder.container(keyedBy:CodingKeys.self);tool=try c.decode(Tool.self,forKey:.tool);points=try c.decode([NSPoint].self,forKey:.points);let v=try c.decode([CGFloat].self,forKey:.rgba);guard v.count==4 else{throw DecodingError.dataCorruptedError(forKey:.rgba,in:c,debugDescription:"Invalid color")};color=NSColor(srgbRed:v[0],green:v[1],blue:v[2],alpha:v[3]);width=try c.decode(CGFloat.self,forKey:.width);text=try c.decode(String.self,forKey:.text);bold=try c.decode(Bool.self,forKey:.bold);italic=try c.decode(Bool.self,forKey:.italic);underline=try c.decode(Bool.self,forKey:.underline);fontSize=try c.decode(CGFloat.self,forKey:.fontSize);rotation=try c.decodeIfPresent(CGFloat.self,forKey:.rotation) ?? 0;textWidth=try c.decodeIfPresent(CGFloat.self,forKey:.textWidth);textHeight=try c.decodeIfPresent(CGFloat.self,forKey:.textHeight);element=try c.decodeIfPresent(ElementInfo.self,forKey:.element)}
- func encode(to encoder:Encoder)throws{var c=encoder.container(keyedBy:CodingKeys.self);try c.encode(tool,forKey:.tool);try c.encode(points,forKey:.points);let v=color.usingColorSpace(.sRGB) ?? .red;try c.encode([v.redComponent,v.greenComponent,v.blueComponent,v.alphaComponent],forKey:.rgba);try c.encode(width,forKey:.width);try c.encode(text,forKey:.text);try c.encode(bold,forKey:.bold);try c.encode(italic,forKey:.italic);try c.encode(underline,forKey:.underline);try c.encode(fontSize,forKey:.fontSize);try c.encode(rotation,forKey:.rotation);try c.encodeIfPresent(textWidth,forKey:.textWidth);try c.encodeIfPresent(textHeight,forKey:.textHeight);try c.encodeIfPresent(element,forKey:.element)}
+ init(from decoder:Decoder)throws{let c=try decoder.container(keyedBy:CodingKeys.self);tool=try c.decode(Tool.self,forKey:.tool);points=try c.decode([NSPoint].self,forKey:.points);let v=try c.decode([CGFloat].self,forKey:.rgba);guard v.count==4 else{throw DecodingError.dataCorruptedError(forKey:.rgba,in:c,debugDescription:"Invalid color")};color=NSColor(srgbRed:v[0],green:v[1],blue:v[2],alpha:v[3]);width=try c.decode(CGFloat.self,forKey:.width);text=try c.decode(String.self,forKey:.text);bold=try c.decode(Bool.self,forKey:.bold);italic=try c.decode(Bool.self,forKey:.italic);underline=try c.decode(Bool.self,forKey:.underline);fontSize=try c.decode(CGFloat.self,forKey:.fontSize);rotation=try c.decodeIfPresent(CGFloat.self,forKey:.rotation) ?? 0;textWidth=try c.decodeIfPresent(CGFloat.self,forKey:.textWidth);textHeight=try c.decodeIfPresent(CGFloat.self,forKey:.textHeight);element=try c.decodeIfPresent(ElementInfo.self,forKey:.element);comment=try c.decodeIfPresent(String.self,forKey:.comment);number=try c.decodeIfPresent(Int.self,forKey:.number)}
+ func encode(to encoder:Encoder)throws{var c=encoder.container(keyedBy:CodingKeys.self);try c.encode(tool,forKey:.tool);try c.encode(points,forKey:.points);let v=color.usingColorSpace(.sRGB) ?? .red;try c.encode([v.redComponent,v.greenComponent,v.blueComponent,v.alphaComponent],forKey:.rgba);try c.encode(width,forKey:.width);try c.encode(text,forKey:.text);try c.encode(bold,forKey:.bold);try c.encode(italic,forKey:.italic);try c.encode(underline,forKey:.underline);try c.encode(fontSize,forKey:.fontSize);try c.encode(rotation,forKey:.rotation);try c.encodeIfPresent(textWidth,forKey:.textWidth);try c.encodeIfPresent(textHeight,forKey:.textHeight);try c.encodeIfPresent(element,forKey:.element);try c.encodeIfPresent(comment,forKey:.comment);try c.encodeIfPresent(number,forKey:.number)}
  var font:NSFont{var f=NSFont.systemFont(ofSize:fontSize,weight:bold ? .bold:.regular);if italic{f=NSFontManager.shared.convert(f,toHaveTrait:.italicFontMask)};return f}
  var attributes:[NSAttributedString.Key:Any]{var a:[NSAttributedString.Key:Any]=[.font:font,.foregroundColor:color];if underline{a[.underlineStyle]=NSUnderlineStyle.single.rawValue};return a}
  var textContentSize:NSSize{
@@ -77,6 +79,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
    }else{(mark.text as NSString).draw(at:first,withAttributes:mark.attributes)}
   default:break
   }
+  if mark.tool != .element,let number=mark.number{paintBadge(number,at:mark.badgeAnchor,mark:mark)}
  }
  override func draw(_ dirtyRect:NSRect){AppPalette.canvas.setFill();bounds.fill();let r=imageRect;NSGraphicsContext.saveGraphicsState();r.clip();let t=NSAffineTransform();t.translateX(by:r.minX,yBy:r.minY);t.scale(by:scale);t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for(i,mark) in marks.enumerated(){if i != editingIndex{paint(mark)}};if let mark=pending{paint(mark)};NSGraphicsContext.restoreGraphicsState()
   drawElementHover();drawSelectionHandles()
@@ -91,7 +94,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  func choose(_ index:Int?){selected=index;if let i=index{let m=marks[i];color=m.color;thickness=m.width;fontSize=m.fontSize;bold=m.bold;italic=m.italic;underline=m.underline};needsDisplay=true;window?.invalidateCursorRects(for:self);changed?()}
  override func mouseDown(with event:NSEvent){finishText();window?.makeFirstResponder(self);if tool == .select && beginTransform(with:event){return};guard imageRect.contains(convert(event.locationInWindow,from:nil)) else{choose(nil);return};let p=point(event)
   if tool == .element {elementClick(p,parent:event.modifierFlags.contains(.option));return}
-  if tool == .select {let index=hit(p);choose(index);if let i=index{if event.clickCount==2 && marks[i].tool == .text{startText(i);return};if marks[i].tool == .element{if event.clickCount==2{startElementNote(i)};return};dragStart=p;dragOriginal=marks[i].points;snapshot()};return}
+  if tool == .select {let index=hit(p);choose(index);if let i=index{if event.clickCount==2 && marks[i].tool == .text{startText(i);return};if marks[i].tool == .element{if event.clickCount==2{startElementNote(i)};return};if event.clickCount==2{startElementNote(i);return};dragStart=p;dragOriginal=marks[i].points;snapshot()};return}
   if tool == .crop {cropStart=p;return}
   if tool == .text {if let i=hit(p),marks[i].tool == .text{choose(i);startText(i)}else{snapshot();var mark=Mark(tool:.text,points:[p],color:color,width:thickness,text:"",bold:bold,italic:italic,underline:underline,fontSize:fontSize);mark.points[0].y=max(viewport.minY,p.y-mark.bounds.height);marks.append(mark);choose(marks.count-1);startText(marks.count-1)};return}
   snapshot();choose(nil);pending=Mark(tool:tool,points:[p,p],color:color,width:thickness,text:"",bold:bold,italic:italic,underline:underline,fontSize:fontSize)
@@ -146,7 +149,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  }
  func textDidChange(_ notification:Notification){guard let edit=inline,let i=editingIndex else{return};marks[i].text=edit.string;updateInline();needsDisplay=true}
  func textView(_ textView:NSTextView,doCommandBy selector:Selector)->Bool{if selector==#selector(NSResponder.insertNewline(_:)) || selector==#selector(NSResponder.cancelOperation(_:)){finishText();return true};return false}
- func finishText(){commitElementNote();guard !closingText,let i=editingIndex else{return};closingText=true;marks[i].text=inline?.string ?? marks[i].text;inline?.removeFromSuperview();inline=nil;editingIndex=nil;if marks[i].text.isEmpty{marks.remove(at:i);selected=nil};window?.makeFirstResponder(self);closingText=false;tool = .select;needsDisplay=true;changed?()}
+ func finishText(){commitElementNote();guard !closingText,let i=editingIndex else{return};closingText=true;marks[i].text=inline?.string ?? marks[i].text;inline?.removeFromSuperview();inline=nil;editingIndex=nil;if marks[i].text.isEmpty{let numbered=marks[i].number != nil;marks.remove(at:i);selected=nil;if numbered{renumberElements()}};window?.makeFirstResponder(self);closingText=false;tool = .select;needsDisplay=true;changed?()}
  func png()->Data?{let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(viewport.width),pixelsHigh:Int(viewport.height),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!;NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);let t=NSAffineTransform();t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState();return rep.representation(using:.png,properties:[:])}
 }
 
@@ -194,10 +197,10 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size),w=dimensions.width,h=dimensions.height
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(740,w),height:min(340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
-  var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
+  var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
   // Nástroj Element jen u obrázku s mapou elementů z prohlížeče.
   let elements=elementTargets(mapElements(contextFile:contextSidecars(url)[0],imageSize:image.size),imageHeight:image.size.height)
-  if !elements.isEmpty{tools.append(.element);symbols.append("square.dashed");helps.append(L("Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší"))}
+  if !elements.isEmpty{tools.append(.element);symbols.append("cursorarrow.and.square.on.square.dashed");helps.append(L("Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší"))}
   let shift=CGFloat(tools.count-7)*44
   _ = icon("arrow.counterclockwise",L("Vrátit poslední úpravu"),#selector(undoMark),NSRect(x:16,y:h-48,width:36,height:34))
   for x in [CGFloat(64),390+shift]{let divider=DesignDivider(NSRect(x:x,y:h-43,width:1,height:24));divider.autoresizingMask=[.minYMargin];window.contentView!.addSubview(divider)}
@@ -255,7 +258,9 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
 
  /// Esc a Enter při výběru elementu patří editoru elementu, ne tlačítkům okna.
  func elementKey(_ code:UInt16)->Bool{
-  guard canvas != nil,canvas.tool == .element,let event=NSApp.currentEvent,event.type == .keyDown,event.keyCode==code else{return false}
+  // Pole komentáře tvaru je otevřené i v nástroji Výběr.
+  guard canvas != nil,canvas.tool == .element || canvas.elementField != nil,let event=NSApp.currentEvent,event.type == .keyDown,event.keyCode==code else{return false}
+  if code==53,let i=canvas.elementFieldIndex,canvas.marks.indices.contains(i),canvas.marks[i].tool != .element{canvas.dropElementField();return true}
   if code==53,canvas.activeElement != nil || canvas.elementField != nil{canvas.cancelActiveElement();return true}
   if code==36 || code==76,canvas.elementField != nil{canvas.confirmElementNote();return true}
   return false

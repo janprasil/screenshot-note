@@ -28,6 +28,7 @@ import AppKit
  // Stažená relace bez názvu: soubor i nadpis dostanou výchozí název složky.
  let created=ISO8601DateFormatter().date(from:"2026-11-23T10:00:00Z")!
  assert(readableSessionName("",created:created,fallback:"Složka").hasSuffix(" Složka") && readableSessionName("",created:created).hasSuffix(" Globální"))
+ assert(readableSessionName("",created:created,fallback:"Bug/Issue").hasSuffix(" Bug_Issue") && !readableSessionName("",created:created,fallback:String(repeating:"é",count:100)).contains("/") && readableSessionName("",created:created,fallback:String(repeating:"é",count:100)).utf8.count<=131)
  let note=RemoteNote(id:UUID(),title:"",comment:"Text",template:"# {title}\n\n{screenshots}\n\n{text}\n",captions:[],images:[])
  assert(cloudSessionBody(note,images:[],fallbackTitle:"Složka").hasPrefix("# Složka") && cloudSessionBody(note,images:[]).hasPrefix("# Globální"))
 

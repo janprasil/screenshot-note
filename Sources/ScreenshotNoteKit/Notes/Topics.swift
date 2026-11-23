@@ -266,7 +266,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   syncButton.needsDisplay=true
  }
  @objc func addTopic(){
-  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;commentTemplate=defaults.comment;imageTemplate=defaults.image;contextPolicy=ContextPolicy();table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
+  saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;commentTemplate=defaults.comment;imageTemplate=defaults.image;contextPolicy=ContextPolicy();defaultTitleValue=nil;table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
   name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();beginNameEdit()
  }
  @objc func syncSelected(){
@@ -382,8 +382,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard let current,current.cloudFolderID != nil else{defaultTitleValue=chosen;updateContext();showStatus(L("Výchozí název se uloží s konfigurací."));return}
   defaultTitleButton.isEnabled=false
   Task{@MainActor in
-   do{try await CloudFolders.shared.setDefaultTitle(current,chosen);self.list=Topics.all;self.defaultTitleValue=chosen;self.updateContext();self.showStatus(L("Výchozí název byl uložen."))}
-   catch{self.updateContext();showError(error.localizedDescription)}
+   // Výsledek patří jen ke složce, která je pořád vybraná.
+   do{try await CloudFolders.shared.setDefaultTitle(current,chosen);self.list=Topics.all;if self.editingID==current.id{self.defaultTitleValue=chosen;self.updateContext();self.showStatus(L("Výchozí název byl uložen."))}}
+   catch{if self.editingID==current.id{self.updateContext()};showError(error.localizedDescription)}
   }
  }
  @objc func toggleAITitle(){

@@ -294,7 +294,7 @@ final class CloudFolders {
   record.shas=session.images.map{(try? cloudImage(assets.appendingPathComponent($0))).map(sessionFingerprint) ?? ""}
   record.render=cloudRenderVersion;record.imageTemplate=source.imageTemplate
   var hashes:[String:String]=[:];for image in session.images{hashes["assets/"+image]=fileHash(assets.appendingPathComponent(image))}
-  if source.combined{record.note=note;record.stem=uniqueStem(readableSessionName(heading,created:Date()),base:base);record.files=hashes}
+  if source.combined{record.note=note;record.stem=uniqueStem(readableSessionName(heading,created:Date(),fallback:DefaultTitle.resolve(source)),base:base);record.files=hashes}
   else{hashes[file.lastPathComponent]=fileHash(file);record.files=hashes}
   index.batch{if let local{index.remove(local)};index.put(record)}
   if source.combined{tagCombinedFile(file)}else if SessionIndex.key(directory)==SessionIndex.key(base){writeSessionTag(file,lower)}else{writeSessionTag(directory,lower);writeSessionTag(file,lower)}
@@ -441,12 +441,14 @@ final class CloudFolders {
  private var defaultTitleChecked:Date?
  @MainActor func syncDefaultTitle(_ c:CloudConnection) async {
   guard let endpoint=CloudEndpoint(c.endpoint) else{return}
-  let path="/api/v1/account/default-title",pending=UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey)
+  let path="/api/v1/account/default-title",pending=UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey),local=DefaultTitle.global
   // Bez místní změny se serverová hodnota čte nejvýš jednou za 5 minut.
   if !pending,let last=defaultTitleChecked,Date().timeIntervalSince(last)<300{return}
   defaultTitleChecked=Date()
   guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":DefaultTitle.global])):request(endpoint,path,c.token,4096)),
         let remote=try? JSONDecoder().decode(FolderEnvelope<DefaultTitleSetting>.self,from:data).data,currentConnection()?.token==c.token else{return}
+  // Změna během požadavku má přednost; pošle se při další synchronizaci.
+  guard DefaultTitle.global==local,UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey)==pending else{defaultTitleChecked=nil;return}
   UserDefaults.standard.set(false,forKey:Self.pendingDefaultTitleKey)
   let value=remote.default_title.flatMap{validDefaultTitle($0) ? $0:nil}
   if value != DefaultTitle.global{DefaultTitle.global=value}
@@ -1013,7 +1015,7 @@ final class CloudFolders {
   record.title=metadata.title;record.comment=metadata.comment;record.template=metadata.template;record.notes=metadata.imageNotes
   record.file=SessionIndex.key(markdown);record.files=receipt?.files ?? [:];record.updated=receipt?.updated;record.created=created;record.digest=receipt?.fingerprint;record.shas=receipt?.shas
   if let files=receipt?.files,sessionFingerprint(Data(body.utf8))==metadata.bodyHash,directoryUnmodified(directory,files) {
-   let readable=uniqueName(readableSessionName(note.title,created:parseServerDate(created) ?? Date())){fm.fileExists(atPath:base.appendingPathComponent($0).path)}
+   let readable=uniqueName(readableSessionName(note.title,created:parseServerDate(created) ?? Date(),fallback:DefaultTitle.resolve(topic))){fm.fileExists(atPath:base.appendingPathComponent($0).path)}
    let target=base.appendingPathComponent(readable,isDirectory:true),renamed=target.appendingPathComponent(readable+".md")
    if (try? fm.moveItem(at:directory,to:target)) != nil {
     if (try? Data(body.utf8).write(to:renamed,options:.withoutOverwriting)) != nil {
@@ -1122,7 +1124,7 @@ final class CloudFolders {
   let lower=id.uuidString.lowercased()
   guard let receipt=readReceipt(receiptFile(endpoint,owner:owner,base:base,id:id,kind:"combined")),let note=receipt.note else{return nil}
   let assets=base.appendingPathComponent("assets"),legacy=assets.appendingPathComponent(lower)
-  let stem=uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date()),base:base)
+  let stem=uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)
   var names:[String]=[],files:[String:String]=[:]
   for image in note.images {
    let old=legacy.appendingPathComponent("\(image.index).png"),hash=fileHash(old),recorded=receipt.files?["\(image.index).png"]
@@ -1168,7 +1170,7 @@ final class CloudFolders {
    }
    guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
    try fm.createDirectory(at:assets,withIntermediateDirectories:true)
-   let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date()),base:base)
+   let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)
    var names=Array((record?.images ?? []).prefix(data.count)),files=record?.files ?? [:]
    for (i,bytes) in data.enumerated() {
     if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
@@ -1211,7 +1213,7 @@ final class CloudFolders {
   var text=header;var placed:[(SessionRecord,Int,String)]=[]
   for (i,(record,_)) in ordered.enumerated() {
    if i>0{text+="\n\n---\n\n"}
-   let body=cloudSessionBody(record.note!,images:record.images,contexts:diskContexts(record.images,assets:assets));placed.append((record,(text as NSString).length,body));text+=body
+   let body=cloudSessionBody(record.note!,images:record.images,contexts:diskContexts(record.images,assets:assets),fallbackTitle:DefaultTitle.resolve(topic));placed.append((record,(text as NSString).length,body));text+=body
   }
   text+=footer
   let name=validCombinedFile(topic.combinedFile) ? topic.combinedFile:defaultCombinedFile

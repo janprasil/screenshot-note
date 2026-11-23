@@ -6,7 +6,8 @@ let builtInSessionTitle = "Screenshot"
 /// Stejná pravidla jako server: jeden řádek bez okrajových mezer, 1–100 znaků.
 func validDefaultTitle(_ value:String)->Bool {
  value==value.trimmingCharacters(in:.whitespacesAndNewlines) && (1...100).contains(value.unicodeScalars.count) && value.utf8.count<=400
-  && !value.unicodeScalars.contains{CharacterSet.controlCharacters.contains($0)}
+  // Stejné rozsahy jako server: C0 a C1 řídicí znaky, ne formátovací (ZWJ).
+  && !value.unicodeScalars.contains{$0.value<0x20 || (0x7F...0x9F).contains($0.value)}
 }
 
 /// Výchozí název relace bez názvu: složka, pak globální nastavení, pak „Screenshot“.

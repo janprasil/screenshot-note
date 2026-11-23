@@ -1161,11 +1161,16 @@ final class CloudFolders {
   let index=SessionIndex.shared,assets=base.appendingPathComponent("assets",isDirectory:true)
   var sections:[(SessionRecord,Int)]=[],refreshed=Set<String>(),failure:Error?
   func present(_ r:SessionRecord)->Bool{r.note != nil && !r.images.isEmpty && r.images.allSatisfy{fm.fileExists(atPath:assets.appendingPathComponent($0).path)}}
+  // Relace bez názvu: změna výchozího názvu přegeneruje její blok.
+  func markFallback(_ r:inout SessionRecord) {
+   let want=(r.note?.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ?? false) ? DefaultTitle.resolve(topic):nil
+   if r.fallback != want{r.fallback=want;index.put(r);refreshed.insert(r.id)}
+  }
   for (order,item) in items.enumerated() {
    var record=index.cloud(item.id,base:base)
    if let saved=record,saved.stem==nil{record=nil}
    if let saved=record,saved.trashed==true{record=restoreCombined(saved,base:base)}
-   if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){sections.append((saved,order));continue}
+   if var saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){markFallback(&saved);sections.append((saved,order));continue}
    let fetched:(RemoteNote,RemoteNoteStamp?,String)
    do{fetched=try await fetchNote(item.id,endpoint:endpoint,token:token)}
    catch {
@@ -1177,7 +1182,7 @@ final class CloudFolders {
    let created=stamp?.created_at ?? item.created_at
    if record==nil{record=migrateCombined(item.id,created:created,topic:topic,base:base,endpoint:endpoint,owner:owner)}
    if var saved=record,saved.digest==digest,saved.render==cloudRenderVersion,present(saved) {
-    saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision;index.put(saved);sections.append((saved,order));continue
+    saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision;index.put(saved);markFallback(&saved);sections.append((saved,order));continue
    }
    let data:[Data]
    let contexts:[Int:[String:Data]]
@@ -1213,7 +1218,7 @@ final class CloudFolders {
    // Obsahově shodná relace (jen nové porovnání) se nebere jako změna.
    let same=record.map{$0.note.map{old in old.title==note.title && old.comment==note.comment && old.captions==note.captions && old.template==note.template && (!note.template.contains("{author}") || old.author==note.author)
     && old.comments==note.comments && old.comment_template==note.comment_template && old.image_template==note.image_template && old.issues==note.issues} ?? false && $0.render==cloudRenderVersion && $0.shas==next.shas} ?? false
-   index.put(next);sections.append((next,order));if !same{refreshed.insert(next.id)}
+   next.fallback=record?.fallback;index.put(next);markFallback(&next);sections.append((next,order));if !same{refreshed.insert(next.id)}
   }
   for item in trashed {
    guard var record=index.cloud(item.id,base:base),record.stem != nil,record.trashed != true else{continue}

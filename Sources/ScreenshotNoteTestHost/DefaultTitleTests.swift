@@ -11,7 +11,7 @@ import AppKit
  DefaultTitle.global=nil
  var plain=Topic(id:"t",name:"Místní",detail:"",folder:"/tmp",combined:false,combinedFile:"All.md"),ai=plain;ai.aiTitle=true
  // Pravidla stejná jako na serveru.
- assert(validDefaultTitle("Bug") && !validDefaultTitle(" Bug") && !validDefaultTitle("") && !validDefaultTitle("a\nb") && !validDefaultTitle(String(repeating:"x",count:101)))
+ assert(validDefaultTitle("Bug") && !validDefaultTitle(" Bug") && !validDefaultTitle("") && !validDefaultTitle("a\nb") && !validDefaultTitle(String(repeating:"x",count:101)) && validDefaultTitle("Tým 👩\u{200D}💻"))
  assert(DefaultTitle.resolve(plain)==builtInSessionTitle)
  DefaultTitle.global="Globální";assert(DefaultTitle.resolve(plain)=="Globální" && DefaultTitle.resolve(nil)=="Globální")
  plain.defaultTitle="Složka";assert(DefaultTitle.resolve(plain)=="Složka")

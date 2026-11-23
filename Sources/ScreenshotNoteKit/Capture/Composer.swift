@@ -291,10 +291,29 @@ final class Composer:NSObject,NSWindowDelegate {
  func snapshotFields(){guard window != nil else{return};window.makeFirstResponder(nil);draft.title=titleField.stringValue;draft.comment=comment.markdownText}
  @objc func addScreenshot(){captureScreenshot(full:false)}
  @objc func addFullscreenScreenshot(){captureScreenshot(full:true)}
- @objc func showCaptureOptions(){
-  let menu=NSMenu()
+ /// Spuštění záznamu videa z panelu (cíl záznamu).
+ var onRecord:((RecordingTarget)->Void)?
+ /// Zda jde záznam právě spustit (neběží jiný záznam ani snímání).
+ var recordingAvailable:()->Bool={true}
+ /// Menu pod Přidat výřez: snímek celé obrazovky a záznam videa.
+ func captureOptionsMenu()->NSMenu {
+  let menu=NSMenu();menu.autoenablesItems=false
   let fullscreen=NSMenuItem(title:L("Přidat snímek celé obrazovky"),action:#selector(addFullscreenScreenshot),keyEquivalent:"")
   fullscreen.target=self;fullscreen.image=NSImage(systemSymbolName:"display",accessibilityDescription:nil);menu.addItem(fullscreen)
+  let record=NSMenuItem(title:L("Nahrát video"),action:nil,keyEquivalent:"");record.image=NSImage(systemSymbolName:"record.circle",accessibilityDescription:nil)
+  let targets=NSMenu()
+  for (title,target) in [(L("Celá obrazovka"),RecordingTarget.screen),(L("Okno v popředí"),.window),(L("Vybraná oblast…"),.region)] {
+   let item=NSMenuItem(title:title,action:#selector(recordVideo(_:)),keyEquivalent:"");item.target=self;item.representedObject=target.rawValue;targets.addItem(item)
+  }
+  record.submenu=targets;record.isEnabled=onRecord != nil && recordingAvailable();menu.addItem(record)
+  return menu
+ }
+ @objc func recordVideo(_ sender:NSMenuItem){
+  guard let onRecord,let target=RecordingTarget(rawValue:sender.representedObject as? String ?? "") else{return}
+  onRecord(target)
+ }
+ @objc func showCaptureOptions(){
+  let menu=captureOptionsMenu()
   menu.popUp(positioning:nil,at:NSPoint(x:0,y:captureOptions.isFlipped ? captureOptions.bounds.maxY+4:captureOptions.bounds.minY-4),in:captureOptions)
  }
  private func captureScreenshot(full:Bool){

@@ -127,6 +127,7 @@ import AppKit
  try await editAndCommentTests()
  try itemTemplateTests()
  try videoRecordingTests()
+ try videoAnnotationTests()
  try await staleDraftTests()
  try await markdownLinkTests()
  try await teamFolderTests()

@@ -3,10 +3,10 @@ import AppKit
 
 /// Výchozí název relace: pořadí složka → globální → „Screenshot“, prázdný název pro AI a synchronizace se serverem.
 @MainActor func defaultTitleTests() async throws {
- let saved=UserDefaults.standard.string(forKey:DefaultTitle.key),pending=UserDefaults.standard.bool(forKey:CloudFolders.pendingDefaultTitleKey)
+ let saved=UserDefaults.standard.string(forKey:DefaultTitle.key),pending=UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)
  defer{
   if let saved{UserDefaults.standard.set(saved,forKey:DefaultTitle.key)}else{UserDefaults.standard.removeObject(forKey:DefaultTitle.key)}
-  UserDefaults.standard.set(pending,forKey:CloudFolders.pendingDefaultTitleKey)
+  if let pending{UserDefaults.standard.set(pending,forKey:CloudFolders.pendingDefaultTitleKey)}else{UserDefaults.standard.removeObject(forKey:CloudFolders.pendingDefaultTitleKey)}
  }
  DefaultTitle.global=nil
  var plain=Topic(id:"t",name:"Místní",detail:"",folder:"/tmp",combined:false,combinedFile:"All.md"),ai=plain;ai.aiTitle=true
@@ -54,7 +54,7 @@ import AppKit
   return try JSONSerialization.data(withJSONObject:["data":["folder_id":personal.uuidString.lowercased(),"default_title":folderTitle]])
  },pending:{_ in false})
  // Bez místní změny platí serverová globální hodnota.
- UserDefaults.standard.set(false,forKey:CloudFolders.pendingDefaultTitleKey)
+ UserDefaults.standard.removeObject(forKey:CloudFolders.pendingDefaultTitleKey)
  await store.refresh(c);await store.syncDefaultTitle(c);assert(store.lastError==nil && DefaultTitle.global=="Účet" && sent.isEmpty)
  var topic=store.topics.first{$0.cloudFolderID==personal}!
  assert(topic.defaultTitle==nil)
@@ -68,9 +68,12 @@ import AppKit
  do{try await store.setDefaultTitle(member,"X");assertionFailure("Member changed default title")}catch let failure as CloudFailure{assert(failure.code=="role_forbidden")}
  assert(sent.count==2)
  // Místní změna globálního názvu se při synchronizaci pošle na server.
- DefaultTitle.global="Mac";UserDefaults.standard.set(true,forKey:CloudFolders.pendingDefaultTitleKey)
+ // Změna pro jiný účet se sem neposílá a hodnotu serveru nepřepíše.
+ DefaultTitle.global="Jiný";UserDefaults.standard.set("https://other.invalid|x",forKey:CloudFolders.pendingDefaultTitleKey)
+ await store.syncDefaultTitle(c);assert(sent.count==2 && UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)=="https://other.invalid|x")
+ DefaultTitle.global="Mac";UserDefaults.standard.set(CloudFolders.accountKey(c),forKey:CloudFolders.pendingDefaultTitleKey)
  await store.syncDefaultTitle(c)
- assert(sent.last!.0=="/api/v1/account/default-title" && sent.last!.2["default_title"] as? String=="Mac" && !UserDefaults.standard.bool(forKey:CloudFolders.pendingDefaultTitleKey) && DefaultTitle.global=="Mac")
+ assert(sent.last!.0=="/api/v1/account/default-title" && sent.last!.2["default_title"] as? String=="Mac" && UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)==nil && DefaultTitle.global=="Mac")
  print("PASS: default title: folder → global → Screenshot, empty title only for AI folders, folder PUT for managers, account sync both ways")
 }
 

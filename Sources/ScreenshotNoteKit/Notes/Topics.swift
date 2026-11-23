@@ -373,7 +373,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard let chosen=promptDefaultTitle(L("Globální výchozí název"),current:DefaultTitle.global,inherited:builtInSessionTitle) else{return}
   DefaultTitle.global=chosen
   // S cloudovým účtem se hodnota pošle na server při další synchronizaci.
-  UserDefaults.standard.set(true,forKey:CloudFolders.pendingDefaultTitleKey);refreshCloud();updateContext()
+  MainActor.assumeIsolated{CloudFolders.shared.markDefaultTitlePending()};refreshCloud();updateContext()
   showStatus(L("Výchozí název byl uložen."))
  }
  @objc func editTopicDefaultTitle(){

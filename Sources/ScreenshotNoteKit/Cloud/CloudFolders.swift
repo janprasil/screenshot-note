@@ -437,21 +437,29 @@ final class CloudFolders {
   if records[index].defaultTitle != saved{var updated=records;updated[index].defaultTitle=saved;try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)}
  }
  /// Globální výchozí název účtu: neodeslaná místní změna jde na server, jinak platí serverová hodnota.
- static let pendingDefaultTitleKey="defaultSessionTitlePending"
+ // Neodeslaná změna globálního názvu patří účtu, pro který vznikla (endpoint|owner).
+ static let pendingDefaultTitleKey="defaultSessionTitlePendingAccount"
+ static func accountKey(_ c:CloudConnection)->String{c.endpoint+"|"+(c.ownerID?.uuidString ?? "")}
+ /// Změna bez připojení zůstane jen místní; při příštím připojení platí hodnota serveru.
+ @MainActor func markDefaultTitlePending() {
+  if let c=currentConnection(){UserDefaults.standard.set(Self.accountKey(c),forKey:Self.pendingDefaultTitleKey)}
+  else{UserDefaults.standard.removeObject(forKey:Self.pendingDefaultTitleKey)}
+ }
  // Poslední čtení globálního názvu pro daný účet a server.
  private var defaultTitleChecked:(account:String,at:Date)?
  @MainActor func syncDefaultTitle(_ c:CloudConnection) async {
   guard let endpoint=CloudEndpoint(c.endpoint) else{return}
-  let path="/api/v1/account/default-title",pending=UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey),local=DefaultTitle.global
+  let account=Self.accountKey(c),marker=UserDefaults.standard.string(forKey:Self.pendingDefaultTitleKey)
+  let path="/api/v1/account/default-title",pending=marker==account,local=DefaultTitle.global
   // Bez místní změny se serverová hodnota čte nejvýš jednou za 5 minut.
-  let account=c.endpoint+"|"+(c.ownerID?.uuidString ?? "")
   if !pending,let last=defaultTitleChecked,last.account==account,Date().timeIntervalSince(last.at)<300{return}
   defaultTitleChecked=(account,Date())
-  guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":DefaultTitle.global])):request(endpoint,path,c.token,4096)),
+  guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":local])):request(endpoint,path,c.token,4096)),
         let remote=try? JSONDecoder().decode(FolderEnvelope<DefaultTitleSetting>.self,from:data).data,currentConnection()?.token==c.token else{return}
   // Změna během požadavku má přednost; pošle se při další synchronizaci.
-  guard DefaultTitle.global==local,UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey)==pending else{defaultTitleChecked=nil;return}
-  UserDefaults.standard.set(false,forKey:Self.pendingDefaultTitleKey)
+  guard DefaultTitle.global==local,UserDefaults.standard.string(forKey:Self.pendingDefaultTitleKey)==marker else{defaultTitleChecked=nil;return}
+  // Změna jiného účtu zůstane čekat na svůj účet.
+  if pending{UserDefaults.standard.removeObject(forKey:Self.pendingDefaultTitleKey)}
   let value=remote.default_title.flatMap{validDefaultTitle($0) ? $0:nil}
   if value != DefaultTitle.global{DefaultTitle.global=value}
  }
@@ -1043,7 +1051,7 @@ final class CloudFolders {
   // Beze změny na serveru se nic nestahuje.
   // Změněná revize (úprava, komentář, šablona) znamená nové vykreslení i beze změny updated_at.
   // Relace bez názvu se vykreslí znovu i po změně výchozího názvu.
-  func fallbackCurrent(_ r:SessionRecord)->Bool{r.fallback==nil || r.fallback==DefaultTitle.resolve(topic)}
+  func fallbackCurrent(_ r:SessionRecord)->Bool{r.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? r.fallback==DefaultTitle.resolve(topic):true}
   if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,fallbackCurrent(saved),present(saved){return}
   let (note,stamp,digest)=try await fetchNote(id,endpoint:endpoint,token:token)
   let created=stamp?.created_at ?? item.created_at
@@ -1108,7 +1116,7 @@ final class CloudFolders {
    let sides=try writeContextAttachments(fresh,names:links,assets:folderAssets)
    let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:fresh,fallbackTitle:DefaultTitle.resolve(topic)).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
+   var kept=saved;kept.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):nil;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)

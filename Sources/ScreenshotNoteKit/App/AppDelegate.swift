@@ -376,6 +376,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let pristine=draftSignature(baseline ?? draft,root:root)
   view.hasUnsavedWork={[weak view] in view.map{draftSignature($0.draft,root:root) != pristine} ?? false}
   view.onCapture={[weak self] full in self?.capture(full:full,fromComposer:true)}
+  view.onRecord={[weak self] target in self?.startRecording(target)}
+  view.recordingAvailable={[weak self] in self.map{!$0.capturing && !$0.browsingSavedSessions && $0.recording.state == .idle && !$0.deliveringRecording} ?? false}
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}
    let upload = result == 2 && draft.topic?.savesToCloud == true

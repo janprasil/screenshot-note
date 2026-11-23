@@ -335,6 +335,14 @@ if CommandLine.arguments.contains("--self-test") {
  captureProbe.window.contentView!.addSubview(captureProbe.sessionLink);captureProbe.layoutContextRow()
  assert(!captureProbe.copyLinkButton.frame.intersects(captureProbe.sessionLink.frame) && !captureProbe.copyLinkButton.frame.intersects(captureProbe.captureGroup.frame))
  captureProbe.sessionLink.removeFromSuperview()
+ // Menu pod Přidat výřez: celá obrazovka a Nahrát video s cíli; bez obsluhy záznamu je položka vypnutá.
+ let options=captureProbe.captureOptionsMenu()
+ assert(options.items.count==2 && options.items[1].submenu?.items.count==3 && !options.items[1].isEnabled)
+ var recorded:[RecordingTarget]=[];captureProbe.onRecord={recorded.append($0)}
+ let targets=captureProbe.captureOptionsMenu().items[1]
+ assert(targets.isEnabled);for item in targets.submenu!.items{captureProbe.recordVideo(item)}
+ assert(recorded==[.screen,.window,.region])
+ captureProbe.onRecord=nil
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
  print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")

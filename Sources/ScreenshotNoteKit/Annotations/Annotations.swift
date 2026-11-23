@@ -54,7 +54,11 @@ final class DrawingView:NSView,NSTextViewDelegate {
  override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
  init(image:NSImage,frame:NSRect){self.image=image;viewport=NSRect(origin:.zero,size:image.size);super.init(frame:frame)}
  required init?(coder:NSCoder){fatalError()}
- override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);updateInline();updateElementField();updateNoteButton();needsDisplay=true;window?.invalidateCursorRects(for:self)}
+ /// False u videa: obraz kreslí přehrávač pod plátnem.
+ var drawsImage=true
+ /// Změna velikosti plátna (přehrávač videa sleduje oblast obrazu).
+ var layoutChanged:(()->Void)?
+ override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);layoutChanged?();updateInline();updateElementField();updateNoteButton();needsDisplay=true;window?.invalidateCursorRects(for:self)}
  var imageRect:NSRect{let scale=min(bounds.width/viewport.width,bounds.height/viewport.height);let size=NSSize(width:viewport.width*scale,height:viewport.height*scale);return NSRect(x:(bounds.width-size.width)/2,y:(bounds.height-size.height)/2,width:size.width,height:size.height)}
  var scale:CGFloat{imageRect.width/viewport.width}
  func point(_ event:NSEvent)->NSPoint{let p=convert(event.locationInWindow,from:nil),r=imageRect;return NSPoint(x:max(viewport.minX,min(viewport.maxX,(p.x-r.minX)/scale+viewport.minX)),y:max(viewport.minY,min(viewport.maxY,(p.y-r.minY)/scale+viewport.minY)))}
@@ -81,7 +85,10 @@ final class DrawingView:NSView,NSTextViewDelegate {
   }
   if mark.tool != .element,let number=mark.number{paintBadge(number,at:mark.badgeAnchor,mark:mark)}
  }
- override func draw(_ dirtyRect:NSRect){AppPalette.canvas.setFill();bounds.fill();let r=imageRect;NSGraphicsContext.saveGraphicsState();r.clip();let t=NSAffineTransform();t.translateX(by:r.minX,yBy:r.minY);t.scale(by:scale);t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for(i,mark) in marks.enumerated(){if i != editingIndex{paint(mark)}};if let mark=pending{paint(mark)};NSGraphicsContext.restoreGraphicsState()
+ override func draw(_ dirtyRect:NSRect){AppPalette.canvas.setFill();bounds.fill();let r=imageRect
+  // U videa je pod plátnem přehrávač; oblast obrazu zůstane průhledná.
+  if !drawsImage{NSColor.clear.setFill();r.fill(using:.copy)}
+  NSGraphicsContext.saveGraphicsState();r.clip();let t=NSAffineTransform();t.translateX(by:r.minX,yBy:r.minY);t.scale(by:scale);t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();if drawsImage{image.draw(in:NSRect(origin:.zero,size:image.size))};for(i,mark) in marks.enumerated(){if i != editingIndex{paint(mark)}};if let mark=pending{paint(mark)};NSGraphicsContext.restoreGraphicsState()
   drawElementHover();drawSelectionHandles();drawNoteIndicators()
   if let rect=cropPreview{AppPalette.accent.setStroke();let p=NSBezierPath(rect:displayRect(rect));p.lineWidth=2;p.stroke()}
  }
@@ -150,6 +157,12 @@ final class DrawingView:NSView,NSTextViewDelegate {
  func textDidChange(_ notification:Notification){guard let edit=inline,let i=editingIndex else{return};marks[i].text=edit.string;updateInline();needsDisplay=true}
  func textView(_ textView:NSTextView,doCommandBy selector:Selector)->Bool{if selector==#selector(NSResponder.insertNewline(_:)) || selector==#selector(NSResponder.cancelOperation(_:)){finishText();return true};return false}
  func finishText(){commitElementNote();guard !closingText,let i=editingIndex else{return};closingText=true;marks[i].text=inline?.string ?? marks[i].text;inline?.removeFromSuperview();inline=nil;editingIndex=nil;if marks[i].text.isEmpty{let numbered=marks[i].number != nil;marks.remove(at:i);selected=nil;if numbered{renumberElements()}};window?.makeFirstResponder(self);closingText=false;tool = .select;needsDisplay=true;changed?()}
+ /// Jen anotace na průhledném pozadí v rozměru obrazu; bez anotací nil.
+ func overlay()->CGImage?{
+  guard !marks.isEmpty,let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(image.size.width),pixelsHigh:Int(image.size.height),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0) else{return nil}
+  NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState()
+  return rep.cgImage
+ }
  func png()->Data?{let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(viewport.width),pixelsHigh:Int(viewport.height),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!;NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);let t=NSAffineTransform();t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState();return rep.representation(using:.png,properties:[:])}
 }
 
@@ -184,6 +197,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  var window:NSWindow!;var canvas:DrawingView!;var accepted=false;var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:NSRect?
  var tools:[Tool]=[.select,.pen,.arrow,.ellipse,.rectangle,.text,.crop];var toolButtons:[NSButton]=[]
  var onValuePickerPresented:((NSWindow,[NSButton])->Void)?
+ /// Položka s videem: anotace se kreslí nad přehrávačem a při uložení se vypálí do MP4.
+ var isVideo=false;var videoPlayer:VideoAnnotationPlayer?;var burning=false;let burnProgress=NSProgressIndicator()
  let colors=ModalColorWell();var width:NSButton!;var size:NSButton!;var textControls:[NSView]=[];var styleButtons:[NSButton]=[]
  func icon(_ symbol:String,_ help:String,_ action:Selector,_ frame:NSRect)->NSButton{let b=AnnotationToolButton(image:NSImage(systemSymbolName:symbol,accessibilityDescription:help) ?? NSImage(),target:self,action:action);b.frame=frame;b.toolTip=help;b.bezelStyle = .texturedRounded;b.autoresizingMask=[.minYMargin];window.contentView!.addSubview(b);return b}
  /// `caption` je popisek obrázku; čísla nových anotací Element navážou na řádky v něm.
@@ -193,11 +208,18 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   var document:AnnotationDocument?
   if FileManager.default.fileExists(atPath:annotationSidecar(url).path){do{document=try JSONDecoder().decode(AnnotationDocument.self,from:Data(contentsOf:annotationSidecar(url)));baseData=document!.base}catch{showError(L("Nelze načíst editovatelné anotace: ")+error.localizedDescription);return false}}
   guard let image=NSImage(data:baseData) else{return false};if let rep=image.representations.first{image.size=NSSize(width:rep.pixelsWide,height:rep.pixelsHigh)}
+  let video=videoSidecars(url),info=fm.fileExists(atPath:video[0].path) ? readVideoInfo(video[1]):nil;isVideo=info != nil
+  // Bez dokumentu anotací je základem současné video; odložený originál by smazal vypálené anotace.
+  if isVideo,document == nil{try? fm.removeItem(at:videoOriginals(url))}
+  // Video se neořezává; starší oříznutí plakátu se u videa nepoužije.
+  if isVideo{document?.crop=NSRect(origin:.zero,size:image.size)}
   let screen=NSApp.keyWindow?.screen?.visibleFrame ?? capturePresentationScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1200,height:850)
   let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size),w=dimensions.width,h=dimensions.height
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(740,w),height:min(340,h))
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(740,w),height:min(340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
   var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
+  // Video se neořezává; anotace platí pro celý záznam.
+  if isVideo{tools.removeAll{$0 == .crop};symbols.removeLast();helps.removeLast()}
   // Nástroj Element jen u obrázku s mapou elementů z prohlížeče.
   let elements=elementTargets(mapElements(contextFile:contextSidecars(url)[0],imageSize:image.size),imageHeight:image.size.height)
   if !elements.isEmpty{tools.append(.element);symbols.append("cursorarrow.and.square.on.square.dashed");helps.append(L("Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší"))}
@@ -211,12 +233,25 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
   canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32,height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  if let info {
+   // Přehrávač ukazuje původní záznam, jinak by se dřívější anotace zobrazily dvakrát.
+   let original=videoOriginals(url).appendingPathComponent("video.mp4"),source=fm.fileExists(atPath:original.path) ? original:video[0]
+   let player=VideoAnnotationPlayer(source:source,durationMs:info.durationMs);videoPlayer=player;canvas.drawsImage=false
+   window.contentView!.addSubview(player.view,positioned:.below,relativeTo:canvas)
+   canvas.layoutChanged={[weak self] in self?.layoutPlayer()};layoutPlayer()
+   player.playButton.frame=NSRect(x:132,y:18,width:36,height:34);window.contentView!.addSubview(player.playButton)
+   player.timeline.frame=NSRect(x:178,y:24,width:max(40,w-420),height:22);player.timeline.autoresizingMask=[.width];window.contentView!.addSubview(player.timeline)
+   burnProgress.style = .spinning;burnProgress.controlSize = .small;burnProgress.isDisplayedWhenStopped=false;burnProgress.frame=NSRect(x:w-220,y:27,width:16,height:16);burnProgress.autoresizingMask=[.minXMargin]
+   burnProgress.setAccessibilityLabel(L("Vkládám anotace do videa…"));window.contentView!.addSubview(burnProgress)
+  }
   let cancel=styledButton(L("Zrušit"),role:.quiet,frame:NSRect(x:20,y:18,width:100,height:34),target:self,action:#selector(cancel));cancel.keyEquivalent="\u{1b}";window.contentView!.addSubview(cancel)
   let apply=styledButton(L("Použít úpravy"),symbol:"checkmark",role:.primary,frame:NSRect(x:w-190,y:18,width:170,height:34),target:self,action:#selector(apply));apply.autoresizingMask=[.minXMargin];apply.keyEquivalent="\r";window.contentView!.addSubview(apply)
   recordInitialState()
+  defer{videoPlayer?.stop()}
   sync();presentScreenshotPanel(window);window.makeFirstResponder(canvas);if isExportingDesign{exportDesignWindow(window,name:"annotations");return false};NSApp.runModal(for:window);window.orderOut(nil)
   return accepted
  }
+ func layoutPlayer(){guard let player=videoPlayer,let content=window?.contentView else{return};player.view.frame=canvas.convert(canvas.imageRect,to:content)}
  func encodedMarks()throws->Data{let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys];return try encoder.encode(canvas.marks)}
  func recordInitialState(){initialMarks=try? encodedMarks();initialCrop=canvas.viewport}
  var hasUnsavedChanges:Bool{initialMarks != (try? encodedMarks()) || initialCrop != canvas.viewport}
@@ -224,9 +259,27 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  func saveWorkingImage()throws{
   guard hasUnsavedChanges else{return}
   guard let url=workingURL,let data=canvas.png() else{throw NSError(domain:"ScreenshotNote",code:6,userInfo:[NSLocalizedDescriptionKey:L("Anotace se nepodařilo uložit.")])}
-  let side=try JSONEncoder().encode(AnnotationDocument(base:baseData,marks:canvas.marks,crop:canvas.viewport)),old=try Data(contentsOf:url)
-  try data.write(to:url,options:.atomic)
-  do{try side.write(to:annotationSidecar(url),options:.atomic)}catch{try? old.write(to:url,options:.atomic);throw error}
+  // Video se připraví předem; položka se změní až po zápisu plakátu a anotací.
+  let overlay=canvas.overlay()
+  let side=try JSONEncoder().encode(AnnotationDocument(base:baseData,marks:canvas.marks,crop:canvas.viewport)),old=try Data(contentsOf:url),oldSide=try? Data(contentsOf:annotationSidecar(url))
+  var prepared:URL?;if isVideo{prepared=try whileBurning{try prepareVideoAnnotations(poster:url,overlay:overlay)}}
+  var wroteSide=false
+  // Vrátí plakát; anotace jen pokud se nové zapsaly.
+  func rollback(){try? old.write(to:url,options:.atomic);guard wroteSide else{return};if let oldSide{try? oldSide.write(to:annotationSidecar(url),options:.atomic)}else{try? fm.removeItem(at:annotationSidecar(url))}}
+  do {
+   try data.write(to:url,options:.atomic)
+   try side.write(to:annotationSidecar(url),options:.atomic);wroteSide=true
+   if isVideo{try commitVideoAnnotations(poster:url,prepared:prepared)}
+  } catch {rollback();if let prepared{try? fm.removeItem(at:prepared)};throw error}
+ }
+ /// Vypálení běží mimo hlavní vlákno; okno mezitím nepřijímá vstup a ukazuje průběh.
+ func whileBurning<T>(_ work:@escaping ()throws->T)throws->T {
+  burning=true;window?.ignoresMouseEvents=true;burnProgress.startAnimation(nil)
+  defer{burning=false;window?.ignoresMouseEvents=false;burnProgress.stopAnimation(nil)}
+  var result:Result<T,Error>?
+  DispatchQueue.global(qos:.userInitiated).async{let value=Result{try work()};DispatchQueue.main.async{result=value}}
+  while result == nil{RunLoop.current.run(mode:RunLoop.current.currentMode ?? .default,before:Date().addingTimeInterval(0.05))}
+  return try result!.get()
  }
 
  func sync(){
@@ -268,12 +321,14 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   return false
  }
  @objc func apply(){
+  if burning{return}
   if elementKey(36) || elementKey(76){return}
   window.makeFirstResponder(nil);canvas.finishText()
   do{try saveWorkingImage()}catch{showError(error.localizedDescription);return}
   colors.deactivate();NSColorPanel.shared.orderOut(nil);accepted=true;NSApp.stopModal()
  }
  @objc func cancel(){
+  if burning{return}
   if elementKey(53){return}
   canvas.finishText()
   switch requestedCloseChoice(confirm:{AnnotationCloseDialog().run()}){

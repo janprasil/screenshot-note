@@ -95,6 +95,8 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   // Video jde vždy (není to kontext z prohlížeče): `<název>.mp4` a `<název>.frames/` vedle posteru.
   func copyVideo(_ image:String,as filename:String)throws{
    for (source,target) in zip(videoSidecars(root.appendingPathComponent(image)),assetVideoFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
+   // Záznam bez anotací zůstává jen v pracovní složce; anotace mohou něco zakrývat.
+   try? fm.removeItem(at:assetVideoFiles(assets,filename)[1].appendingPathComponent("original",isDirectory:true))
   }
   for (index, image) in draft.images.enumerated() {
    if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){

@@ -607,3 +607,9 @@
 "Server zatím výchozí název nepodporuje." = "The server does not support default titles yet.";
 "Tažením vyber oblast · Esc zruší" = "Drag to select an area · Esc cancels";
 "Esc zruší" = "Esc cancels";
+"Upravit video" = "Edit video";
+"Přehrát nebo pozastavit video" = "Play or pause the video";
+"Posun ve videu" = "Video position";
+"Video" = "Video";
+"Anotace se do videa nepodařilo vložit." = "Could not add the annotations to the video.";
+"Vkládám anotace do videa…" = "Adding annotations to the video…";

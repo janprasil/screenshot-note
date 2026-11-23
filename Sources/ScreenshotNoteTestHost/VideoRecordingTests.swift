@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 @testable import ScreenshotNoteKit
 
 // Video ze záznamu obrazovky; parita Markdownu s webem (tests/video.test.mjs, videoParity).
@@ -135,4 +136,96 @@ import AppKit
  let legacy=try JSONDecoder().decode(CloudAttachment.self,from:Data("{\"index\":1,\"kind\":\"har\",\"bytes\":1,\"sha256\":\"x\"}".utf8))
  assert(legacy.timestampMs==nil && legacy.video==nil)
  print("PASS: video and key frame cloud attachments: kinds, MIME types, size limits, queue file names and legacy jobs")
+}
+
+// Anotace přes video: plátno bez obrazu, vrstva anotací a vypálení do MP4 s původním záznamem stranou.
+@MainActor func videoAnnotationTests() throws {
+ let root=fm.temporaryDirectory.appendingPathComponent("video-annotations-\(UUID().uuidString)",isDirectory:true)
+ try fm.createDirectory(at:root,withIntermediateDirectories:true);defer{try? fm.removeItem(at:root)}
+ let (width,height)=(64,48)
+ // Krátké černé video 64×48, 5 snímků po 100 ms.
+ func blackVideo(_ url:URL)throws {
+  let writer=try AVAssetWriter(outputURL:url,fileType:.mp4)
+  let input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height])
+  let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,kCVPixelBufferWidthKey as String:width,kCVPixelBufferHeightKey as String:height])
+  writer.add(input);assert(writer.startWriting());writer.startSession(atSourceTime:.zero)
+  for frame in 0..<5 {
+   var buffer:CVPixelBuffer?;CVPixelBufferPoolCreatePixelBuffer(nil,adaptor.pixelBufferPool!,&buffer)
+   CVPixelBufferLockBaseAddress(buffer!,[]);memset(CVPixelBufferGetBaseAddress(buffer!),0,CVPixelBufferGetDataSize(buffer!));CVPixelBufferUnlockBaseAddress(buffer!,[])
+   while !input.isReadyForMoreMediaData{usleep(1000)}
+   assert(adaptor.append(buffer!,withPresentationTime:CMTime(value:CMTimeValue(frame),timescale:10)))
+  }
+  input.markAsFinished();writer.endSession(atSourceTime:CMTime(value:5,timescale:10))
+  let done=DispatchSemaphore(value:0);writer.finishWriting{done.signal()};done.wait()
+  assert(writer.status == .completed,"\(String(describing:writer.error))")
+ }
+ // Barva pixelu prvního snímku (x zleva, y shora).
+ func pixel(_ url:URL,x:Int,y:Int)->(r:Int,g:Int,b:Int) {
+  let generator=AVAssetImageGenerator(asset:AVURLAsset(url:url));generator.requestedTimeToleranceBefore = .zero;generator.requestedTimeToleranceAfter = .zero
+  let image=try! generator.copyCGImage(at:.zero,actualTime:nil)
+  var data=[UInt8](repeating:0,count:width*height*4)
+  let context=CGContext(data:&data,width:width,height:height,bitsPerComponent:8,bytesPerRow:width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!
+  context.draw(image,in:CGRect(x:0,y:0,width:width,height:height))
+  let i=(y*width+x)*4;return (Int(data[i]),Int(data[i+1]),Int(data[i+2]))
+ }
+ // Plátno: bez anotací žádná vrstva; s anotací průhledná mimo tvar a v rozměru obrazu.
+ let poster=NSImage(size:NSSize(width:width,height:height));poster.lockFocus();NSColor.black.setFill();NSRect(x:0,y:0,width:width,height:height).fill();poster.unlockFocus()
+ let canvas=DrawingView(image:poster,frame:NSRect(x:0,y:0,width:320,height:240))
+ assert(canvas.overlay()==nil)
+ // Vyplněný levý horní roh: tlustý rámeček přes celou levou polovinu horní poloviny.
+ canvas.marks=[Mark(tool:.rectangle,points:[NSPoint(x:8,y:30),NSPoint(x:24,y:42)],color:.red,width:12,text:"",bold:false,italic:false,underline:false,fontSize:28)]
+ let overlay=canvas.overlay()!
+ assert(overlay.width==width && overlay.height==height)
+ var alpha=[UInt8](repeating:0,count:width*height*4)
+ CGContext(data:&alpha,width:width,height:height,bitsPerComponent:8,bytesPerRow:width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!.draw(overlay,in:CGRect(x:0,y:0,width:width,height:height))
+ // Řádky bitmapy jdou shora: bod (16,36) v souřadnicích obrazu je řádek 11.
+ assert(alpha[(11*width+16)*4+3]>200 && alpha[(40*width+56)*4+3]==0)
+ print("PASS: video annotation canvas renders marks only on a transparent overlay at the poster size")
+
+ // Vypálení: anotace ve videu na správném místě, zbytek obrazu beze změny, délka zachovaná.
+ let source=root.appendingPathComponent("source.mp4");try blackVideo(source)
+ let burned=root.appendingPathComponent("burned.mp4");try burnVideoOverlay(overlay,source:source,to:burned)
+ let mark=pixel(burned,x:16,y:11),empty=pixel(burned,x:56,y:40)
+ assert(mark.r>150 && mark.g<90 && empty.r<50 && empty.g<50,"\(mark) \(empty)")
+ let sourceDuration=AVURLAsset(url:source).duration.seconds,burnedDuration=AVURLAsset(url:burned).duration.seconds
+ assert(abs(sourceDuration-burnedDuration)<0.15,"\(sourceDuration) \(burnedDuration)")
+ // Položka: původní záznam a snímky odložené ve složce snímků, MP4 i klíčový snímek s anotacemi; bez anotací se původní vrátí.
+ func apply(_ poster:URL,_ overlay:CGImage?)throws{try commitVideoAnnotations(poster:poster,prepared:prepareVideoAnnotations(poster:poster,overlay:overlay))}
+ let item=root.appendingPathComponent("item.png"),sides=videoSidecars(item),originals=videoOriginals(item)
+ try fm.createDirectory(at:sides[1],withIntermediateDirectories:true);try fm.copyItem(at:source,to:sides[0])
+ let black=CGContext(data:nil,width:width,height:height,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!
+ black.setFillColor(CGColor(red:0,green:0,blue:0,alpha:1));black.fill(CGRect(x:0,y:0,width:width,height:height))
+ try writePNG(black.makeImage()!,to:sides[1].appendingPathComponent("1.png"))
+ try JSONEncoder().encode(VideoInfo(durationMs:500,width:width,height:height,frames:[.init(file:"1.png",ms:0)])).write(to:sides[1].appendingPathComponent("video.json"))
+ let raw=try Data(contentsOf:source),rawFrame=try Data(contentsOf:sides[1].appendingPathComponent("1.png"))
+ let data:(URL)->Data={(try? Data(contentsOf:$0)) ?? Data()}
+ func framePixel(_ url:URL)->UInt8{
+  let image=NSBitmapImageRep(data:data(url))!.cgImage!;var bytes=[UInt8](repeating:0,count:width*height*4)
+  CGContext(data:&bytes,width:width,height:height,bitsPerComponent:8,bytesPerRow:width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!.draw(image,in:CGRect(x:0,y:0,width:width,height:height))
+  return bytes[(11*width+16)*4]
+ }
+ // Příprava položku nemění.
+ let prepared=try prepareVideoAnnotations(poster:item,overlay:overlay)!
+ assert(data(sides[0])==raw && !fm.fileExists(atPath:originals.path))
+ try commitVideoAnnotations(poster:item,prepared:prepared);assert(!fm.fileExists(atPath:prepared.path))
+ assert(data(originals.appendingPathComponent("video.mp4"))==raw && data(originals.appendingPathComponent("1.png"))==rawFrame && data(sides[0]) != raw)
+ assert(pixel(sides[0],x:16,y:11).r>150 && framePixel(sides[1].appendingPathComponent("1.png"))>150 && readVideoInfo(sides[1]) != nil)
+ // Další úprava vychází z původního záznamu, ne z už vypáleného.
+ try apply(item,overlay);assert(data(originals.appendingPathComponent("video.mp4"))==raw && data(originals.appendingPathComponent("1.png"))==rawFrame)
+ try apply(item,nil)
+ assert(data(sides[0])==raw && data(sides[1].appendingPathComponent("1.png"))==rawFrame && !fm.fileExists(atPath:originals.path))
+ // Bez původního záznamu a bez anotací se nic nemění.
+ try apply(item,nil);assert(data(sides[0])==raw)
+ // Nečitelné video: chyba, položka zůstane beze změny a dočasná složka nezůstane.
+ let broken=root.appendingPathComponent("broken.png"),brokenSides=videoSidecars(broken)
+ try fm.createDirectory(at:brokenSides[1],withIntermediateDirectories:true);try Data([0,1,2,3]).write(to:brokenSides[0])
+ var failed=false;do{try apply(broken,overlay)}catch{failed=true}
+ assert(failed && data(brokenSides[0])==Data([0,1,2,3]) && !fm.fileExists(atPath:videoOriginals(broken).path))
+ assert(((try? fm.contentsOfDirectory(atPath:root.path)) ?? []).allSatisfy{!$0.hasPrefix(".")})
+ // Kopie a odebrání položky berou původní záznam s sebou (je ve složce snímků).
+ try apply(item,overlay)
+ let copy=root.appendingPathComponent("copy.png");try Data().write(to:copy);try copyAnnotationSidecar(from:item,to:copy)
+ assert(fm.fileExists(atPath:videoOriginals(copy).path))
+ removeAnnotatedImage(copy);assert(!fm.fileExists(atPath:videoOriginals(copy).path))
+ print("PASS: annotations burn into the MP4 and key frames at the right place; the original recording is kept for re-editing and restored without marks")
 }

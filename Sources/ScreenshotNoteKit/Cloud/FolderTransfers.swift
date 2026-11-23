@@ -61,7 +61,7 @@ final class FolderTransfers {
    try fm.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
    defer{try? fm.removeItem(at:root)}
    var draft=try workingDraft(from:session,topic:source,root:root)
-   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;frozen.commentTemplate=source.commentTemplate;frozen.imageTemplate=source.imageTemplate;draft.topic=frozen;draft.previous=nil
+   var frozen=plan.target;frozen.markdownTemplate=source.markdownTemplate;frozen.commentTemplate=source.commentTemplate;frozen.imageTemplate=source.imageTemplate;frozen.defaultTitle=frozen.defaultTitle ?? source.defaultTitle;draft.topic=frozen;draft.previous=nil
    try library.enqueue(draft,root:root,sessionID:entry.id,folders:folders.topics)
    await Task.yield()
   }
@@ -148,6 +148,10 @@ enum FolderDialogs {
      if moved.commentTemplate==nil || moved.commentTemplate==TemplateDefaults.shared.comment{settings.commentTemplate=source.commentTemplate}
      if moved.imageTemplate==nil || moved.imageTemplate==TemplateDefaults.shared.image{settings.imageTemplate=source.imageTemplate}
      if settings != moved{_ = try? await CloudFolders.shared.update(settings)}
+    }
+    // Výchozí název místní složky přejde na cloudovou, pokud ta vlastní nemá.
+    if let title=source.defaultTitle,let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.defaultTitle==nil,moved.canManageCloudFolder {
+     _ = try? await CloudFolders.shared.setDefaultTitle(moved,title)
     }
    }catch{showError(error.localizedDescription)}
   }

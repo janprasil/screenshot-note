@@ -74,7 +74,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
  let assets = dest.appendingPathComponent("assets", isDirectory:true)
  try fm.createDirectory(at:assets, withIntermediateDirectories:true)
  // Plochá složka: „YYYY-MM-DD Název.md“ v kořeni a obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
- let readable=readableSessionName(draft.title ?? "",created:Date())
+ let readable=readableSessionName(draft.title ?? "",created:Date(),fallback:DefaultTitle.resolve(draft.topic))
  let markdown = previous.map{URL(fileURLWithPath:$0.path)} ?? combinedFile.map{dest.appendingPathComponent($0)} ?? dest.appendingPathComponent(uniqueName(readable){fm.fileExists(atPath:dest.appendingPathComponent($0+".md").path)}+".md")
  let name = combinedFile == nil ? markdown.deletingPathExtension().lastPathComponent:readable
  var copied:[URL] = []; var imageNames:[String] = []
@@ -111,7 +111,7 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   // Bez kontextu (odebraný nebo vypnutý politikou) jdou ven jen čísla a popisy, ne data stránky.
   let captions=draft.images.map{captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:keepContext && draft.contexts?[$0] != nil)}
   let rendered=screenshotsWithContext(imageNames,captions,assets:assets,without:Set(removedContext.keys),imageTemplate:draft.topic?.imageTemplate)
-  let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : "Screenshot"
+  let title=(draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false) ? draft.title!.replacingOccurrences(of:"\n",with:" ") : DefaultTitle.resolve(draft.topic)
   let template=draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   // Replace placeholders in a single pass so user content containing tokens stays literal.
   let body=renderSessionTemplate(template,title:title,screenshots:rendered.screenshots,text:draft.comment,context:rendered.context)

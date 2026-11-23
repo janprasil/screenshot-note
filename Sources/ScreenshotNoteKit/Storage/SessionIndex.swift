@@ -9,6 +9,8 @@ struct SessionRecord:Codable,Equatable {
  // Otisky souborů: u samostatné relace vůči jejímu adresáři, u společného souboru vůči bázi.
  var files:[String:String];var seen:Double
  var base:String? = nil;var folder:String? = nil;var owner:String? = nil;var origin:String? = nil
+ // Výchozí název použitý u relace bez názvu; jeho změna vynutí nové vykreslení.
+ var fallback:String? = nil
  var updated:String? = nil;var created:String? = nil;var digest:String? = nil;var shas:[String]? = nil;var note:RemoteNote? = nil;var stem:String? = nil
  var trashed:Bool? = nil;var away:String? = nil;var trashNote:String? = nil;var trashHash:String? = nil;var noticed:Bool? = nil
  // Identita adresáře a stav místního smazání.
@@ -148,13 +150,18 @@ func tagCombinedFile(_ url:URL) {
 }
 
 /// Čitelný název „YYYY-MM-DD Název“ podle místního data vytvoření.
-func readableSessionName(_ title:String,created:Date)->String {
+func readableSessionName(_ title:String,created:Date,fallback:String?=nil)->String {
  let format=DateFormatter();format.locale=Locale(identifier:"en_US_POSIX");format.timeZone = .current;format.dateFormat="yyyy-MM-dd"
  let forbidden=CharacterSet(charactersIn:"/\\:?*\"<>|[]#^").union(.controlCharacters).union(.newlines)
- var safe=title.precomposedStringWithCanonicalMapping.unicodeScalars.map{forbidden.contains($0) ? "_":String($0)}.joined()
- safe=safe.split(whereSeparator:{$0==" " || $0=="\t"}).joined(separator:" ").trimmingCharacters(in:CharacterSet.whitespaces.union(CharacterSet(charactersIn:".")))
- while safe.utf8.count>120{safe.removeLast()}
- return format.string(from:created)+" "+(safe.isEmpty ? "Screenshot":safe)
+ // Výchozí název prochází stejnou úpravou jako zadaný, aby nevznikla cesta ani příliš dlouhé jméno.
+ func clean(_ text:String)->String {
+  var safe=text.precomposedStringWithCanonicalMapping.unicodeScalars.map{forbidden.contains($0) ? "_":String($0)}.joined()
+  safe=safe.split(whereSeparator:{$0==" " || $0=="\t"}).joined(separator:" ").trimmingCharacters(in:CharacterSet.whitespaces.union(CharacterSet(charactersIn:".")))
+  while safe.utf8.count>120{safe.removeLast()}
+  return safe
+ }
+ let name=[title,fallback ?? DefaultTitle.global ?? builtInSessionTitle,builtInSessionTitle].lazy.map(clean).first{!$0.isEmpty} ?? builtInSessionTitle
+ return format.string(from:created)+" "+name
 }
 func uniqueName(_ name:String,taken:(String)->Bool)->String {
  var n=1

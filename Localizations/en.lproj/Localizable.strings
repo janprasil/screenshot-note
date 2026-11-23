@@ -592,3 +592,16 @@
 "Server zatím AI názvy relací nepodporuje." = "The server does not support AI session titles yet.";
 "AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období." = "AI session titles need an active cloud plan or trial.";
 "AI názvy relací teď nejsou dostupné. Zkus to později." = "AI session titles are not available right now. Try again later.";
+
+/* Výchozí název relace */
+"Výchozí název…" = "Default title…";
+"Výchozí název: %@" = "Default title: %@";
+"Výchozí název týmové složky mění vlastník nebo správce týmu." = "The team owner or an admin changes the default title of a team folder.";
+"Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název." = "Used when a session has no title. Leave it empty to use the global default title.";
+"Použije se, když relace nemá název. Nech prázdné pro „%@“." = "Used when a session has no title. Leave it empty to use “%@”.";
+"Výchozí název může mít 1–100 znaků na jednom řádku." = "The default title can have 1–100 characters on one line.";
+"Globální výchozí název" = "Global default title";
+"Výchozí název byl uložen." = "Default title saved.";
+"Výchozí název složky" = "Folder default title";
+"Výchozí název se uloží s konfigurací." = "The default title is saved with the configuration.";
+"Server zatím výchozí název nepodporuje." = "The server does not support default titles yet.";

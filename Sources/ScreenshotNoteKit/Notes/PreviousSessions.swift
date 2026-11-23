@@ -287,7 +287,7 @@ enum DraftTarget{case current(Draft),stale(String)}
 /// Ověří cíl rozpracované relace přes index; po migraci cestu opraví, smazanou relaci nikdy znovu neotevře.
 func resolveDraftTarget(_ draft:Draft,folders:CloudFolders = .shared)->DraftTarget {
  guard let previous=draft.previous,let topic=draft.topic else{return .current(draft)}
- let trimmed=draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",title=trimmed.isEmpty ? "Screenshot":trimmed
+ let trimmed=draft.title?.trimmingCharacters(in:.whitespacesAndNewlines) ?? "",title=trimmed.isEmpty ? DefaultTitle.resolve(draft.topic):trimmed
  var current=topic
  if let folder=topic.cloudFolderID {
   // Cloudová relace musí v indexu existovat, nebýt v koši ani smazaná z disku.

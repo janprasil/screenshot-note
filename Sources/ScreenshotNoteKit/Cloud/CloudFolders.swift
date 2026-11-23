@@ -1003,7 +1003,7 @@ final class CloudFolders {
    if fm.fileExists(atPath:url.path),fileHash(url) != record.files["assets/"+name] || fm.fileExists(atPath:trash.appendingPathComponent("assets/"+name).path){return false}
   }
   record.trashCopies=trashImages(record,base:base).copied
-  let body=cloudSessionBody(note,images:record.images)
+  let body=cloudSessionBody(note,images:record.images,fallbackTitle:record.fallback)
   let file=trash.appendingPathComponent(uniqueName(stem){fm.fileExists(atPath:trash.appendingPathComponent($0+".md").path)}+".md")
   guard (try? Data(body.utf8).write(to:file,options:.withoutOverwriting)) != nil else{return false}
   writeSessionTag(file,record.id)

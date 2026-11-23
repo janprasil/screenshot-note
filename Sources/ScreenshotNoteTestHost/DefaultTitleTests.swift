@@ -3,7 +3,7 @@ import AppKit
 
 /// Výchozí název relace: pořadí složka → globální → „Screenshot“, prázdný název pro AI a synchronizace se serverem.
 @MainActor func defaultTitleTests() async throws {
- let saved=UserDefaults.standard.string(forKey:DefaultTitle.key),pending=UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)
+ let saved=UserDefaults.standard.string(forKey:DefaultTitle.key),pending=UserDefaults.standard.dictionary(forKey:CloudFolders.pendingDefaultTitleKey)
  defer{
   if let saved{UserDefaults.standard.set(saved,forKey:DefaultTitle.key)}else{UserDefaults.standard.removeObject(forKey:DefaultTitle.key)}
   if let pending{UserDefaults.standard.set(pending,forKey:CloudFolders.pendingDefaultTitleKey)}else{UserDefaults.standard.removeObject(forKey:CloudFolders.pendingDefaultTitleKey)}
@@ -69,11 +69,12 @@ import AppKit
  assert(sent.count==2)
  // Místní změna globálního názvu se při synchronizaci pošle na server.
  // Změna pro jiný účet se sem neposílá a hodnotu serveru nepřepíše.
- DefaultTitle.global="Jiný";UserDefaults.standard.set("https://other.invalid|x",forKey:CloudFolders.pendingDefaultTitleKey)
- await store.syncDefaultTitle(c);assert(sent.count==2 && UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)=="https://other.invalid|x")
- DefaultTitle.global="Mac";UserDefaults.standard.set(CloudFolders.accountKey(c),forKey:CloudFolders.pendingDefaultTitleKey)
+ DefaultTitle.global="Jiný";UserDefaults.standard.set(["account":"https://other.invalid|x","value":"Jiný"],forKey:CloudFolders.pendingDefaultTitleKey)
+ await store.syncDefaultTitle(c);assert(sent.count==2 && CloudFolders.pendingDefaultTitle?.value=="Jiný")
+ // Čekající hodnota účtu se pošle, i když se globální hodnota mezitím změnila jiným účtem.
+ DefaultTitle.global="Jiný účet";UserDefaults.standard.set(["account":CloudFolders.accountKey(c),"value":"Mac"],forKey:CloudFolders.pendingDefaultTitleKey)
  await store.syncDefaultTitle(c)
- assert(sent.last!.0=="/api/v1/account/default-title" && sent.last!.2["default_title"] as? String=="Mac" && UserDefaults.standard.string(forKey:CloudFolders.pendingDefaultTitleKey)==nil && DefaultTitle.global=="Mac")
+ assert(sent.last!.0=="/api/v1/account/default-title" && sent.last!.2["default_title"] as? String=="Mac" && CloudFolders.pendingDefaultTitle==nil && DefaultTitle.global=="Mac")
  print("PASS: default title: folder → global → Screenshot, empty title only for AI folders, folder PUT for managers, account sync both ways")
 }
 

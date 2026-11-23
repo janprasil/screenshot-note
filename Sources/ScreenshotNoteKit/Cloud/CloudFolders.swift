@@ -442,22 +442,27 @@ final class CloudFolders {
  static func accountKey(_ c:CloudConnection)->String{c.endpoint+"|"+(c.ownerID?.uuidString ?? "")}
  /// Změna bez připojení zůstane jen místní; při příštím připojení platí hodnota serveru.
  @MainActor func markDefaultTitlePending() {
-  if let c=currentConnection(){UserDefaults.standard.set(Self.accountKey(c),forKey:Self.pendingDefaultTitleKey)}
+  // Hodnota se ukládá s účtem, aby ji jiný účet nepřepsal.
+  if let c=currentConnection(){UserDefaults.standard.set(["account":Self.accountKey(c),"value":DefaultTitle.global ?? ""],forKey:Self.pendingDefaultTitleKey)}
   else{UserDefaults.standard.removeObject(forKey:Self.pendingDefaultTitleKey)}
+ }
+ static var pendingDefaultTitle:(account:String,value:String?)? {
+  guard let raw=UserDefaults.standard.dictionary(forKey:pendingDefaultTitleKey) as? [String:String],let account=raw["account"] else{return nil}
+  let value=raw["value"] ?? "";return (account,value.isEmpty ? nil:value)
  }
  // Poslední čtení globálního názvu pro daný účet a server.
  private var defaultTitleChecked:(account:String,at:Date)?
  @MainActor func syncDefaultTitle(_ c:CloudConnection) async {
   guard let endpoint=CloudEndpoint(c.endpoint) else{return}
-  let account=Self.accountKey(c),marker=UserDefaults.standard.string(forKey:Self.pendingDefaultTitleKey)
-  let path="/api/v1/account/default-title",pending=marker==account,local=DefaultTitle.global
+  let account=Self.accountKey(c),marker=Self.pendingDefaultTitle
+  let path="/api/v1/account/default-title",pending=marker?.account==account,local=DefaultTitle.global,upload=pending ? marker?.value:local
   // Bez místní změny se serverová hodnota čte nejvýš jednou za 5 minut.
   if !pending,let last=defaultTitleChecked,last.account==account,Date().timeIntervalSince(last.at)<300{return}
   defaultTitleChecked=(account,Date())
-  guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":local])):request(endpoint,path,c.token,4096)),
+  guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":upload])):request(endpoint,path,c.token,4096)),
         let remote=try? JSONDecoder().decode(FolderEnvelope<DefaultTitleSetting>.self,from:data).data,currentConnection()?.token==c.token else{return}
   // Změna během požadavku má přednost; pošle se při další synchronizaci.
-  guard DefaultTitle.global==local,UserDefaults.standard.string(forKey:Self.pendingDefaultTitleKey)==marker else{defaultTitleChecked=nil;return}
+  guard DefaultTitle.global==local,Self.pendingDefaultTitle?.account==marker?.account,Self.pendingDefaultTitle?.value==marker?.value else{defaultTitleChecked=nil;return}
   // Změna jiného účtu zůstane čekat na svůj účet.
   if pending{UserDefaults.standard.removeObject(forKey:Self.pendingDefaultTitleKey)}
   let value=remote.default_title.flatMap{validDefaultTitle($0) ? $0:nil}

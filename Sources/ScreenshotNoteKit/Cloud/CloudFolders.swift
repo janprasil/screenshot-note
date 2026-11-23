@@ -316,7 +316,7 @@ final class CloudFolders {
    let file=URL(fileURLWithPath:r.file)
    guard fileHash(file)==r.files[file.lastPathComponent],r.images.count==fields.captions.count else{continue}
    let screenshots=renderImageBlocks(zip(r.images,fields.captions.map(escapeServerMarkdown)).map{ImageBlock(name:$0.0,caption:$0.1)},template:r.imageTemplate)
-   try? Data(renderSessionTemplate(r.template,title:serverTitle(fields.title),screenshots:screenshots,text:escapeServerMarkdown(fields.comment),author:serverTitle(r.author ?? "")).utf8).write(to:file,options:.atomic);writeSessionTag(file,r.id)
+   try? Data(renderSessionTemplate(r.template,title:serverTitle(fields.title.isEmpty ? (r.fallback.flatMap{$0.isEmpty ? nil:$0} ?? DefaultTitle.global ?? builtInSessionTitle):fields.title),screenshots:screenshots,text:escapeServerMarkdown(fields.comment),author:serverTitle(r.author ?? "")).utf8).write(to:file,options:.atomic);writeSessionTag(file,r.id)
   }
  }
  func finishTransfer(_ source:Topic,to target:Topic)throws {
@@ -1003,7 +1003,7 @@ final class CloudFolders {
    if fm.fileExists(atPath:url.path),fileHash(url) != record.files["assets/"+name] || fm.fileExists(atPath:trash.appendingPathComponent("assets/"+name).path){return false}
   }
   record.trashCopies=trashImages(record,base:base).copied
-  let body=cloudSessionBody(note,images:record.images,fallbackTitle:record.fallback)
+  let body=cloudSessionBody(note,images:record.images,fallbackTitle:record.fallback.flatMap{$0.isEmpty ? nil:$0})
   let file=trash.appendingPathComponent(uniqueName(stem){fm.fileExists(atPath:trash.appendingPathComponent($0+".md").path)}+".md")
   guard (try? Data(body.utf8).write(to:file,options:.withoutOverwriting)) != nil else{return false}
   writeSessionTag(file,record.id)
@@ -1055,7 +1055,8 @@ final class CloudFolders {
   // Beze změny na serveru se nic nestahuje.
   // Změněná revize (úprava, komentář, šablona) znamená nové vykreslení i beze změny updated_at.
   // Relace bez názvu se vykreslí znovu i po změně výchozího názvu.
-  func fallbackCurrent(_ r:SessionRecord)->Bool{r.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? r.fallback==DefaultTitle.resolve(topic):true}
+  // fallback: nil = starší záznam, "" = server má název, jinak použitý výchozí název.
+  func fallbackCurrent(_ r:SessionRecord)->Bool{guard let f=r.fallback else{return !r.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty};return f.isEmpty || f==DefaultTitle.resolve(topic)}
   if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,fallbackCurrent(saved),present(saved){return}
   let (note,stamp,digest)=try await fetchNote(id,endpoint:endpoint,token:token)
   let created=stamp?.created_at ?? item.created_at
@@ -1074,7 +1075,7 @@ final class CloudFolders {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)
    next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created;next.digest=digest;next.shas=shas;next.revision=stamp?.revision?.value
    next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names)
-   next.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):nil;return next
+   next.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):"";return next
   }
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
@@ -1120,7 +1121,7 @@ final class CloudFolders {
    let sides=try writeContextAttachments(fresh,names:links,assets:folderAssets)
    let copy=markdown.deletingLastPathComponent().appendingPathComponent(stem+"_cloud.md"),text=Data(cloudSessionBody(note,images:links,contexts:fresh,fallbackTitle:DefaultTitle.resolve(topic)).utf8)
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
-   var kept=saved;kept.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):nil;kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
+   var kept=saved;kept.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):"";kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
   }
   // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
   let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)
@@ -1162,8 +1163,9 @@ final class CloudFolders {
   func present(_ r:SessionRecord)->Bool{r.note != nil && !r.images.isEmpty && r.images.allSatisfy{fm.fileExists(atPath:assets.appendingPathComponent($0).path)}}
   // Relace bez názvu: změna výchozího názvu přegeneruje její blok.
   func markFallback(_ r:inout SessionRecord) {
-   let want=(r.note?.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ?? false) ? DefaultTitle.resolve(topic):nil
-   if r.fallback != want{r.fallback=want;index.put(r);refreshed.insert(r.id)}
+   let want=(r.note?.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ?? false) ? DefaultTitle.resolve(topic):""
+   // Starší záznam s názvem jen dostane značku, bez přegenerování.
+   if r.fallback != want{let silent=r.fallback==nil && want=="";r.fallback=want;index.put(r);if !silent{refreshed.insert(r.id)}}
   }
   for (order,item) in items.enumerated() {
    var record=index.cloud(item.id,base:base)

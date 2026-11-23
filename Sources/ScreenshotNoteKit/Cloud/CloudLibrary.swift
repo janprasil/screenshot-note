@@ -238,7 +238,8 @@ final class CloudLibrary {
   let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   // Bez zadaného názvu: prázdný pro AI návrh nové relace, jinak výchozí název složky.
-  let heading = DefaultTitle.cloudTitle(title,topic:draft.topic,allowAI:base == nil), config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
+  // Doplnění AI relace bez názvu nechá název prázdný, aby ho AI mohla dodat.
+  let heading = DefaultTitle.cloudTitle(title,topic:draft.topic,allowAI:true), config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),
         captions.allSatisfy({valid($0,20000,20000)}), captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 else { throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná.")) }
   let staging = queue.appendingPathComponent("." + id.uuidString, isDirectory: true)

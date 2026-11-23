@@ -154,7 +154,7 @@ final class CloudFolders {
   // Týmovou složku mohou mít dva účty; její lokální kopie má v ID i účet.
   var topic=Topic(id:"former-cloud:"+(record.isTeam ? record.account.uuidString.lowercased()+":":"")+record.id.uuidString.lowercased(),name:record.name,detail:record.description ?? "",folder:record.folder,combined:record.combined ?? false,combinedFile:record.combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:record.markdownTemplate,combinedTemplate:record.combinedTemplate)
   topic.formerCloudFolderID=record.id;topic.formerCloudOwnerID=record.owner;topic.formerCloudOrigin=record.origin
-  topic.commentTemplate=record.commentTemplate;topic.imageTemplate=record.imageTemplate
+  topic.commentTemplate=record.commentTemplate;topic.imageTemplate=record.imageTemplate;topic.defaultTitle=record.defaultTitle
   return topic
  }
  // Lokální složky dříve přesunuté do cloudu se stejným adresářem nahradí nová lokální kopie.
@@ -438,13 +438,15 @@ final class CloudFolders {
  }
  /// Globální výchozí název účtu: neodeslaná místní změna jde na server, jinak platí serverová hodnota.
  static let pendingDefaultTitleKey="defaultSessionTitlePending"
- private var defaultTitleChecked:Date?
+ // Poslední čtení globálního názvu pro daný účet a server.
+ private var defaultTitleChecked:(account:String,at:Date)?
  @MainActor func syncDefaultTitle(_ c:CloudConnection) async {
   guard let endpoint=CloudEndpoint(c.endpoint) else{return}
   let path="/api/v1/account/default-title",pending=UserDefaults.standard.bool(forKey:Self.pendingDefaultTitleKey),local=DefaultTitle.global
   // Bez místní změny se serverová hodnota čte nejvýš jednou za 5 minut.
-  if !pending,let last=defaultTitleChecked,Date().timeIntervalSince(last)<300{return}
-  defaultTitleChecked=Date()
+  let account=c.endpoint+"|"+(c.ownerID?.uuidString ?? "")
+  if !pending,let last=defaultTitleChecked,last.account==account,Date().timeIntervalSince(last.at)<300{return}
+  defaultTitleChecked=(account,Date())
   guard let data=try? await (pending ? send(endpoint,path,"PUT",c.token,try JSONEncoder().encode(["default_title":DefaultTitle.global])):request(endpoint,path,c.token,4096)),
         let remote=try? JSONDecoder().decode(FolderEnvelope<DefaultTitleSetting>.self,from:data).data,currentConnection()?.token==c.token else{return}
   // Změna během požadavku má přednost; pošle se při další synchronizaci.
@@ -1040,11 +1042,13 @@ final class CloudFolders {
   func present(_ r:SessionRecord)->Bool{!r.files.isEmpty && r.files.keys.allSatisfy{fm.fileExists(atPath:self.fileURL(r,$0,base:base).path)}}
   // Beze změny na serveru se nic nestahuje.
   // Změněná revize (úprava, komentář, šablona) znamená nové vykreslení i beze změny updated_at.
-  if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){return}
+  // Relace bez názvu se vykreslí znovu i po změně výchozího názvu.
+  func fallbackCurrent(_ r:SessionRecord)->Bool{r.fallback==nil || r.fallback==DefaultTitle.resolve(topic)}
+  if let saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,fallbackCurrent(saved),present(saved){return}
   let (note,stamp,digest)=try await fetchNote(id,endpoint:endpoint,token:token)
   let created=stamp?.created_at ?? item.created_at
   if record==nil{record=migrateSeparate(id,note:note,created:created,topic:topic,base:base,endpoint:endpoint,owner:owner)}
-  if var saved=record,saved.digest==digest,saved.render==cloudRenderVersion,present(saved) {
+  if var saved=record,saved.digest==digest,saved.render==cloudRenderVersion,fallbackCurrent(saved),present(saved) {
    saved.updated=stamp?.updated_at ?? item.updated_at;saved.created=saved.created ?? created;saved.revision=stamp?.revision?.value ?? saved.revision
    if saved != record{index.put(saved)};return
   }
@@ -1057,7 +1061,8 @@ final class CloudFolders {
   func finished(_ file:URL,_ body:String,_ names:[String],_ files:[String:String])->SessionRecord {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)
    next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created;next.digest=digest;next.shas=shas;next.revision=stamp?.revision?.value
-   next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names);return next
+   next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names)
+   next.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):nil;return next
   }
   func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {

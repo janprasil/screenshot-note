@@ -9,6 +9,8 @@ struct SessionRecord:Codable,Equatable {
  // Otisky souborů: u samostatné relace vůči jejímu adresáři, u společného souboru vůči bázi.
  var files:[String:String];var seen:Double
  var base:String? = nil;var folder:String? = nil;var owner:String? = nil;var origin:String? = nil
+ // Výchozí název použitý u relace bez názvu; jeho změna vynutí nové vykreslení.
+ var fallback:String? = nil
  var updated:String? = nil;var created:String? = nil;var digest:String? = nil;var shas:[String]? = nil;var note:RemoteNote? = nil;var stem:String? = nil
  var trashed:Bool? = nil;var away:String? = nil;var trashNote:String? = nil;var trashHash:String? = nil;var noticed:Bool? = nil
  // Identita adresáře a stav místního smazání.

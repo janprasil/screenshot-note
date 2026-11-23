@@ -42,14 +42,18 @@ final class RegionSelector:NSPanel {
   becomesKeyOnlyIfNeeded=false
   self.group=group;self.minimum=minimum;level = .screenSaver;isOpaque=false;backgroundColor=NSColor.black.withAlphaComponent(0.25)
   ignoresMouseEvents=false;isReleasedWhenClosed=false;collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];acceptsMouseMovedEvents=true
-  let view=NSView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true
+  let view=CrosshairView(frame:NSRect(origin:.zero,size:screen.frame.size));view.wantsLayer=true
   selection.fillColor=NSColor.white.withAlphaComponent(0.15).cgColor;selection.strokeColor=NSColor.white.cgColor;selection.lineWidth=1.5
   view.layer?.addSublayer(selection);contentView=view;setFrame(screen.frame,display:true)
+  hint=overlayHint(L("Tažením vyber oblast · Esc zruší"),size:15);view.addSubview(hint)
+  hint.setFrameOrigin(NSPoint(x:(view.bounds.width-hint.frame.width)/2,y:(view.bounds.height-hint.frame.height)/2))
  }
+ /// Nápověda uprostřed displeje; při tažení zmizí. Esc tu obslouží i samotný panel.
+ private(set) var hint=NSView()
  override var canBecomeKey:Bool{true}
  // První klik na jiném displeji okno rovnou aktivuje a začne výběr.
- override func mouseDown(with event:NSEvent){makeKey();origin=event.locationInWindow}
- override func mouseDragged(with event:NSEvent){guard let origin else{return};selection.path=CGPath(rect:rect(origin,event.locationInWindow),transform:nil)}
+ override func mouseDown(with event:NSEvent){makeKey();origin=event.locationInWindow;hint.isHidden=true;NSCursor.crosshair.set()}
+ override func mouseDragged(with event:NSEvent){guard let origin else{return};NSCursor.crosshair.set();selection.path=CGPath(rect:rect(origin,event.locationInWindow),transform:nil)}
  override func mouseUp(with event:NSEvent){
   guard let origin else{return};let local=rect(origin,event.locationInWindow)
   // Kliknutí bez tažení se nepočítá; malý výřez (screenshot) je v pořádku, video si limit ohlídá samo.
@@ -63,17 +67,47 @@ final class RegionSelector:NSPanel {
  }
 }
 
+/// Nitkový kříž nad celým překryvem; panel nepřebírá aktivaci, proto ho nastavuje i při pohybu myši.
+final class CrosshairView:NSView {
+ override func resetCursorRects(){addCursorRect(bounds,cursor:.crosshair)}
+ override func updateTrackingAreas() {
+  super.updateTrackingAreas()
+  for area in trackingAreas{removeTrackingArea(area)}
+  addTrackingArea(NSTrackingArea(rect:.zero,options:[.activeAlways,.inVisibleRect,.cursorUpdate,.mouseMoved,.mouseEnteredAndExited],owner:self))
+ }
+ override func cursorUpdate(with event:NSEvent){NSCursor.crosshair.set()}
+ override func mouseEntered(with event:NSEvent){NSCursor.crosshair.set()}
+ override func mouseMoved(with event:NSEvent){NSCursor.crosshair.set()}
+}
+
+/// Štítek nepřebírá kliknutí; tažení může začít i na něm.
+final class PassthroughView:NSView {override func hitTest(_ point:NSPoint)->NSView?{nil}}
+
+/// Tmavý štítek s textem pro překryvy výběru a odpočtu.
+func overlayHint(_ text:String,size:CGFloat)->NSView {
+ let label=NSTextField(labelWithString:text);label.font = .systemFont(ofSize:size,weight:.medium);label.textColor = .white;label.alignment = .center
+ label.sizeToFit()
+ let padding=NSSize(width:18,height:10)
+ let pill=PassthroughView(frame:NSRect(x:0,y:0,width:ceil(label.frame.width)+padding.width*2,height:ceil(label.frame.height)+padding.height*2))
+ pill.wantsLayer=true;pill.layer?.backgroundColor=NSColor.black.withAlphaComponent(0.7).cgColor;pill.layer?.cornerRadius=pill.frame.height/2
+ label.frame.origin=NSPoint(x:padding.width,y:padding.height);pill.addSubview(label)
+ pill.setAccessibilityElement(true);pill.setAccessibilityRole(.staticText);pill.setAccessibilityLabel(text)
+ return pill
+}
+
 /// Odpočet uprostřed obrazovky; okno se do záznamu nedostane (filtr vynechá vlastní aplikaci).
 final class CountdownOverlay {
  private var window:NSPanel?;private var timer:Timer?
- func run(seconds:Int,on screen:NSScreen,_ done:@escaping ()->Void) {
+ func run(seconds:Int,on screen:NSScreen,escape:Bool=true,_ done:@escaping ()->Void) {
   let size=NSSize(width:180,height:180)
   let panel=NSPanel(contentRect:NSRect(x:screen.frame.midX-size.width/2,y:screen.frame.midY-size.height/2,width:size.width,height:size.height),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
   panel.level = .screenSaver;panel.isOpaque=false;panel.backgroundColor = .clear;panel.ignoresMouseEvents=true;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
   let label=NSTextField(labelWithString:"\(seconds)");label.font=NSFont.monospacedDigitSystemFont(ofSize:96,weight:.bold);label.textColor = .white;label.alignment = .center
-  label.frame=NSRect(x:0,y:30,width:size.width,height:120)
+  label.frame=NSRect(x:0,y:42,width:size.width,height:120)
+  let hint=NSTextField(labelWithString:L("Esc zruší"));hint.font = .systemFont(ofSize:13,weight:.medium);hint.textColor=NSColor.white.withAlphaComponent(0.8);hint.alignment = .center
+  hint.frame=NSRect(x:0,y:22,width:size.width,height:18)
   let back=NSView(frame:NSRect(origin:.zero,size:size));back.wantsLayer=true;back.layer?.backgroundColor=NSColor.black.withAlphaComponent(0.6).cgColor;back.layer?.cornerRadius=36
-  back.addSubview(label);panel.contentView=back;panel.orderFrontRegardless();window=panel
+  back.addSubview(label);if escape{back.addSubview(hint)};panel.contentView=back;panel.orderFrontRegardless();window=panel
   back.setAccessibilityLabel(LF("Záznam začne za %d s",seconds))
   var left=seconds
   let tick=Timer(timeInterval:1,repeats:true){[weak self] timer in
@@ -90,7 +124,11 @@ final class CountdownOverlay {
 /// Záznam: výběr cíle, odpočet, start a stop (zkratkou, z menu baru nebo po 60 s).
 /// Volá se jen z hlavního vlákna (menu, zkratka, časovače).
 final class RecordingController {
- enum State {case idle,preparing,counting,recording,finishing}
+ enum State {
+  case idle,preparing,counting,recording,finishing
+  /// Stavy, které Esc zruší nebo zastaví.
+  var stopsOnEscape:Bool{self == .preparing || self == .counting || self == .recording}
+ }
  private(set) var state:State = .idle
  private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelection?;private var limit:Timer?;private var ticker:Timer?
  private(set) var startedAt:Date?
@@ -98,6 +136,8 @@ final class RecordingController {
  private var attempt=0
  /// Změna stavu pro menu bar (ikona, položka Zastavit).
  var onChange:(()->Void)?
+ /// Zda je zkratka Esc zaregistrovaná; jinak nápovědy Esc nezmiňují.
+ var escapeAvailable:()->Bool={false}
  /// Hotové video: výsledek, nebo chyba (zrušení = nil).
  var onFinish:((Result<RecordingResult,Error>?)->Void)?
  var elapsed:TimeInterval{startedAt.map{Date().timeIntervalSince($0)} ?? 0}
@@ -118,7 +158,7 @@ final class RecordingController {
    let overlay=CountdownOverlay();self.countdown=overlay
    // Oblast se zaznamenává na displeji, kde byla vybraná.
    let display=region.flatMap{area in NSScreen.screens.first{$0.frame.contains(CGPoint(x:area.midX,y:area.midY))}} ?? screen
-   overlay.run(seconds:recordingCountdown,on:display){Task{@MainActor in await self.begin(target,screen:display,region:region,window:front,output:output,attempt:current)}}
+   overlay.run(seconds:recordingCountdown,on:display,escape:self.escapeAvailable()){Task{@MainActor in await self.begin(target,screen:display,region:region,window:front,output:output,attempt:current)}}
   }
   if target == .region{selector=RegionSelector.choose{[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
  }

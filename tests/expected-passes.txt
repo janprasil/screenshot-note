@@ -82,6 +82,7 @@ PASS: web-deleted folder keep/restore-before-answer/delete to macOS Trash, app d
 PASS: comment and image templates match the web export byte for byte ({date} cs/en, image comments, {elements}, {issues}, escaping)
 PASS: image template paragraphs, {elements} split, template checks and caption parsing with a custom image template
 PASS: recording size, duration format, limits, countdown setting and region coordinates
+PASS: temporary Esc hotkey follows the recording state and is released on stop
 PASS: scene signature, key frame threshold, spacing and 12-frame budget keeping the first frame
 PASS: video Markdown links the poster to the MP4 like the web export; link parsing and renaming keep the video
 PASS: recording files beside the poster, copy/remove with the item, assets rendering and cloud download of MP4 and frames

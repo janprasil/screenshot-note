@@ -22,6 +22,17 @@ import AppKit
  assert(displaySourceRect(CGRect(x:100,y:200,width:300,height:400),screen:CGRect(x:0,y:0,width:1440,height:900))==CGRect(x:100,y:300,width:300,height:400))
  assert(displaySourceRect(CGRect(x:1540,y:100,width:200,height:100),screen:CGRect(x:1440,y:0,width:1920,height:1080))==CGRect(x:100,y:880,width:200,height:100))
  print("PASS: recording size, duration format, limits, countdown setting and region coordinates")
+ 
+ // Esc: jen během výběru, odpočtu a záznamu; zapnutí je idempotentní a vypnutí uvolní zkratku.
+ assert([RecordingController.State.idle,.preparing,.counting,.recording,.finishing].map(\.stopsOnEscape)==[false,true,true,true,false])
+ let escape=Hotkeys();var escaped:[Int]=[];escape.callback={escaped.append($0)}
+ assert(!escape.escapeActive)
+ assert(escape.setEscape(true) && escape.escapeActive && escape.setEscape(true) && escape.escapeActive)
+ assert(escape.setEscape(false) && !escape.escapeActive && escape.setEscape(false))
+ // Po uvolnění jde Esc zaregistrovat znovu.
+ let other=Hotkeys();assert(other.setEscape(true));other.setEscape(false)
+ assert(escape.trigger(Hotkeys.escapeID,at:20) && escaped==[Hotkeys.escapeID])
+ print("PASS: temporary Esc hotkey follows the recording state and is released on stop")
 
  // Otisk scény a rozdíl.
  var pixels=[UInt8](repeating:0,count:64*36*4)

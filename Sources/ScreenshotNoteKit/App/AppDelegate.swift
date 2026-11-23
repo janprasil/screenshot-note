@@ -61,8 +61,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;parked.image=mark;parkedEntry=parked;menu.addItem(parked)
    }
   }
-  updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in if id == 3{self?.toggleRecording()}else{self?.capture(full:id == 2)}}
+  updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in
+   switch id{case Hotkeys.escapeID:self?.recording.stop();case 3:self?.toggleRecording();default:self?.capture(full:id == 2)}
+  }
   recording.onChange={[weak self] in self?.updateRecordingState()}
+  recording.escapeAvailable={[weak self] in self?.hotkeys.escapeActive ?? false}
   recording.onFinish={[weak self] result in self?.recordingFinished(result)}
   let errors=CommandLine.arguments.contains("--preview-test") ? [] : hotkeys.register();if !errors.isEmpty{DispatchQueue.main.async{showError(errors.joined(separator:"\n"))}}
   DistributedNotificationCenter.default().addObserver(self,selector:#selector(external(_:)),name:NSNotification.Name("cz.janprasil.screenshotnote.capture"),object:nil)
@@ -129,6 +132,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  func updateRecordingState() {
   let active=recording.state != .idle
+  // Esc zastaví výběr, odpočet i záznam, i když je v popředí jiná aplikace.
+  hotkeys.setEscape(recording.state.stopsOnEscape)
   stopEntry?.isHidden = !active;recordEntry?.isEnabled = !active
   if recording.state == .recording{let seconds=Int(recording.elapsed);stopEntry?.title=LF("Zastavit záznam (%@)",videoDuration(seconds*1000))}
   else{stopEntry?.title=L("Zastavit záznam")}

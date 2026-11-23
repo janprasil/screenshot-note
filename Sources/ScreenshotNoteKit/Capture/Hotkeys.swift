@@ -57,5 +57,17 @@ final class Hotkeys {
   }
   return errors
  }
- deinit{if let monitor{NSEvent.removeMonitor(monitor)};for r in refs{UnregisterEventHotKey(r)};if let h=handler{RemoveEventHandler(h)}}
+ /// Dočasná zkratka Esc (id 4) během výběru oblasti, odpočtu a záznamu; register() ji nemaže.
+ static let escapeID=4
+ private var escapeRef:EventHotKeyRef?
+ var escapeActive:Bool{escapeRef != nil}
+ @discardableResult func setEscape(_ on:Bool)->Bool {
+  if on == escapeActive{return true}
+  if !on{if let ref=escapeRef{UnregisterEventHotKey(ref)};escapeRef=nil;return true}
+  var ref:EventHotKeyRef?
+  let status=RegisterEventHotKey(53,0,EventHotKeyID(signature:0x53434E54,id:UInt32(Self.escapeID)),GetApplicationEventTarget(),0,&ref)
+  if status == noErr{escapeRef=ref}
+  return escapeActive
+ }
+ deinit{setEscape(false);if let monitor{NSEvent.removeMonitor(monitor)};for r in refs{UnregisterEventHotKey(r)};if let h=handler{RemoveEventHandler(h)}}
 }

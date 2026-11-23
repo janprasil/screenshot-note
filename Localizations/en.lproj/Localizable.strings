@@ -605,3 +605,5 @@
 "Výchozí název složky" = "Folder default title";
 "Výchozí název se uloží s konfigurací." = "The default title is saved with the configuration.";
 "Server zatím výchozí název nepodporuje." = "The server does not support default titles yet.";
+"Tažením vyber oblast · Esc zruší" = "Drag to select an area · Esc cancels";
+"Esc zruší" = "Esc cancels";

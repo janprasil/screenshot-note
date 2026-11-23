@@ -318,6 +318,8 @@ func cloudFolderUnitTests()throws {
  try await cloudMaterializationTests()
  try await reviewFindingTests()
  try await aiTitleFolderTests()
+ try await defaultTitleTests()
+ try await aiTitleUploadTests()
  print("PASS: folder transfer stays pending without confirmed uploads, stable resumable IDs, conflict/foreign target rejection and idempotent finish")
 }
 

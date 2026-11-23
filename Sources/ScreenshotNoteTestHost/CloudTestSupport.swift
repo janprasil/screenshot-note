@@ -77,11 +77,13 @@ final class TrashedFolderStub: URLProtocol {
 final class AcceptingUploadStub: URLProtocol {
  static var owner=UUID()
  static var manifests:[(UUID,[String:Any])]=[]
+ static var aiTitleCalls:[UUID]=[]
  override class func canInit(with request:URLRequest)->Bool{true}
  override class func canonicalRequest(for request:URLRequest)->URLRequest{request}
  override func startLoading() {
   let path=request.url?.path ?? "";var body:[String:Any]
   if path=="/api/v1/me"{body=["data":["id":Self.owner.uuidString]]}
+  else if path.hasSuffix("/ai-title"),let id=UUID(uuidString:String(path.split(separator:"/").dropLast().last ?? "")){Self.aiTitleCalls.append(id);body=["data":["state":"done","title":"AI"]]}
   else {
    var data=request.httpBody ?? Data()
    if data.isEmpty,let stream=request.httpBodyStream{stream.open();var buffer=[UInt8](repeating:0,count:65536);while stream.hasBytesAvailable{let n=stream.read(&buffer,maxLength:buffer.count);if n<=0{break};data.append(buffer,count:n)};stream.close()}

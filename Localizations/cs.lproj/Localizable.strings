@@ -592,3 +592,16 @@
 "Server zatím AI názvy relací nepodporuje." = "Server zatím AI názvy relací nepodporuje.";
 "AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období." = "AI názvy relací potřebují aktivní cloudový tarif nebo zkušební období.";
 "AI názvy relací teď nejsou dostupné. Zkus to později." = "AI názvy relací teď nejsou dostupné. Zkus to později.";
+
+/* Výchozí název relace */
+"Výchozí název…" = "Výchozí název…";
+"Výchozí název: %@" = "Výchozí název: %@";
+"Výchozí název týmové složky mění vlastník nebo správce týmu." = "Výchozí název týmové složky mění vlastník nebo správce týmu.";
+"Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název." = "Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.";
+"Použije se, když relace nemá název. Nech prázdné pro „%@“." = "Použije se, když relace nemá název. Nech prázdné pro „%@“.";
+"Výchozí název může mít 1–100 znaků na jednom řádku." = "Výchozí název může mít 1–100 znaků na jednom řádku.";
+"Globální výchozí název" = "Globální výchozí název";
+"Výchozí název byl uložen." = "Výchozí název byl uložen.";
+"Výchozí název složky" = "Výchozí název složky";
+"Výchozí název se uloží s konfigurací." = "Výchozí název se uloží s konfigurací.";
+"Server zatím výchozí název nepodporuje." = "Server zatím výchozí název nepodporuje.";

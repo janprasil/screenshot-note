@@ -237,7 +237,8 @@ final class CloudLibrary {
   let pageData = policy.map{$0.includeElements && $0.includeElementText} ?? false
   let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
-  let heading = title.flatMap { $0.isEmpty ? nil : $0 } ?? "Screenshot", config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
+  // Bez zadaného názvu: prázdný pro AI návrh nové relace, jinak výchozí název složky.
+  let heading = DefaultTitle.cloudTitle(title,topic:draft.topic,allowAI:base == nil), config = draft.topic?.name ?? "", template = draft.topic?.markdownTemplate ?? defaultMarkdownTemplate
   guard valid(heading,500,2000), valid(draft.comment,100000,100000), valid(config,200,800), valid(template,100000,100000),
         captions.allSatisfy({valid($0,20000,20000)}), captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 else { throw CloudFailure(L("Text relace překračuje cloudový limit. Lokální data zůstávají zachovaná.")) }
   let staging = queue.appendingPathComponent("." + id.uuidString, isDirectory: true)
@@ -381,8 +382,8 @@ final class CloudLibrary {
  }
  /// Texty relace z konceptu ve tvaru úpravy.
  static func editFields(_ draft:Draft)->CloudEdit.Fields {
-  let title=draft.title?.trimmingCharacters(in:.whitespacesAndNewlines).replacingOccurrences(of:"\n",with:" ") ?? ""
-  return CloudEdit.Fields(title:title.isEmpty ? "Screenshot":title,comment:draft.comment,captions:draft.images.map{draft.imageNotes?[$0] ?? ""})
+  // Prázdný název v AI složce zůstane prázdný, aby ho AI mohla doplnit.
+  return CloudEdit.Fields(title:DefaultTitle.cloudTitle(draft.title,topic:draft.topic,allowAI:true),comment:draft.comment,captions:draft.images.map{draft.imageNotes?[$0] ?? ""})
  }
  /// Čekající text úpravy relace; znovu otevřená relace ho zobrazí místo staženého.
  func queuedEdit(_ id:UUID)->CloudEdit.Fields?{edits().first{$0.1.sessionID==id}?.1.fields}
@@ -675,8 +676,18 @@ final class CloudLibrary {
   }
   // Odmítnuté video je jediná kopie záznamu; job se odloží, místo aby se smazal.
   if let videoRejected { try park(directory, job, reason: videoRejected); return }
+  // Nová relace bez názvu (AI složka): počkat na AI název, než ji synchronizace stáhne.
+  if job.manifest.base_images == nil, job.manifest.title.isEmpty { await requestAITitle(job.sessionID,endpoint:endpoint,token:c.token) }
   try fm.removeItem(at:directory)
  }
+ /// Server zkusí AI název hned; po 15 s nebo při chybě zůstane výchozí název a worker ho dodá později.
+ @MainActor private func requestAITitle(_ id:UUID,endpoint:CloudEndpoint,token:String) async {
+  let path="/api/v1/sessions/"+id.uuidString.lowercased()+"/ai-title"
+  let call=Task{try? await CloudTransport.shared.request(endpoint,path,method:"POST",token:token)}
+  let limit=Task{try? await Task.sleep(nanoseconds:Self.aiTitleWait);call.cancel()}
+  _ = await call.value;limit.cancel()
+ }
+ static var aiTitleWait:UInt64=15_000_000_000
  private func park(_ directory:URL,_ job:CloudJob,reason:String)throws {
   let target=try parkedLocation(job.sessionID.uuidString.lowercased())
   try fm.moveItem(at:directory,to:target)

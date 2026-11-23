@@ -148,13 +148,13 @@ func tagCombinedFile(_ url:URL) {
 }
 
 /// Čitelný název „YYYY-MM-DD Název“ podle místního data vytvoření.
-func readableSessionName(_ title:String,created:Date)->String {
+func readableSessionName(_ title:String,created:Date,fallback:String?=nil)->String {
  let format=DateFormatter();format.locale=Locale(identifier:"en_US_POSIX");format.timeZone = .current;format.dateFormat="yyyy-MM-dd"
  let forbidden=CharacterSet(charactersIn:"/\\:?*\"<>|[]#^").union(.controlCharacters).union(.newlines)
  var safe=title.precomposedStringWithCanonicalMapping.unicodeScalars.map{forbidden.contains($0) ? "_":String($0)}.joined()
  safe=safe.split(whereSeparator:{$0==" " || $0=="\t"}).joined(separator:" ").trimmingCharacters(in:CharacterSet.whitespaces.union(CharacterSet(charactersIn:".")))
  while safe.utf8.count>120{safe.removeLast()}
- return format.string(from:created)+" "+(safe.isEmpty ? "Screenshot":safe)
+ return format.string(from:created)+" "+(safe.isEmpty ? (fallback ?? DefaultTitle.global ?? builtInSessionTitle):safe)
 }
 func uniqueName(_ name:String,taken:(String)->Bool)->String {
  var n=1

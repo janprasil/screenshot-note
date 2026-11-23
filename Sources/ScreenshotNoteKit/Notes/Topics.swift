@@ -15,6 +15,8 @@ struct Topic:Codable,Equatable {
  var cloudOwnerName:String? = nil;var cloudTeam:Bool? = nil;var cloudRole:String? = nil
  // Cloudová složka: AI návrh názvu relace (nastavení serveru).
  var aiTitle:Bool? = nil
+ // Výchozí název relace bez názvu; nil = globální nastavení.
+ var defaultTitle:String? = nil
  // Kontext z prohlížeče u lokální složky; nil znamená výchozí politiku.
  var contextPolicy:ContextPolicy? = nil
  /// Zobrazovaný název; týmová složka má vždy předponu týmu.
@@ -142,6 +144,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  private(set) var contextButton:AppButton!;private(set) var contextCaption:NSTextField!
  // AI návrh názvu jen u cloudové složky; mění ho vlastník nebo správce, platí hned na serveru.
  let aiTitleToggle=NSButton(checkboxWithTitle:"",target:nil,action:nil)
+ // Výchozí název relace bez názvu; u cloudové složky platí hned na serveru, u místní s uložením.
+ private(set) var defaultTitleButton:AppButton!;var defaultTitleValue:String?=nil
  let mode=NSPopUpButton()
  func show(present:Bool=true,reload:Bool=true){
   if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
@@ -151,9 +155,10 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let sidebar=DesignSurface(frame:NSRect(x:0,y:0,width:240,height:620),fill:AppPalette.raised);view.addSubview(sidebar)
   sidebar.addSubview(designLabel(L("Složky"),NSRect(x:20,y:562,width:200,height:30),size:19,weight:.semibold))
   let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("topic"));column.width=208;table.addTableColumn(column);table.headerView=nil;table.rowHeight=58;table.intercellSpacing=NSSize(width:0,height:3);table.delegate=self;table.dataSource=self;table.style = .plain;table.backgroundColor=AppPalette.raised;table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-  let scroll=NSScrollView(frame:NSRect(x:12,y:116,width:216,height:430));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
+  let scroll=NSScrollView(frame:NSRect(x:12,y:150,width:216,height:396));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
   addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:208,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
   sidebar.addSubview(styledButton(L("Výchozí šablony…"),symbol:"doc.on.doc",role:.quiet,frame:NSRect(x:16,y:64,width:208,height:34),target:self,action:#selector(editDefaults)))
+  sidebar.addSubview(styledButton(L("Výchozí název…"),symbol:"textformat",role:.quiet,frame:NSRect(x:16,y:106,width:208,height:34),target:self,action:#selector(editGlobalDefaultTitle)))
   // Název je nadpis; tužka nebo klik ho přepne do úprav.
   nameShell.isHidden=true;view.addSubview(nameShell)
   name.isBordered=false;name.drawsBackground=false;name.font = .systemFont(ofSize:23,weight:.semibold);name.textColor = .labelColor;name.usesSingleLineMode=true;name.lineBreakMode = .byTruncatingTail;name.isEditable=false;name.isSelectable=false;name.delegate=self
@@ -178,6 +183,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   contextCaption=designLabel("",NSRect(x:292,y:96,width:580,height:18),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
   contextButton=styledButton(L("Co přikládat…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
   aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:128,width:600,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
+  defaultTitleButton=styledButton("",symbol:"textformat",role:.quiet,frame:NSRect(x:612,y:122,width:260,height:32),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
   view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
   saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
@@ -207,7 +213,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
-  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy()
+  template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
  }
@@ -331,6 +337,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let current=list.first{$0.id==editingID}
   aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-50
   aiTitleToggle.state=current?.aiTitle==true ? .on:.off;aiTitleToggle.isEnabled=editingManaged
+  if let defaultTitleButton {
+   defaultTitleButton.frame.origin.y=top-56;defaultTitleButton.isEnabled = !cloud || editingManaged
+   defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
+   defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
+  }
   aiTitleToggle.toolTip=editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
   contextToggle.toolTip=cloud ? L("Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
  }
@@ -345,6 +356,35 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   alert.informativeText=L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.")
   alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Zrušit"))
   return alert.runModal() == .alertFirstButtonReturn
+ }
+ /// Dialog výchozího názvu; nil = zrušeno, .some(nil) = převzít nadřazenou hodnotu.
+ func promptDefaultTitle(_ message:String,current:String?,inherited:String)->String?? {
+  let alert=NSAlert();alert.messageText=message
+  alert.informativeText=LF("Použije se, když relace nemá název. Nech prázdné pro „%@“.",inherited)
+  let field=NSTextField(frame:NSRect(x:0,y:0,width:300,height:24));field.stringValue=current ?? "";field.placeholderString=inherited;alert.accessoryView=field
+  alert.addButton(withTitle:L("Uložit"));alert.addButton(withTitle:L("Zrušit"));alert.window.initialFirstResponder=field
+  guard alert.runModal() == .alertFirstButtonReturn else{return nil}
+  let value=field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+  if value.isEmpty{return .some(nil)}
+  guard validDefaultTitle(value) else{showError(L("Výchozí název může mít 1–100 znaků na jednom řádku."));return nil}
+  return .some(value)
+ }
+ @objc func editGlobalDefaultTitle(){
+  guard let chosen=promptDefaultTitle(L("Globální výchozí název"),current:DefaultTitle.global,inherited:builtInSessionTitle) else{return}
+  DefaultTitle.global=chosen
+  // S cloudovým účtem se hodnota pošle na server při další synchronizaci.
+  UserDefaults.standard.set(true,forKey:CloudFolders.pendingDefaultTitleKey);refreshCloud();updateContext()
+  showStatus(L("Výchozí název byl uložen."))
+ }
+ @objc func editTopicDefaultTitle(){
+  let current=list.first{$0.id==editingID}
+  guard let chosen=promptDefaultTitle(L("Výchozí název složky"),current:defaultTitleValue,inherited:DefaultTitle.global ?? builtInSessionTitle) else{return}
+  guard let current,current.cloudFolderID != nil else{defaultTitleValue=chosen;updateContext();showStatus(L("Výchozí název se uloží s konfigurací."));return}
+  defaultTitleButton.isEnabled=false
+  Task{@MainActor in
+   do{try await CloudFolders.shared.setDefaultTitle(current,chosen);self.list=Topics.all;self.defaultTitleValue=chosen;self.updateContext();self.showStatus(L("Výchozí název byl uložen."))}
+   catch{self.updateContext();showError(error.localizedDescription)}
+  }
  }
  @objc func toggleAITitle(){
   guard let topic=list.first(where:{$0.id==editingID}),topic.cloudFolderID != nil else{return}
@@ -463,7 +503,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   }
   var topic=Topic(id:editingID ?? UUID().uuidString,name:title,detail:detail.stringValue,folder:path,combined:mode.indexOfSelectedItem==1,combinedFile:filename,markdownTemplate:template,combinedTemplate:fileTemplate)
   topic.commentTemplate=commentTemplate;topic.imageTemplate=imageTemplate
-  topic.contextPolicy=contextPolicy==ContextPolicy() ? nil:contextPolicy
+  topic.contextPolicy=contextPolicy==ContextPolicy() ? nil:contextPolicy;topic.defaultTitle=defaultTitleValue
   let previous=list.first{$0.id==topic.id && $0.cloudFolderID==nil}
   if let previous{topic.formerCloudFolderID=previous.formerCloudFolderID;topic.formerCloudOwnerID=previous.formerCloudOwnerID;topic.formerCloudOrigin=previous.formerCloudOrigin}
   if let previous,!confirmTemplateChange(previous,template:topic.markdownTemplate,file:topic.combinedTemplate,comment:topic.commentTemplate,image:topic.imageTemplate){return}

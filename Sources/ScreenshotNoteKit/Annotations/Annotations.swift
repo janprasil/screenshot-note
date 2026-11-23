@@ -211,6 +211,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   let video=videoSidecars(url),info=fm.fileExists(atPath:video[0].path) ? readVideoInfo(video[1]):nil;isVideo=info != nil
   // Bez dokumentu anotací je základem současné video; odložený originál by smazal vypálené anotace.
   if isVideo,document == nil{try? fm.removeItem(at:videoOriginals(url))}
+  // Zbytky přerušené výměny ve složce snímků.
+  if isVideo{for name in (try? fm.contentsOfDirectory(atPath:video[1].path)) ?? [] where name.hasPrefix(".backup-") || name.hasPrefix(".original-"){try? fm.removeItem(at:video[1].appendingPathComponent(name))}}
   // Video se neořezává; starší oříznutí plakátu se u videa nepoužije.
   if isVideo{document?.crop=NSRect(origin:.zero,size:image.size)}
   let screen=NSApp.keyWindow?.screen?.visibleFrame ?? capturePresentationScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1200,height:850)
@@ -272,10 +274,11 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
    if isVideo{try commitVideoAnnotations(poster:url,prepared:prepared)}
   } catch {rollback();if let prepared{try? fm.removeItem(at:prepared)};throw error}
  }
- /// Vypálení běží mimo hlavní vlákno; okno mezitím nepřijímá vstup a ukazuje průběh.
+ /// Vypálení běží mimo hlavní vlákno; okno mezitím ukazuje průběh.
  func whileBurning<T>(_ work:@escaping ()throws->T)throws->T {
-  burning=true;window?.ignoresMouseEvents=true;burnProgress.startAnimation(nil)
-  defer{burning=false;window?.ignoresMouseEvents=false;burnProgress.stopAnimation(nil)}
+  burning=true;burnProgress.startAnimation(nil)
+  // Vstup uživatele během vypalování se zahodí; jinak by po zavření editoru dorazil do jiného okna.
+  defer{burning=false;burnProgress.stopAnimation(nil);NSApp.discardEvents(matching:[.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.scrollWheel,.keyDown,.keyUp],before:nil)}
   var result:Result<T,Error>?
   DispatchQueue.global(qos:.userInitiated).async{let value=Result{try work()};DispatchQueue.main.async{result=value}}
   while result == nil{RunLoop.current.run(mode:RunLoop.current.currentMode ?? .default,before:Date().addingTimeInterval(0.05))}

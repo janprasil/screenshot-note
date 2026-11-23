@@ -94,9 +94,12 @@ func finish(_ draft: Draft, root: URL, dest: URL, combinedFile:String? = nil, pr
   }
   // Video jde vždy (není to kontext z prohlížeče): `<název>.mp4` a `<název>.frames/` vedle posteru.
   func copyVideo(_ image:String,as filename:String)throws{
-   for (source,target) in zip(videoSidecars(root.appendingPathComponent(image)),assetVideoFiles(assets,filename)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:target.path){try fm.copyItem(at:source,to:target);copied.append(target)}
-   // Záznam bez anotací zůstává jen v pracovní složce; anotace mohou něco zakrývat.
-   try? fm.removeItem(at:assetVideoFiles(assets,filename)[1].appendingPathComponent("original",isDirectory:true))
+   let sources=videoSidecars(root.appendingPathComponent(image)),targets=assetVideoFiles(assets,filename)
+   if fm.fileExists(atPath:sources[0].path) && !fm.fileExists(atPath:targets[0].path){try fm.copyItem(at:sources[0],to:targets[0]);copied.append(targets[0])}
+   guard fm.fileExists(atPath:sources[1].path),!fm.fileExists(atPath:targets[1].path) else{return}
+   // Záznam bez anotací (original/) ani dočasné soubory do assets/ nejdou; anotace mohou něco zakrývat.
+   try fm.createDirectory(at:targets[1],withIntermediateDirectories:false);copied.append(targets[1])
+   for name in try fm.contentsOfDirectory(atPath:sources[1].path) where name != "original" && !name.hasPrefix("."){try fm.copyItem(at:sources[1].appendingPathComponent(name),to:targets[1].appendingPathComponent(name))}
   }
   for (index, image) in draft.images.enumerated() {
    if let originalName=previous?.imported[image],!originalName.contains("/"),let old=try? Data(contentsOf:assets.appendingPathComponent(originalName)),old == (try? Data(contentsOf:root.appendingPathComponent(image))){

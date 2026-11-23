@@ -11,7 +11,8 @@ func videoOriginals(_ poster:URL)->URL{videoSidecars(poster)[1].appendingPathCom
 func prepareVideoAnnotations(poster:URL,overlay:CGImage?)throws->URL? {
  guard let overlay else{return nil}
  let sides=videoSidecars(poster),originals=videoOriginals(poster),clean=fm.fileExists(atPath:originals.path)
- let staging=poster.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).video-annotations",isDirectory:true)
+ // Mimo pracovní složku: po pádu nezůstane v konceptu.
+ let staging=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-video-annotations-\(UUID().uuidString)",isDirectory:true)
  try fm.createDirectory(at:staging,withIntermediateDirectories:false)
  do {
   let source=clean ? originals.appendingPathComponent("video.mp4"):sides[0],output=staging.appendingPathComponent("video.mp4")
@@ -22,10 +23,11 @@ func prepareVideoAnnotations(poster:URL,overlay:CGImage?)throws->URL? {
   }
   for frame in readVideoInfo(sides[1])?.frames ?? [] {
    let file=(clean ? originals:sides[1]).appendingPathComponent(frame.file)
+   // Nečitelný snímek zastaví úpravu; jinak by v něm zůstaly staré anotace.
    guard let data=try? Data(contentsOf:file),let image=NSBitmapImageRep(data:data)?.cgImage,
-    let context=CGContext(data:nil,width:image.width,height:image.height,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else{continue}
+    let context=CGContext(data:nil,width:image.width,height:image.height,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else{throw NSError(domain:"ScreenshotNote",code:46,userInfo:[NSLocalizedDescriptionKey:L("Anotace se do videa nepodařilo vložit.")])}
    let rect=CGRect(x:0,y:0,width:image.width,height:image.height);context.draw(image,in:rect);context.draw(overlay,in:rect)
-   guard let burned=context.makeImage() else{continue}
+   guard let burned=context.makeImage() else{throw NSError(domain:"ScreenshotNote",code:46,userInfo:[NSLocalizedDescriptionKey:L("Anotace se do videa nepodařilo vložit.")])}
    try writePNG(burned,to:staging.appendingPathComponent(frame.file))
   }
  } catch {try? fm.removeItem(at:staging);throw error}
@@ -33,25 +35,45 @@ func prepareVideoAnnotations(poster:URL,overlay:CGImage?)throws->URL? {
 }
 
 /// Prohodí připravené soubory s položkou; původní záznam a snímky se nejdřív odloží. nil vrátí původní záznam.
+/// Při chybě vrátí položku do stavu před voláním.
 func commitVideoAnnotations(poster:URL,prepared:URL?)throws {
  let sides=videoSidecars(poster),originals=videoOriginals(poster)
- func swap(_ source:URL,_ target:URL)throws{if fm.fileExists(atPath:target.path){_ = try fm.replaceItemAt(target,withItemAt:source)}else{try fm.moveItem(at:source,to:target)}}
- guard let prepared else {
-  guard fm.fileExists(atPath:originals.path) else{return}
-  for name in try fm.contentsOfDirectory(atPath:originals.path){try swap(originals.appendingPathComponent(name),name == "video.mp4" ? sides[0]:sides[1].appendingPathComponent(name))}
-  try fm.removeItem(at:originals);return
+ func target(_ name:String)->URL{name == "video.mp4" ? sides[0]:sides[1].appendingPathComponent(name)}
+ func names(_ folder:URL)throws->[String]{try fm.contentsOfDirectory(atPath:folder.path).filter{!$0.hasPrefix(".")}}
+ if prepared == nil && !fm.fileExists(atPath:originals.path){return}
+ let backup=sides[1].appendingPathComponent(".backup-\(UUID().uuidString)",isDirectory:true)
+ try fm.createDirectory(at:backup,withIntermediateDirectories:false);defer{try? fm.removeItem(at:backup)}
+ var replaced:[String]=[];var createdOriginals=false
+ // Současný soubor jde do zálohy, nový na jeho místo.
+ func place(_ name:String,from source:URL,copy:Bool)throws {
+  if fm.fileExists(atPath:target(name).path){try fm.moveItem(at:target(name),to:backup.appendingPathComponent(name))}
+  replaced.append(name)
+  if copy{try fm.copyItem(at:source,to:target(name))}else{try fm.moveItem(at:source,to:target(name))}
  }
- defer{try? fm.removeItem(at:prepared)}
- let files=try fm.contentsOfDirectory(atPath:prepared.path)
- if !fm.fileExists(atPath:originals.path) {
-  let staging=sides[1].appendingPathComponent(".original-\(UUID().uuidString)",isDirectory:true)
-  do {
-   try fm.createDirectory(at:staging,withIntermediateDirectories:false)
-   for name in files{let source=name == "video.mp4" ? sides[0]:sides[1].appendingPathComponent(name);if fm.fileExists(atPath:source.path){try fm.copyItem(at:source,to:staging.appendingPathComponent(name))}}
-   try fm.moveItem(at:staging,to:originals)
-  } catch {try? fm.removeItem(at:staging);throw error}
+ do {
+  if let prepared {
+   let files=try names(prepared)
+   if !fm.fileExists(atPath:originals.path) {
+    let staging=sides[1].appendingPathComponent(".original-\(UUID().uuidString)",isDirectory:true)
+    do {
+     try fm.createDirectory(at:staging,withIntermediateDirectories:false)
+     for name in files where fm.fileExists(atPath:target(name).path){try fm.copyItem(at:target(name),to:staging.appendingPathComponent(name))}
+     try fm.moveItem(at:staging,to:originals);createdOriginals=true
+    } catch {try? fm.removeItem(at:staging);throw error}
+   }
+   for name in files{try place(name,from:prepared.appendingPathComponent(name),copy:false)}
+   try? fm.removeItem(at:prepared)
+  } else {
+   // Kopie: odložený originál zůstane, dokud se nevrátí všechny soubory.
+   for name in try names(originals){try place(name,from:originals.appendingPathComponent(name),copy:true)}
+   // Přesun do zálohy je jeden krok; smaže ho až defer po úspěchu.
+   try fm.moveItem(at:originals,to:backup.appendingPathComponent("original",isDirectory:true))
+  }
+ } catch {
+  for name in replaced.reversed(){try? fm.removeItem(at:target(name));try? fm.moveItem(at:backup.appendingPathComponent(name),to:target(name))}
+  if createdOriginals{try? fm.removeItem(at:originals)}
+  throw error
  }
- for name in files{try swap(prepared.appendingPathComponent(name),name == "video.mp4" ? sides[0]:sides[1].appendingPathComponent(name))}
 }
 
 /// Překreslí každý snímek s průhledným obrázkem anotací přes celý obraz; kódování stejné jako při záznamu.

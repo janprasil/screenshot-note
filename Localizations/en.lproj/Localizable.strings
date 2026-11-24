@@ -181,7 +181,6 @@
 
 "Vytvořit novou poznámku." = "Create a new note.";
 
-"Anotace" = "Annotations";
 
 "Konfiguraci uložené relace nelze změnit." = "A saved session’s configuration cannot be changed.";
 
@@ -647,7 +646,6 @@
 
 /* Úpravy UI 25. 11. */
 "%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky." = "%@ selection, %@ full screen, %@ video recording. Change them in Settings → Keyboard shortcuts.";
-"Anotace a poznámka" = "Annotate and note";
 "Další snímky" = "Next screenshots";
 "Nahradit" = "Replace";
 "Nahradit systémové zkratky pro snímky?" = "Replace the system screenshot shortcuts?";
@@ -675,3 +673,4 @@
 "Tvar zatím nemá komentář." = "This shape has no comment yet.";
 "Přidat popis" = "Add description";
 "Bez komentáře" = "No comment";
+"Snímek %ld · anotace a poznámka" = "Screenshot %ld · annotations and note";

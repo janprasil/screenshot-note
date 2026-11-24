@@ -297,19 +297,12 @@ if CommandLine.arguments.contains("--self-test") {
  assert(compose.draft.imageNotes?["b.png"]=="# Per-image note\n**Detail**")
  let imageAfterNote=try Data(contentsOf:deleteRoot.appendingPathComponent("b.png"));assert(imageBeforeNote==imageAfterNote)
  let thumbnail=compose.buttons[0] as! ScreenshotThumbnailButton
- let hoverActions=thumbnail.subviews.compactMap{$0 as? ThumbnailActionButton}
- // Jediná akce nad snímkem: anotace a poznámka v jednom editoru přes celou plochu obrázku.
- assert(hoverActions.count==1)
- let annotate=hoverActions[0]
- assert(annotate.isHidden && annotate.frame==thumbnail.imageDisplayRect)
+ // Bez překryvných akcí: klik na kartu otevře editor, poznámka je pod snímkem.
+ assert(thumbnail.action == #selector(Composer.edit) && thumbnail.subviews.allSatisfy{!($0 is NSButton)})
  assert(thumbnail.notePreview.stringValue=="# Per-image note **Detail**" && thumbnail.notePreview.lineBreakMode == .byTruncatingTail && thumbnail.notePreview.maximumNumberOfLines==1)
- thumbnail.setHovered(true);assert(!annotate.isHidden)
- assert(annotate.action == #selector(Composer.edit) && annotate.expandedTitle==L("Anotace a poznámka"))
- let annotatePoint=thumbnail.convert(NSPoint(x:annotate.frame.midX,y:annotate.frame.midY),to:thumbnail.superview)
- assert(thumbnail.hitTest(annotatePoint) === annotate)
- thumbnail.setHovered(false);assert(annotate.isHidden && annotate.frame==annotate.collapsedFrame)
+ assert(thumbnail.notePreview.frame.minY>thumbnail.imageDisplayRect.maxY)
  compose.setImageNote("",for:"b.png");assert(compose.draft.imageNotes?["b.png"]==nil)
- print("PASS: thumbnail hover actions and per-image notes independent of PNG editing")
+ print("PASS: thumbnail card opens the editor, note below the image, per-image notes independent of PNG editing")
 
  compose.removeImage(remove);assert(compose.draft.images.isEmpty && !compose.saveButton.isEnabled && compose.addShotButton.isEnabled)
  let shortcut=Shortcut(key:21,modifiers:UInt32(controlKey|optionKey|shiftKey),name:"4")

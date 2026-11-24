@@ -230,8 +230,9 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size)
   // S poznámkou se okno rozšíří o panel vpravo, obraz dostane zhruba 80 % šířky.
   let notePanel:CGFloat=note ? min(320,max(240,round(dimensions.width*0.25))):0
-  let w=min(dimensions.width+notePanel,screen.width-40),h=dimensions.height
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(340,h))
+  // Panel potřebuje výšku pro poznámku i seznam komentářů.
+  let w=min(dimensions.width+notePanel,screen.width-40),h=note ? min(max(dimensions.height,540),screen.height-40):dimensions.height
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(note ? 540:340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
   var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
   // Video se neořezává; anotace platí pro celý záznam.

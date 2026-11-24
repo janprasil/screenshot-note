@@ -31,8 +31,9 @@ struct Shortcut:Codable {
  let done="shortcutOnboardingDone",defaults=UserDefaults.standard
  guard !defaults.bool(forKey:done) else{return}
  defaults.set(true,forKey:done)
- // Kdo už si zkratky nastavil, dialog nedostane.
- guard !(1...3).contains(where:{defaults.data(forKey:"shortcut\($0)") != nil}) else{return}
+ // Jen nová instalace: kdo už má zkratky nebo složky, dialog nedostane (i s výchozími zkratkami).
+ let existing=["topics","destination","defaultTopic","lastTopic"].contains{defaults.object(forKey:$0) != nil}
+ guard !existing,!(1...3).contains(where:{defaults.data(forKey:"shortcut\($0)") != nil}) else{return}
  NSApp.activate(ignoringOtherApps:true)
  let alert=NSAlert();alert.messageText=L("Nahradit systémové zkratky pro snímky?")
  alert.informativeText=L("Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.")
@@ -40,7 +41,9 @@ struct Shortcut:Codable {
  if alert.runModal() == .alertFirstButtonReturn {
   let mods=UInt32(cmdKey|shiftKey)
   for (id,key,name) in [(1,UInt32(21),"4"),(2,UInt32(20),"3"),(3,UInt32(23),"5")]{defaults.set(try? JSONEncoder().encode(Shortcut(key:key,modifiers:mods,name:name)),forKey:"shortcut\(id)")}
-  let errors=hotkeys.register();if !errors.isEmpty{showError(errors.joined(separator:"\n"))}
+  // Když systém zkratky nepustí, vrátí se výchozí, aby snímání dál fungovalo.
+  let errors=hotkeys.register()
+  if !errors.isEmpty{for id in 1...3{defaults.removeObject(forKey:"shortcut\(id)")};_ = hotkeys.register();showError(L("Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky."))}
   if let url=URL(string:"x-apple.systempreferences:com.apple.Keyboard-Settings.extension"){NSWorkspace.shared.open(url)}
  } else {
   let info=NSAlert();info.messageText=L("Výchozí zkratky Screenshot Note")

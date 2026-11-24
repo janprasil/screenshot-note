@@ -658,3 +658,4 @@
 "Text pod snímkem, Markdown." = "Text below the screenshot, Markdown.";
 "Výchozí název a šablony" = "Default title and templates";
 "Výchozí zkratky Screenshot Note" = "Screenshot Note default shortcuts";
+"Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "The system shortcuts are taken. We kept the defaults; set them in Settings → Keyboard shortcuts after turning off the system shortcuts.";

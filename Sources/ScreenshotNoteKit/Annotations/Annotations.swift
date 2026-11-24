@@ -229,9 +229,9 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   let screen=NSApp.keyWindow?.screen?.visibleFrame ?? capturePresentationScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1200,height:850)
   let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size)
   // S poznámkou se okno rozšíří o panel vpravo, obraz dostane zhruba 80 % šířky.
-  let notePanel:CGFloat=note ? max(240,round(dimensions.width*0.25)):0
+  let notePanel:CGFloat=note ? min(320,max(240,round(dimensions.width*0.25))):0
   let w=min(dimensions.width+notePanel,screen.width-40),h=dimensions.height
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(740,w),height:min(340,h))
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
   var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
   // Video se neořezává; anotace platí pro celý záznam.

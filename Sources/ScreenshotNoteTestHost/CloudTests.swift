@@ -203,6 +203,7 @@ func cloudFolderUnitTests()throws {
  func shareFailure(_ id:String)async->CloudFailure?{do{_ = try await sharer.shareLink(UUID(uuidString:id)!);return nil}catch{return error as? CloudFailure}}
  let missing=await shareFailure(UUID().uuidString);assert(missing?.status==404)
  let trashed=await shareFailure("00000000-0000-4000-8000-000000000409");assert(trashed?.status==409 && trashed?.code=="session_trashed")
+ let teamLink=await shareFailure("00000000-0000-4000-8000-000000000410");assert(teamLink?.status==409 && teamLink?.code=="link_exists" && teamLink?.message==L("Relace už má týmový odkaz. Zkopíruj ho nebo ho změň na webu."))
  let forbidden=await shareFailure("00000000-0000-4000-8000-000000000403");assert(forbidden?.status==403)
  let full=await shareFailure("00000000-0000-4000-8000-000000000413");assert(full?.status==413 && full?.message==L("Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu."))
  let down=await shareFailure("00000000-0000-4000-8000-000000000503");assert(down?.status==503 && down?.message==L("Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli."))

@@ -855,6 +855,7 @@ extension CloudLibrary {
     case (403, _): message = L("Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny.")
     case (404, _): message = L("Relace v cloudu není dostupná nebo je sdílení vypnuté.")
     case (409, "session_trashed"): message = L("Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu.")
+    case (409, "link_exists"): message = L("Relace už má týmový odkaz. Zkopíruj ho nebo ho změň na webu.")
     case (413, _): message = L("Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu.")
     case (429, _): let delay = failure.retryAfter > 0 ? failure.retryAfter : 30; shareRetry = (account, now().addingTimeInterval(delay)); throw limited(delay)
     case (0, _), (500..., _): message = L("Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli.")

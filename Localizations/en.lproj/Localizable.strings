@@ -420,6 +420,7 @@
 "Tuto relaci nemůžeš sdílet. Zkontroluj na webu, že má tento Mac oprávnění zapisovat do knihovny." = "You can’t share this session. Check on the web that this Mac is allowed to write to the library.";
 "Relace v cloudu není dostupná nebo je sdílení vypnuté." = "The session isn’t available in the cloud, or sharing is turned off.";
 "Relace je v koši. Obnov ji na webu a odkaz zkopíruj znovu." = "The session is in the trash. Restore it on the web, then copy the link again.";
+"Relace už má týmový odkaz. Zkopíruj ho nebo ho změň na webu." = "The session already has a team link. Copy it or change it on the web.";
 "Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu." = "Couldn’t get the link. Check your internet connection and try again.";
 "Je dosažen limit sdílených odkazů. Odvolej nepotřebný odkaz na webu a zkus to znovu." = "You’ve reached the shared link limit. Revoke a link you no longer need on the web and try again.";
 "Sdílení je teď dočasně nedostupné. Zkus to znovu za chvíli." = "Sharing is temporarily unavailable. Try again in a moment.";

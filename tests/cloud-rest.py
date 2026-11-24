@@ -159,6 +159,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         share_calls.append(ident)
         address = 'http://127.0.0.1:' + str(self.server.server_port)
         special = {'00000000-0000-4000-8000-000000000409': (409, 'session_trashed'),
+                   '00000000-0000-4000-8000-000000000410': (409, 'link_exists'),
                    '00000000-0000-4000-8000-000000000403': (403, 'role_forbidden'),
                    '00000000-0000-4000-8000-000000000413': (413, 'resource_limit'),
                    '00000000-0000-4000-8000-000000000503': (503, 'service_unavailable'),
@@ -299,7 +300,7 @@ try:
     assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
     assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
     # 12 volání: druhý pokus během Retry-After se na server nedostane.
-    assert len(share_calls) == 12 and share_statuses == [201, 200, 200]
+    assert len(share_calls) == 13 and share_statuses == [201, 200, 200]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
     print('PASS: team folder wire contract (/me libraries, owner fields, library_id, author, membership loss → hidden folder and parked upload without retry loop)')

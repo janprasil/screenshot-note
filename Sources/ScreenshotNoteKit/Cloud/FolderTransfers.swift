@@ -157,6 +157,11 @@ enum FolderDialogs {
   }
  }
  @MainActor private static var dismissed=Set<UUID>()
+ /// Výchozí nadřazená složka cloudu; nastavená = nové složky dostanou podsložku bez dotazu.
+ static var cloudRoot:URL?{
+  get{UserDefaults.standard.string(forKey:"cloudFolderRoot").map{URL(fileURLWithPath:$0,isDirectory:true)}}
+  set{if let newValue{UserDefaults.standard.set(newValue.path,forKey:"cloudFolderRoot")}else{UserDefaults.standard.removeObject(forKey:"cloudFolderRoot")}}
+ }
  @MainActor private static var deferredHeld=Set<String>()
  @MainActor private static var deferredDeletes=Set<String>()
  /// Relace smazané z disku: jeden dotaz na složku a dávku; Esc/Později se zeptá až při dalším spuštění.
@@ -251,6 +256,12 @@ enum FolderDialogs {
   // Složky čekající na znovupropojení se neptají na nový adresář.
   let repairing=Set(folders.repairCandidates.compactMap(\.formerCloudFolderID))
   let unmapped=folders.topics.filter{$0.folder.isEmpty && $0.cloudFolderID != nil && !repairing.contains($0.cloudFolderID!)}
+  guard !unmapped.isEmpty else{return}
+  // Nastavená nadřazená složka: podsložky bez dotazu; chybí-li adresář, zeptá se jako dřív.
+  if let root=cloudRoot,fm.fileExists(atPath:root.path){
+   do{try assign(unmapped,root:root,folders:folders);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil);await folders.refresh(CloudLibrary.shared.connection);return}
+   catch{showError(error.localizedDescription)}
+  }
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
   NSApp.activate(ignoringOtherApps:true)
   let alert=NSAlert();alert.messageText=L("Cloudové složky potřebují místní adresář")
@@ -260,9 +271,9 @@ enum FolderDialogs {
   switch alert.runModal() {
   case .alertFirstButtonReturn:
    let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
-   panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek.")
+   panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení.")
    guard panel.runModal() == .OK,let root=panel.url else{break}
-   do{try assign(unmapped,root:root,folders:folders);mapped=true}catch{showError(error.localizedDescription)}
+   do{try assign(unmapped,root:root,folders:folders);mapped=true;cloudRoot=root}catch{showError(error.localizedDescription)}
   case .alertSecondButtonReturn:
    for topic in unmapped {
     let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")

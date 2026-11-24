@@ -24,8 +24,12 @@ func browserCaptureWindow()->BrowserWindow? {
  var app=NSWorkspace.shared.frontmostApplication
  // Při otevřeném komposeru je v popředí appka sama; rozhoduje nejvyšší cizí okno.
  if app?.processIdentifier==own,let pid=windows.lazy.filter({windowNumber($0,kCGWindowLayer)==0}).compactMap({windowNumber($0,kCGWindowOwnerPID)}).first(where:{$0 != Int(own)}){app=NSRunningApplication(processIdentifier:pid_t(pid))}
- guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{return nil}
- return captureTarget(windows:windows,pid:app.processIdentifier).map{BrowserWindow(pid:app.processIdentifier,target:$0)}
+ guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{NSLog("Capture context: front app %@ is not a supported browser",app?.bundleIdentifier ?? "none");return nil}
+ let target=captureTarget(windows:windows,pid:app.processIdentifier)
+ // Diagnostika kontextu (fullscreen): jen geometrie, žádné adresy ani titulky.
+ if let b=target?["windowBounds"] as? [String:CGFloat]{NSLog("Capture context: browser window %.0f,%.0f %.0fx%.0f, displays %@",b["x"] ?? 0,b["y"] ?? 0,b["width"] ?? 0,b["height"] ?? 0,displayBounds().map{"\(Int($0.width))x\(Int($0.height))@\(Int($0.minX)),\(Int($0.minY))"}.joined(separator:" "))}
+ else{NSLog("Capture context: no browser window found for %@",id)}
+ return target.map{BrowserWindow(pid:app.processIdentifier,target:$0)}
 }
 private func windowNumber(_ window:[String:Any],_ key:CFString)->Int?{(window[key as String] as? NSNumber)?.intValue}
 /// Displeje v souřadnicích oken (počátek vlevo nahoře hlavního displeje).
@@ -62,7 +66,9 @@ func bundleMatches(_ data:Data,bounds:[String:CGFloat]?)->Bool {
  guard let left=value("screenX"),let top=value("screenY"),let outerWidth=value("outerWidth"),let outerHeight=value("outerHeight"),outerWidth>0 else{return false}
  let scale=width/outerWidth
  guard (0.2...5).contains(scale) else{return false}
- return abs(left*scale-x)<=8 && abs(top*scale-y)<=8 && abs(outerHeight*scale-height)<=8
+ let ok=abs(left*scale-x)<=8 && abs(top*scale-y)<=8 && abs(outerHeight*scale-height)<=8
+ if !ok{NSLog("Capture context: bundle geometry %.0f,%.0f %.0fx%.0f does not match window %.0f,%.0f %.0fx%.0f",left,top,outerWidth,outerHeight,x,y,width,height)}
+ return ok
 }
 /// Bundle rozdělený na kontext bez HAR a samotný HAR.
 struct CaptureContextFiles {

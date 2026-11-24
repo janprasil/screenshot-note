@@ -587,10 +587,14 @@ final class CloudFolders {
    }
    // Relace, která není v žádném seznamu a detail vrací 404, byla smazána natrvalo.
    let known=Set((active+(trashed ?? [])).map{$0.id.uuidString.lowercased()})
-   var checks=0,member:Bool?
+   var checks=0,member:Bool?,retained=0
    for record in index.cloudRecords(base:base,folder:folderID) where !known.contains(record.id) {
     guard checks<20 else{break};checks+=1
     do{_ = try await request(endpoint,"/api/v1/sessions/"+record.id,token,CloudTransport.jsonLimit);continue}
+    // Smazání po konci předplatného: soubory jdou do .trash a nic se nemaže.
+    catch let failure as CloudFailure where failure.status==404 && failure.reason=="retention" {
+     guard isCurrent(topic,token:token) else{throw CloudFailure.invalid};retain(record,base:base);retained+=1
+    }
     catch let failure as CloudFailure where failure.status==404 {
      if member==nil{member=try await stillMember(topic,endpoint:endpoint,token:token)}
      // Ztráta týmu není smazání: nic se nemaže ani nepřesouvá.
@@ -599,6 +603,8 @@ final class CloudFolders {
     }
     catch{continue}
    }
+   // Víc dávek po 20 kontrolách dává jednu zprávu v okně; systémové oznámení se nahrazuje.
+   if retained>0{let text=LF("Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash).",topic.displayName);if !messages.contains(text){say(text)};onRetained?(topic)}
   }
   if readableRoot{flatten(topic,base:base);migrateImageLinks(in:base);migrateImageLinks(in:trashURL(base))}
   if trashed != nil,readableRoot,let identity {
@@ -750,6 +756,8 @@ final class CloudFolders {
   return active.filter{!removed.contains($0.id.uuidString.lowercased())}
  }
  var onTrashedQuietly:((SessionRecord,Topic)->Void)?
+ /// Systémové oznámení o relacích smazaných po konci předplatného.
+ var onRetained:((Topic)->Void)?
  func notify(_ message:String){say(message)}
  /// Relace smazané z disku, které čekají na potvrzení, po složkách.
  var deletePrompts:[(Topic,[SessionRecord])] {
@@ -842,10 +850,10 @@ final class CloudFolders {
   for image in record.trashCopies ?? []{let url=trashURL(base).appendingPathComponent("assets/"+image);if fileHash(url)==record.files["assets/"+image]{try? fm.removeItem(at:url)}}
  }
  /// Web přesunul do koše relaci z kořene: do .trash jde jen její Markdown a vlastní obrázky.
- private func trashRoot(_ record:SessionRecord,base:URL) {
+ private func trashRoot(_ record:SessionRecord,base:URL,force:Bool=false) {
   var next=record;let markdown=URL(fileURLWithPath:record.file),name=markdown.lastPathComponent,assets=base.appendingPathComponent("assets")
   guard fm.fileExists(atPath:markdown.path) else{next.trashed=true;next.away=record.file;next.rootMoved=[];SessionIndex.shared.put(next);return}
-  guard fileHash(markdown)==record.files[name],record.images.allSatisfy({fileHash(assets.appendingPathComponent($0))==record.files["assets/"+$0]}) else{notice(record);return}
+  guard force || fileHash(markdown)==record.files[name] && record.images.allSatisfy({fileHash(assets.appendingPathComponent($0))==record.files["assets/"+$0]}) else{notice(record);return}
   let trash=trashURL(base),target=trash.appendingPathComponent(uniqueName((name as NSString).deletingPathExtension){fm.fileExists(atPath:trash.appendingPathComponent($0+".md").path)}+".md")
   try? fm.createDirectory(at:trash.appendingPathComponent("assets"),withIntermediateDirectories:true)
   guard (try? fm.moveItem(at:markdown,to:target)) != nil else{return}
@@ -970,6 +978,21 @@ final class CloudFolders {
   }
   index.remove(record)
  }
+ /// Retenční smazání: soubory jdou do .trash i upravené a záznam z indexu zmizí.
+ /// Úklid koše (purge) pracuje jen se záznamy indexu, takže tyto soubory už nikdy nesmaže.
+ private func retain(_ record:SessionRecord,base:URL) {
+  let index=SessionIndex.shared
+  if record.trashed != true {
+   if record.stem != nil{var copy=record;_ = trashCombined(&copy,base:base,force:true)}
+   else if isRoot(record,base){trashRoot(record,base:base,force:true)}
+   else if SessionIndex.key(record.directory.deletingLastPathComponent())==SessionIndex.key(base),fm.fileExists(atPath:record.directory.path) {
+    let directory=record.directory,trash=trashURL(base);try? fm.createDirectory(at:trash,withIntermediateDirectories:true)
+    try? fm.moveItem(at:directory,to:trash.appendingPathComponent(uniqueName(directory.lastPathComponent){fm.fileExists(atPath:trash.appendingPathComponent($0).path)}))
+   }
+  }
+  // Přesun mohl změnit cestu záznamu; maže se podle ID a kořene.
+  index.remove(record);if let id=UUID(uuidString:record.id),let current=index.cloud(id,base:base){index.remove(current)}
+ }
  private func restoreSeparate(_ record:SessionRecord,base:URL)->SessionRecord {
   if record.rootMoved != nil{return restoreRoot(record,base:base)}
   var next=record;next.trashed=false;next.noticed=nil
@@ -995,10 +1018,10 @@ final class CloudFolders {
   record.away=SessionIndex.key(directory);record.trashed=true;record.file=SessionIndex.key(target.appendingPathComponent(markdown));index.put(record)
  }
  /// Blok společného souboru se v koši uloží jako samostatná poznámka s obrázky.
- private func trashCombined(_ record:inout SessionRecord,base:URL)->Bool {
+ private func trashCombined(_ record:inout SessionRecord,base:URL,force:Bool=false)->Bool {
   guard let note=record.note,let stem=record.stem else{return false}
   let assets=base.appendingPathComponent("assets"),trash=trashURL(base)
-  for name in record.images {
+  for name in record.images where !force {
    let url=assets.appendingPathComponent(name)
    if fm.fileExists(atPath:url.path),fileHash(url) != record.files["assets/"+name] || fm.fileExists(atPath:trash.appendingPathComponent("assets/"+name).path){return false}
   }

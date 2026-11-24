@@ -358,6 +358,16 @@ final class TrashNotifier:NSObject,UNUserNotificationCenterDelegate {
   let center=UNUserNotificationCenter.current();center.delegate=self
   center.setNotificationCategories([UNNotificationCategory(identifier:"session-trashed",actions:[UNNotificationAction(identifier:"restore",title:L("Obnovit"),options:[])],intentIdentifiers:[],options:[])])
   CloudFolders.shared.onTrashedQuietly={record,_ in TrashNotifier.shared.post(record)}
+  CloudFolders.shared.onRetained={topic in TrashNotifier.shared.postRetained(topic)}
+ }
+ /// Bez povolení stačí zpráva v okně Cloudu, kterou synchronizace přidala vždy.
+ func postRetained(_ topic:Topic) {
+  let text=LF("Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash).",topic.displayName)
+  UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){granted,_ in
+   guard granted else{return}
+   let content=UNMutableNotificationContent();content.title="Screenshot Note";content.body=text
+   UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"retention-"+(topic.cloudFolderID?.uuidString ?? topic.id),content:content,trigger:nil))
+  }
  }
  func post(_ record:SessionRecord) {
   let text=LF("Relace %@ přesunuta do Koše na webu",record.title),fallback=LF("Relace „%@“ přesunuta do Koše na webu (lze obnovit 30 dní).",record.title)

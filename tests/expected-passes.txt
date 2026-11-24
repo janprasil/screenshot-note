@@ -91,3 +91,7 @@ PASS: recording files beside the poster, copy/remove with the item, assets rende
 PASS: video and key frame cloud attachments: kinds, MIME types, size limits, queue file names and legacy jobs
 PASS: area capture maps elements of the selected region only and stores its geometry
 PASS: AI title folder setting round-trip: legacy server hidden, off by default, PUT {enabled} persisted, kept on folder save, plan error, member cannot change
+PASS: retention: plain 404 without reason still purges .trash as before, no retention notice
+PASS: retention: 404 reason retention moves active and edited sessions to .trash, keeps web-trashed files, drops index records, notifies once
+PASS: retention: later syncs and trash cleanup skip retained .trash files
+PASS: retention: transport parses error.reason, absent reason stays nil

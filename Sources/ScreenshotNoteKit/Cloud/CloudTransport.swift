@@ -8,7 +8,9 @@ struct CloudFailure: LocalizedError {
  let status: Int
  let retryAfter: TimeInterval
  var code: String? = nil
- init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0, code: String? = nil) { self.message = message; self.status = status; self.retryAfter = retryAfter; self.code = code }
+ // Strojový důvod chyby, např. "retention" u smazání po konci předplatného.
+ var reason: String? = nil
+ init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0, code: String? = nil, reason: String? = nil) { self.message = message; self.status = status; self.retryAfter = retryAfter; self.code = code; self.reason = reason }
  var errorDescription: String? { message }
  // Kvóta účtu (tarif nebo plné úložiště); 413 resource_limit je jen příliš velký požadavek.
  var isQuota: Bool { status == 402 || (status == 413 && code == "billing_storage_limit") }
@@ -53,7 +55,8 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
   for try await byte in stream { if data.count >= limit { throw CloudFailure.invalid }; data.append(byte) }
   guard (200..<300).contains(http.statusCode) else {
    let retry = min(3600, max(0, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 0))
-   let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap { $0["error"] as? [String: Any] }?["code"] as? String
+   let error = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]).flatMap { $0["error"] as? [String: Any] }
+   let code = error?["code"] as? String
    let message: String
    switch http.statusCode {
     case 403 where code == "role_forbidden": message = L("Na tuto akci nemáš v týmu oprávnění.")
@@ -67,7 +70,7 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
     case 409, 410: message = L("Přenos zatím nelze dokončit. Zkus jej později znovu; lokální data zůstávají zachovaná.")
     default: message = LF("Cloud vrátil chybu HTTP %ld.", http.statusCode)
    }
-   throw CloudFailure(message, status: http.statusCode, retryAfter: max(retry, code == "upload_incomplete" ? 90 : 0), code: code)
+   throw CloudFailure(message, status: http.statusCode, retryAfter: max(retry, code == "upload_incomplete" ? 90 : 0), code: code, reason: error?["reason"] as? String)
   }
   return data
  }

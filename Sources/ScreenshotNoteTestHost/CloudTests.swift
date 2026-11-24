@@ -324,6 +324,7 @@ func cloudFolderUnitTests()throws {
  let kept=try previousSessions(in:sourceFolder);assert(kept.count==1)
  try folders.finishTransfer(source,to:target);assert(folders.records.first{$0.id==a.id}?.migratedLocalIDs==[source.id])
  try await cloudMaterializationTests()
+ try await cloudRetentionTests()
  try await reviewFindingTests()
  try await aiTitleFolderTests()
  try await defaultTitleTests()

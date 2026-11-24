@@ -674,3 +674,4 @@
 "Přidat popis" = "Add description";
 "Bez komentáře" = "No comment";
 "Snímek %ld · anotace a poznámka" = "Screenshot %ld · annotations and note";
+"Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash)." = "The cloud copy was deleted after the subscription ended; the local files are in the trash of folder %@ (.trash).";

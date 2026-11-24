@@ -156,6 +156,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   sidebar.addSubview(designLabel(L("Složky"),NSRect(x:20,y:562,width:200,height:30),size:19,weight:.semibold))
   let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("topic"));column.width=208;table.addTableColumn(column);table.headerView=nil;table.rowHeight=58;table.intercellSpacing=NSSize(width:0,height:3);table.delegate=self;table.dataSource=self;table.style = .plain;table.backgroundColor=AppPalette.raised;table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
   let scroll=NSScrollView(frame:NSRect(x:12,y:68,width:216,height:478));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
+  // Úzký překryvný posuvník; čára odděluje seznam od tlačítek dole.
+  scroll.scrollerStyle = .overlay;scroll.verticalScroller?.controlSize = .small
+  sidebar.addSubview(DesignDivider(NSRect(x:16,y:64,width:208,height:1)))
   // Dole jen Nová složka; výchozí název a šablony jsou v menu „⋯“.
   addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
   let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:22,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
@@ -206,8 +209,24 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   for (title,symbol,action) in [(L("Výchozí název…"),"textformat",#selector(editGlobalDefaultTitle)),(L("Výchozí šablony…"),"doc.on.doc",#selector(editDefaults))]{
    let item=NSMenuItem(title:title,action:action,keyEquivalent:"");item.target=self;item.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);menu.addItem(item)
   }
+  // Nadřazená složka cloudu: nastavená = nové cloudové složky se mapují samy, jinak se appka ptá.
+  menu.addItem(.separator())
+  let root=NSMenuItem(title:L("Nadřazená složka cloudu…"),action:#selector(chooseCloudRoot),keyEquivalent:"");root.target=self;root.image=NSImage(systemSymbolName:"externaldrive.badge.icloud",accessibilityDescription:nil)
+  root.toolTip=L("Nové cloudové složky dostanou podsložku tady.");menu.addItem(root)
+  if let current=FolderDialogs.cloudRoot{
+   let path=NSMenuItem(title:(current.path as NSString).abbreviatingWithTildeInPath,action:nil,keyEquivalent:"");path.isEnabled=false;path.indentationLevel=1;menu.addItem(path)
+   let reset=NSMenuItem(title:L("Ptát se na složku u nové cloudové složky"),action:#selector(resetCloudRoot),keyEquivalent:"");reset.target=self;reset.indentationLevel=1;menu.addItem(reset)
+  }else{
+   let none=NSMenuItem(title:L("Nenastaveno, u nové cloudové složky se zeptám."),action:nil,keyEquivalent:"");none.isEnabled=false;none.indentationLevel=1;menu.addItem(none)
+  }
   menu.popUp(positioning:nil,at:NSPoint(x:0,y:sender.bounds.height+4),in:sender)
  }
+ @objc func chooseCloudRoot(){
+  let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
+  panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek.");panel.directoryURL=FolderDialogs.cloudRoot
+  if panel.runModal() == .OK,let url=panel.url{FolderDialogs.cloudRoot=url;Task{@MainActor in await FolderDialogs.mapUnmapped()}}
+ }
+ @objc func resetCloudRoot(){FolderDialogs.cloudRoot=nil}
  func tableView(_ tableView:NSTableView,heightOfRow row:Int)->CGFloat{58}
  func tableView(_ tableView:NSTableView,rowViewForRow row:Int)->NSTableRowView?{DesignTopicRow()}
  func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{

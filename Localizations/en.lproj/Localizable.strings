@@ -675,3 +675,4 @@
 "Bez komentáře" = "No comment";
 "Snímek %ld · anotace a poznámka" = "Screenshot %ld · annotations and note";
 "Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash)." = "The cloud copy was deleted after the subscription ended; the local files are in the trash of folder %@ (.trash).";
+"Relaci „%@“ nelze obnovit: cloudová kopie byla smazána po konci předplatného. Místní soubory zůstávají." = "The session “%@” can’t be restored: the cloud copy was deleted after the subscription ended. The local files stay.";

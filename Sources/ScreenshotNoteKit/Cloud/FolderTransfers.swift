@@ -366,7 +366,7 @@ final class TrashNotifier:NSObject,UNUserNotificationCenterDelegate {
   UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound]){granted,_ in
    guard granted else{return}
    let content=UNMutableNotificationContent();content.title="Screenshot Note";content.body=text
-   UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"retention-"+(topic.cloudFolderID?.uuidString ?? topic.id),content:content,trigger:nil))
+   UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"retention-"+topic.destination.path,content:content,trigger:nil))
   }
  }
  func post(_ record:SessionRecord) {

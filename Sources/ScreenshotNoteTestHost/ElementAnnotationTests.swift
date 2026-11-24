@@ -92,6 +92,12 @@ import AppKit
  try check(captionWithElements("Popisek",image:image)=="Popisek\n\n"+expected && captionWithElements("",image:image)==expected,"caption with elements")
  try check(captionWithElements("Jen text",image:folder.appendingPathComponent("missing.png"))=="Jen text","caption without annotations")
  try check(captionWithElements("",image:image,pageData:false)=="- **[1] Element**: Klik nic\n  neudělá\n- **[2] Element**\n- **[4] Element**\n- **[5] Element**","cloud caption without page data")
+ // Poloha pro web: podíly ořezu, počátek vlevo nahoře, skrytá v HTML komentáři.
+ let area=Mark(tool:.rectangle,points:[NSPoint(x:100,y:300),NSPoint(x:200,y:400)],color:.red,width:2,text:"",bold:false,italic:false,underline:false,fontSize:14)
+ try check(areaMarker(area,crop:NSRect(x:0,y:0,width:500,height:500))==" <!-- sn:area 0.2000,0.2000,0.2000,0.2000 -->","area marker uses top-left fractions")
+ try check(areaMarker(area,crop:NSRect(x:0,y:0,width:50,height:50))=="","area outside the crop has no marker")
+ try check(captionWithElements("",image:image,pageData:false,areas:true).hasPrefix("- **[1] Element** <!-- sn:area "),"cloud caption carries the area")
+ try check(stripAreas("- **[1] Rámeček** <!-- sn:area 0.1000,0.2000,0.3000,0.4000 -->: text")=="- **[1] Rámeček**: text","export strips hidden areas")
  // Komentáře tvarů: společná řada čísel s elementy, prázdný komentář číslo odebere, ostatní se přečíslují.
  let notes=DrawingView(image:NSImage(size:NSSize(width:1000,height:800)),frame:NSRect(x:0,y:0,width:500,height:400))
  func shape(_ tool:Tool,_ rect:NSRect)->Mark{Mark(tool:tool,points:[rect.origin,NSPoint(x:rect.maxX,y:rect.maxY)],color:.red,width:3,text:"",bold:false,italic:false,underline:false,fontSize:14)}

@@ -664,3 +664,14 @@
 "Nové cloudové složky dostanou podsložku tady." = "Nové cloudové složky dostanou podsložku tady.";
 "Ptát se" = "Ptát se";
 "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení.";
+"Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo";
+"Komentáře k anotacím" = "Komentáře k anotacím";
+"Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář." = "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář.";
+"Všechny komentáře" = "Všechny komentáře";
+"Odebrat" = "Odebrat";
+"Potvrdit komentář (⌘Enter)" = "Potvrdit komentář (⌘Enter)";
+"Popis elementu · ⌘Enter potvrdí, Esc zruší výběr" = "Popis elementu · ⌘Enter potvrdí, Esc zruší výběr";
+"Markdown · ⌘Enter potvrdí, Esc zavře" = "Markdown · ⌘Enter potvrdí, Esc zavře";
+"Tvar zatím nemá komentář." = "Tvar zatím nemá komentář.";
+"Přidat popis" = "Přidat popis";
+"Bez komentáře" = "Bez komentáře";

@@ -74,6 +74,13 @@ func exportDesignPreviews(to directory:URL)throws{
   let editor=AnnotationEditor();_ = editor.run(url:root.appendingPathComponent("sample-\(language)-0.png"))
   editor.canvas.marks=[Mark(tool:.text,points:[NSPoint(x:300,y:300)],color:.systemRed,width:4,text:L("Poznámka ke snímku"),bold:true,italic:false,underline:false,fontSize:32)];editor.canvas.tool = .text;editor.canvas.choose(0);editor.canvas.startText(0);editor.sync();exportDesignWindow(editor.window,name:"annotation-text")
   editor.canvas.finishText();editor.canvas.marks[0].rotation = .pi/9;editor.canvas.choose(0);exportDesignWindow(editor.window,name:"annotation-transform")
+  // Panel komentářů: přehled se seznamem a úprava komentáře tvaru.
+  let commented=AnnotationEditor();_ = commented.run(url:root.appendingPathComponent("sample-\(language)-0.png"),caption:L("Poznámka ke snímku"),note:true)
+  var box=Mark(tool:.rectangle,points:[NSPoint(x:120,y:160),NSPoint(x:520,y:360)],color:.systemRed,width:4,text:"",bold:false,italic:false,underline:false,fontSize:28);box.comment=language=="en" ? "Wrong alignment of the button":"Špatné zarovnání tlačítka";box.number=1
+  var arrow=Mark(tool:.arrow,points:[NSPoint(x:700,y:200),NSPoint(x:900,y:420)],color:.systemBlue,width:4,text:"",bold:false,italic:false,underline:false,fontSize:28);arrow.comment=language=="en" ? "Click here":"Sem klikni";arrow.number=2
+  commented.canvas.marks=[box,arrow];commented.canvas.changed?();commented.canvas.choose(nil);exportDesignWindow(commented.window,name:"annotation-comments")
+  commented.canvas.choose(0);commented.canvas.startElementNote(0);exportDesignWindow(commented.window,name:"annotation-comment-edit")
+  commented.canvas.dropElementField();commented.window.orderOut(nil)
   _ = AnnotationCloseDialog().run()
   composer.collapseCompact();exportDesignWindow(composer.window,name:"compact")
  }

@@ -71,19 +71,38 @@ private func safeNote(_ value:String)->String{
  let lines=limited.components(separatedBy:.newlines).map{line->String in let text=line.split(whereSeparator:{$0.isWhitespace}).joined(separator:" ");return imageLinks(text).isEmpty ? text:escapedMarkdown(text)}
  return lines.reduce(into:[String]()){if !($1.isEmpty && ($0.last?.isEmpty ?? true)){$0.append($1)}}.joined(separator:"\n").trimmingCharacters(in:.newlines).replacingOccurrences(of:"\n",with:"\n  ")
 }
+/// Skrytá poloha anotace v exportovaném obrázku: podíly šířky a výšky, počátek vlevo nahoře.
+/// HTML komentář Markdown nezobrazí; web podle něj zvýrazní místo na obrázku.
+func areaMarker(_ mark:Mark,crop:NSRect)->String{
+ var rect=mark.bounds
+ if mark.rotation != 0{
+  let c=NSPoint(x:rect.midX,y:rect.midY),cosine=cos(mark.rotation),sine=sin(mark.rotation)
+  func turn(_ p:NSPoint)->NSPoint{let dx=p.x-c.x,dy=p.y-c.y;return NSPoint(x:c.x+dx*cosine-dy*sine,y:c.y+dx*sine+dy*cosine)}
+  let corners:[NSPoint]=[turn(NSPoint(x:rect.minX,y:rect.minY)),turn(NSPoint(x:rect.maxX,y:rect.minY)),turn(NSPoint(x:rect.minX,y:rect.maxY)),turn(NSPoint(x:rect.maxX,y:rect.maxY))]
+  let xs=corners.map{$0.x},ys=corners.map{$0.y};rect=NSRect(x:xs.min()!,y:ys.min()!,width:xs.max()!-xs.min()!,height:ys.max()!-ys.min()!)
+ }
+ rect=rect.intersection(crop);guard !rect.isNull,crop.width>0,crop.height>0 else{return ""}
+ return String(format:" <!-- sn:area %.4f,%.4f,%.4f,%.4f -->",(rect.minX-crop.minX)/crop.width,(crop.maxY-rect.maxY)/crop.height,rect.width/crop.width,rect.height/crop.height)
+}
+/// Text bez skrytých poloh anotací; export musí odpovídat webu (stripAreas).
+func stripAreas(_ text:String)->String{
+ guard text.contains("<!-- sn:area") else{return text}
+ return text.replacingOccurrences(of:" ?<!-- sn:area [0-9.,]{1,60} -->",with:"",options:.regularExpression)
+}
 /// Řádky `- **[1] Element** `selector` „name“: popis` a `- **[2] Rámeček**: komentář` seřazené podle čísla; anotace mimo ořez vynechá.
-func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->String{
+/// S `areas` dostane každý řádek skrytou polohu anotace (cloud).
+func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true,areas:Bool=false)->String{
  marks.compactMap{mark->(Int,String)? in
   if let crop,mark.bounds.intersection(crop).isNull{return nil}
   if mark.tool != .element,let number=mark.number {
    let note=safeNote(mark.comment ?? "");guard !note.isEmpty else{return nil}
-   return (number,"- **[\(number)] \(mark.noteLabel)**: "+note)
+   return (number,"- **[\(number)] \(mark.noteLabel)**"+(areas && crop != nil ? areaMarker(mark,crop:crop!):"")+": "+note)
   }
   guard mark.tool == .element,let info=mark.element else{return nil}
   // Selektor nesmí vypadat jako odkaz na obrázek, jinak by ho znovuotevření relace bralo jako snímek.
   var selector=flattened(info.selector,limit:300);if !imageLinks(selector).isEmpty{selector=flattened(info.tag,limit:40);if !imageLinks(selector).isEmpty{selector=""}}
   let label=flattened(info.name.isEmpty ? info.text:info.name,limit:80),note=safeNote(mark.text)
-  var line="- **[\(info.number)] Element**"
+  var line="- **[\(info.number)] Element**"+(areas && crop != nil ? areaMarker(mark,crop:crop!):"")
   if pageData,!selector.isEmpty{line+=" "+codeSpan(selector)}
   if pageData,!label.isEmpty{line+=" „"+escapedMarkdown(label)+"“"}
   if !note.isEmpty{line+=": "+note}
@@ -92,9 +111,9 @@ func elementMarkdownLines(_ marks:[Mark],crop:NSRect?,pageData:Bool=true)->Strin
 }
 /// Popisek obrázku doplněný o řádky anotací Element z pracovní kopie anotací.
 /// Bez `pageData` vynechá selektor a text stránky.
-func captionWithElements(_ note:String,image:URL,pageData:Bool=true)->String{
+func captionWithElements(_ note:String,image:URL,pageData:Bool=true,areas:Bool=false)->String{
  guard let data=try? Data(contentsOf:annotationSidecar(image)),let document=try? JSONDecoder().decode(ElementSidecar.self,from:data) else{return note}
- return [note,elementMarkdownLines(document.marks,crop:document.crop,pageData:pageData)].filter{!$0.isEmpty}.joined(separator:"\n\n")
+ return [note,elementMarkdownLines(document.marks,crop:document.crop,pageData:pageData,areas:areas)].filter{!$0.isEmpty}.joined(separator:"\n\n")
 }
 /// Po ořezu v editoru přepíše `capture` v exportovaném kontextu na oříznutou část.
 func adjustContextCapture(_ contextFile:URL,annotations:URL){
@@ -156,10 +175,12 @@ extension DrawingView:NSTextFieldDelegate {
   box.onCancel={[weak self] in self?.cancelNote()}
   box.onResize={[weak self] in self?.updateElementField()}
   noteButton?.removeFromSuperview();noteButton=nil
-  noteBox=box;elementField=box.field;elementFieldIndex=index;addSubview(box);updateElementField();window?.makeFirstResponder(box.editor)
+  noteBox=box;elementField=box.field;elementFieldIndex=index
+  if let host=noteHost{box.embed();host.attach(box)}else{addSubview(box);updateElementField()}
+  window?.makeFirstResponder(box.editor)
  }
  func updateElementField(){
-  guard let box=noteBox,let i=elementFieldIndex,marks.indices.contains(i) else{return}
+  guard let box=noteBox,box.superview === self,let i=elementFieldIndex,marks.indices.contains(i) else{return}
   let rect=noteAnchorRect(marks[i])
   let width=min(max(box.expanded ? 360:280,rect.width),max(240,bounds.width-8)),height=box.frame.height
   var y=rect.minY-height-6;if y<bounds.minY+4{y=min(rect.maxY+6,bounds.maxY-height-4)}
@@ -175,7 +196,7 @@ extension DrawingView:NSTextFieldDelegate {
  func confirmElementNote(){commitElementNote();activeElement?.confirmed=true}
  /// Plocha anotace Element pro výběr: okraj a odznak, aby šlo vybrat i anotace pod ní.
  func elementHit(_ mark:Mark,at point:NSPoint,tolerance:CGFloat)->Bool{
-  let rect=mark.bounds,size=max(24,mark.width*6),band=max(tolerance,mark.width)
+  let rect=mark.bounds,size=badgeSize(mark),band=max(tolerance,mark.width)
   if hypot(point.x-rect.minX,point.y-rect.maxY)<=size/2+tolerance{return true}
   return rect.insetBy(dx:-band,dy:-band).contains(point) && !rect.insetBy(dx:band,dy:band).contains(point)
  }
@@ -223,8 +244,8 @@ extension DrawingView:NSTextFieldDelegate {
  }
  /// Kruhový odznak s číslem anotace, vždy celý uvnitř ořezu.
  func paintBadge(_ number:Int,at anchor:NSPoint,mark:Mark){
-  let size=max(24,mark.width*6),x=max(viewport.minX+size/2,min(viewport.maxX-size/2,anchor.x)),y=max(viewport.minY+size/2,min(viewport.maxY-size/2,anchor.y))
-  let badge=NSRect(x:x-size/2,y:y-size/2,width:size,height:size);mark.color.setFill();NSBezierPath(ovalIn:badge).fill()
+  let size=badgeSize(mark),x=max(viewport.minX+size/2,min(viewport.maxX-size/2,anchor.x)),y=max(viewport.minY+size/2,min(viewport.maxY-size/2,anchor.y))
+  let badge=NSRect(x:x-size/2,y:y-size/2,width:size,height:size);let ring=NSBezierPath(ovalIn:badge.insetBy(dx:-size*0.08,dy:-size*0.08));NSColor.white.setFill();ring.fill();mark.color.setFill();NSBezierPath(ovalIn:badge).fill()
   let label="\(number)" as NSString,attributes:[NSAttributedString.Key:Any]=[.font:NSFont.systemFont(ofSize:size*0.55,weight:.bold),.foregroundColor:NSColor.white]
   let text=label.size(withAttributes:attributes);label.draw(at:NSPoint(x:badge.midX-text.width/2,y:badge.midY-text.height/2),withAttributes:attributes)
  }

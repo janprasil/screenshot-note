@@ -81,7 +81,7 @@ func cloudSessionBody(_ note:RemoteNote,images names:[String],contexts:[Int:[Str
  func list(_ items:[RemoteNote.Comment])->String{renderCommentList(items,template:note.comment_template,language:language,timeZone:timeZone)}
  // Stažený kontext dostane stejný callout s odkazy do assets/ jako lokální export.
  var items:[(number:Int,summary:ContextSummary,base:String,har:Bool)]=[]
- let blocks=zip(names,note.captions.map(escapeServerMarkdown)).enumerated().map{(offset,pair)->ImageBlock in
+ let blocks=zip(names,note.captions.map{escapeServerMarkdown(stripAreas($0))}).enumerated().map{(offset,pair)->ImageBlock in
   var block=ImageBlock(name:pair.0,caption:pair.1,comments:list(comments.filter{$0.image_index==offset+1}))
   // Video se staženými metadaty (video.json z contextAttachments nebo z disku).
   let kept=contexts[offset+1]?["video.keep"] != nil && assets.map{fm.fileExists(atPath:assetVideoFiles($0,pair.0)[0].path)} == true

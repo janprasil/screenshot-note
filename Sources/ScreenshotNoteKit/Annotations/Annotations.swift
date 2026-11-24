@@ -42,7 +42,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  var bold=false;var italic=false;var underline=false;var fontSize:CGFloat=28
  var changed:(()->Void)?;var dragStart:NSPoint?;var dragOriginal:[NSPoint]?;var cropStart:NSPoint?;var cropPreview:NSRect?
  var history:[([Mark],NSRect)]=[];var inline:NSTextView?;var editingIndex:Int?;var closingText=false;var transformDrag:AnnotationTransformDrag?
- var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:ActiveElement?;var firstElementNumber=1;var elementField:NSTextField?;var noteBox:NoteEditorBox?;var noteButton:NSButton?;var elementFieldIndex:Int?;var closingElementNote=false;var trackingArea:NSTrackingArea?
+ var elementMap:[ElementTarget]=[];var hoverElement:Int?;var activeElement:ActiveElement?;var firstElementNumber=1;var elementField:NSTextField?;var noteBox:NoteEditorBox?;var noteButton:NSButton?;var elementFieldIndex:Int?;var closingElementNote=false;weak var noteHost:AnnotationCommentPanel?;var trackingArea:NSTrackingArea?
  override var acceptsFirstResponder:Bool{true}
  override var mouseDownCanMoveWindow:Bool{false}
  var toolCursor:NSCursor{tool == .text ? .iBeam:(tool == .select ? .arrow:(tool == .element ? .pointingHand:.crosshair))}
@@ -89,7 +89,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   // U videa je pod plátnem přehrávač; oblast obrazu zůstane průhledná.
   if !drawsImage{NSColor.clear.setFill();r.fill(using:.copy)}
   NSGraphicsContext.saveGraphicsState();r.clip();let t=NSAffineTransform();t.translateX(by:r.minX,yBy:r.minY);t.scale(by:scale);t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();if drawsImage{image.draw(in:NSRect(origin:.zero,size:image.size))};for(i,mark) in marks.enumerated(){if i != editingIndex{paint(mark)}};if let mark=pending{paint(mark)};NSGraphicsContext.restoreGraphicsState()
-  drawElementHover();drawSelectionHandles();drawNoteIndicators()
+  drawElementHover();drawSelectionHandles()
   if let rect=cropPreview{AppPalette.accent.setStroke();let p=NSBezierPath(rect:displayRect(rect));p.lineWidth=2;p.stroke()}
  }
  func hit(_ p:NSPoint)->Int?{let tolerance=max(6/scale,3);return marks.indices.reversed().first{index in let mark=marks[index],r=mark.bounds;let p=mark.unrotatedPoint(p);if mark.tool == .text{return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p)}
@@ -230,10 +230,11 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size)
   // S poznámkou se okno rozšíří o panel vpravo, obraz dostane zhruba 80 % šířky.
   let notePanel:CGFloat=note ? min(320,max(240,round(dimensions.width*0.25))):0
-  let w=min(dimensions.width+notePanel,screen.width-40),h=dimensions.height
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(340,h))
+  // Panel potřebuje výšku pro poznámku i seznam komentářů.
+  let w=min(dimensions.width+notePanel,screen.width-40),h=note ? min(max(dimensions.height,540),screen.height-40):dimensions.height
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(note ? 540:340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
-  var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
+  var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
   // Video se neořezává; anotace platí pro celý záznam.
   if isVideo{tools.removeAll{$0 == .crop};symbols.removeLast();helps.removeLast()}
   // Nástroj Element jen u obrázku s mapou elementů z prohlížeče.
@@ -274,17 +275,11 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
  var hasUnsavedChanges:Bool{initialMarks != (try? encodedMarks()) || initialCrop != canvas.viewport}
  func requestedCloseChoice(confirm:()->AnnotationCloseChoice)->AnnotationCloseChoice{hasUnsavedChanges || noteChanged ? confirm():.discard}
  var noteChanged:Bool{noteView.map{$0.string != initialNote} ?? false}
+ /// Pravý panel: poznámka ke snímku a komentáře anotací; pole komentáře se otevírá v něm.
  func addNotePanel(frame:NSRect,text:String){
   guard let content=window.contentView else{return}
-  let panel=NSView(frame:frame);panel.autoresizingMask=[.minXMargin,.height]
-  let title=designLabel(L("Poznámka ke snímku"),NSRect(x:0,y:frame.height-24,width:frame.width,height:22),size:13,weight:.semibold);title.autoresizingMask=[.minYMargin];panel.addSubview(title)
-  let hint=designLabel(L("Text pod snímkem, Markdown."),NSRect(x:0,y:frame.height-44,width:frame.width,height:18),size:11,color:AppPalette.secondary);hint.autoresizingMask=[.minYMargin];panel.addSubview(hint)
-  let shell=AdaptiveInputBackground(frame:NSRect(x:0,y:0,width:frame.width,height:frame.height-54));shell.autoresizingMask=[.width,.height];panel.addSubview(shell)
-  let scroll=NSScrollView(frame:shell.bounds.insetBy(dx:8,dy:8));scroll.autoresizingMask=[.width,.height];scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;scroll.drawsBackground=false
-  let view=NSTextView(frame:NSRect(origin:.zero,size:scroll.contentSize));view.isRichText=false;view.allowsUndo=true;view.drawsBackground=false;view.font = .systemFont(ofSize:13);view.textColor = .textColor
-  view.isAutomaticQuoteSubstitutionEnabled=false;view.isAutomaticDashSubstitutionEnabled=false;view.isVerticallyResizable=true;view.autoresizingMask=[.width];view.textContainer?.widthTracksTextView=true
-  view.string=text;view.setAccessibilityLabel(L("Poznámka ke snímku"));scroll.documentView=view;shell.addSubview(scroll);noteView=view
-  content.addSubview(panel)
+  let panel=AnnotationCommentPanel(frame:frame,note:text);panel.autoresizingMask=[.minXMargin,.height]
+  panel.canvas=canvas;canvas.noteHost=panel;noteView=panel.noteView;content.addSubview(panel);panel.refresh()
  }
  func saveWorkingImage()throws{
   guard hasUnsavedChanges else{return}

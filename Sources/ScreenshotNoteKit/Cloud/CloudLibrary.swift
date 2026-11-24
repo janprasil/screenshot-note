@@ -235,7 +235,7 @@ final class CloudLibrary {
   let policy = draft.topic?.effectiveContextPolicy, withContext = policy != nil
   // Selektor a texty prvků jen tehdy, když je cílová složka povoluje.
   let pageData = policy.map{$0.includeElements && $0.includeElementText} ?? false
-  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path)) }
+  let captions = draft.images.map { captionWithElements(draft.imageNotes?[$0] ?? "",image:root.appendingPathComponent($0),pageData:pageData && fm.fileExists(atPath:contextSidecars(root.appendingPathComponent($0))[0].path),areas:true) }
   func valid(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   // Bez zadaného názvu: prázdný pro AI návrh nové relace, jinak výchozí název složky.
   // Doplnění AI relace bez názvu nechá název prázdný, aby ho AI mohla dodat.

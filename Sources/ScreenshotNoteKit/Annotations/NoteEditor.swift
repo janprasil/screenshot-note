@@ -22,6 +22,9 @@ final class NoteEditorBox:NSView {
  let expandButton=NSButton(frame:.zero)
  let doneButton=NSButton(frame:.zero)
  private(set) var expanded=false
+ /// V panelu editoru: jen víceřádkové pole přes celou plochu, ovládání dává panel.
+ private(set) var embedded=false
+ func embed(){setExpanded(true);embedded=true;textView.font = .systemFont(ofSize:13);layer?.shadowOpacity=0;shadow=nil;for view in [icon,field,expandButton,doneButton] as [NSView]{view.isHidden=true};layoutParts()}
  var onConfirm:(()->Void)?{didSet{textView.onConfirm=onConfirm}}
  var onCancel:(()->Void)?{didSet{textView.onCancel=onCancel}}
  var onResize:(()->Void)?
@@ -74,6 +77,7 @@ final class NoteEditorBox:NSView {
  override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);layoutParts()}
  private func layoutParts(){
   let h=bounds.height,w=bounds.width,top=h-Self.collapsedHeight
+  if embedded{scroll.frame=bounds.insetBy(dx:8,dy:8);return}
   icon.frame=NSRect(x:9,y:top+8,width:18,height:18)
   doneButton.frame=NSRect(x:w-30,y:top+6,width:22,height:22)
   expandButton.frame=NSRect(x:w-54,y:top+6,width:22,height:22)
@@ -90,25 +94,16 @@ extension DrawingView {
   let clipped=mark.bounds.intersection(viewport)
   if mark.tool == .element && clipped.isNull{return nil}
   let anchor=mark.tool == .element ? NSPoint(x:clipped.minX,y:clipped.maxY):mark.badgeAnchor
-  let size=max(24,mark.width*6)
+  let size=badgeSize(mark)
   return NSPoint(x:max(viewport.minX+size/2,min(viewport.maxX-size/2,anchor.x)),y:max(viewport.minY+size/2,min(viewport.maxY-size/2,anchor.y)))
  }
- /// Ikona komentáře u odznaku; jen v editoru, export obsahuje samotné číslo.
- func drawNoteIndicators(){
-  guard let symbol=NSImage(systemSymbolName:"text.bubble.fill",accessibilityDescription:nil) else{return}
-  for (index,mark) in marks.enumerated() where index != editingIndex && !mark.noteText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
-   guard let center=badgeCenter(mark) else{continue}
-   let size=max(24,mark.width*6)*scale,point=displayRect(NSRect(origin:center,size:.zero)).origin
-   // Bublina vpravo vedle odznaku, odznak nepřekryje při žádném zvětšení.
-   let rect=NSRect(x:point.x+size/2+3,y:point.y-8,width:18,height:16)
-   AppPalette.paper.setFill();NSBezierPath(roundedRect:rect.insetBy(dx:-2,dy:-2),xRadius:5,yRadius:5).fill()
-   drawAdaptiveSymbol(symbol,in:rect,color:mark.color)
-  }
- }
+ /// Velikost odznaku: roste s obrázkem, aby číslo bylo čitelné i u velkých snímků.
+ func badgeSize(_ mark:Mark)->CGFloat{max(24,mark.width*6,round(min(viewport.width,viewport.height)*0.03))}
  /// Tlačítko „Komentář“ u vybraného tvaru v nástroji Výběr.
  func updateNoteButton(){
   // Bez okna (testy, export) se tlačítko nevytváří.
-  guard window != nil,tool == .select,elementField == nil,editingIndex == nil,let i=selected,marks.indices.contains(i) else{noteButton?.removeFromSuperview();noteButton=nil;return}
+  noteHost?.refresh()
+  guard window != nil,noteHost == nil,tool == .select,elementField == nil,editingIndex == nil,let i=selected,marks.indices.contains(i) else{noteButton?.removeFromSuperview();noteButton=nil;return}
   let button=noteButton ?? {
    let b=NSButton(title:"",target:self,action:#selector(noteButtonPressed));b.bezelStyle = .rounded;b.controlSize = .small;b.imagePosition = .imageLeading;b.font = .systemFont(ofSize:11,weight:.medium)
    b.image=NSImage(systemSymbolName:"text.bubble",accessibilityDescription:nil);b.contentTintColor=AppPalette.accent;addSubview(b);noteButton=b;return b

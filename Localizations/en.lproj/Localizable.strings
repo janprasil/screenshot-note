@@ -664,3 +664,14 @@
 "Nové cloudové složky dostanou podsložku tady." = "New cloud folders get a subfolder here.";
 "Ptát se" = "Ask each time";
 "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "Subfolders named after your cloud folders are created here. New cloud folders are stored here automatically; change it in Settings.";
+"Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Select · drag to move, double-click to edit text; add comments in the panel on the right";
+"Komentáře k anotacím" = "Annotation comments";
+"Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář." = "No comments yet. Select a shape with the Select tool and add a comment in this panel.";
+"Všechny komentáře" = "All comments";
+"Odebrat" = "Remove";
+"Potvrdit komentář (⌘Enter)" = "Confirm comment (⌘Enter)";
+"Popis elementu · ⌘Enter potvrdí, Esc zruší výběr" = "Element description · ⌘Enter confirms, Esc cancels the selection";
+"Markdown · ⌘Enter potvrdí, Esc zavře" = "Markdown · ⌘Enter confirms, Esc closes";
+"Tvar zatím nemá komentář." = "This shape has no comment yet.";
+"Přidat popis" = "Add description";
+"Bez komentáře" = "No comment";

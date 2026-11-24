@@ -82,7 +82,7 @@ final class Composer:NSObject,NSWindowDelegate {
  private var contextSummaries:[String:ContextSummary?]=[:]
  let thumbnails=NSView();let thumbnailScroll=NSScrollView();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
  let laterButton=AppButton();let saveButton=AppButton();var availableTopics:[Topic]=[]
- let copyLinkButton=AppButton();var sharing=false;private var shareFeedback:DispatchWorkItem?
+ let copyLinkButton=AppButton();var sharing=false
  let addShotButton=AppButton();let captureOptions=AppButton();let captureGroup=DesignSurface(frame:.zero,fill:AppPalette.raised,radius:8);var onCapture:((Bool)->Void)?
  private var screenTimer:Timer?
  private var pointerScreenFrame:NSRect?
@@ -173,30 +173,21 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  func shareableSessionID()->UUID?{CloudLibrary.shared.shareableSessionID(draft,index:SessionIndex.shared,serverImages:CloudFolders.shared.serverImages)}
  func copyLinkWidth(maximum:CGFloat)->CGFloat{min(maximum,ceil((copyLinkButton.title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width)+47)}
- // Jediné místo, kde se mění vzhled tlačítka Kopírovat odkaz.
+ // Jediné místo, kde se mění vzhled tlačítka Sdílet odkaz.
  func setCopyLinkState(copied:Bool){
-  let title=copied ? L("Odkaz zkopírován"):L("Kopírovat odkaz")
-  copyLinkButton.title=title;copyLinkButton.image=NSImage(systemSymbolName:copied ? "checkmark":"link",accessibilityDescription:nil);copyLinkButton.imagePosition = .imageLeading
-  copyLinkButton.role=copied ? .success:.quiet;copyLinkButton.toolTip=L("Zkopírovat veřejný odkaz na relaci do schránky");copyLinkButton.setAccessibilityLabel(title)
+  let title=L("Sdílet odkaz…")
+  copyLinkButton.title=title;copyLinkButton.image=NSImage(systemSymbolName:"link",accessibilityDescription:nil);copyLinkButton.imagePosition = .imageLeading
+  copyLinkButton.role = .quiet;copyLinkButton.toolTip=L("Nastavit a zkopírovat odkaz na relaci");copyLinkButton.setAccessibilityLabel(title)
   copyLinkButton.needsDisplay=true;layoutContextRow()
  }
+ // Sdílet odkaz otevře dialog jako na webu: publikum, adresa, kopírování a zrušení.
  @objc func copyLink(){
   guard !sharing,let id=shareableSessionID() else{return}
-  sharing=true;copyLinkButton.isEnabled=false;shareFeedback?.cancel()
-  Task{@MainActor [weak self] in
-   do{
-    let url=try await CloudLibrary.shared.shareLink(id)
-    // Odkaz patří do schránky, i když se okno mezitím zavřelo.
-    copyShareLink(url);guard let self else{return}
-    self.sharing=false;self.copyLinkButton.isEnabled=true;self.setCopyLinkState(copied:true)
-    NSAccessibility.post(element:self.copyLinkButton,notification:.announcementRequested,userInfo:[.announcement:L("Odkaz zkopírován"),.priority:NSAccessibilityPriorityLevel.medium.rawValue])
-    let reset=DispatchWorkItem{[weak self] in self?.setCopyLinkState(copied:false)};self.shareFeedback=reset;DispatchQueue.main.asyncAfter(deadline:.now()+2,execute:reset)
-   }catch{
-    guard let self else{return}
-    self.sharing=false;self.copyLinkButton.isEnabled=true
-    self.childEditorOpen=true;showError(error.localizedDescription);self.childEditorOpen=false;self.window.makeKeyAndOrderFront(nil)
-   }
-  }
+  sharing=true;defer{sharing=false}
+  childEditorOpen=true;defer{childEditorOpen=false};snapshotFields()
+  let title=draft.title ?? "",team=draft.topic?.cloudTeam==true
+  MainActor.assumeIsolated{ShareDialog().run(id:id,title:title,team:team)}
+  window.makeKeyAndOrderFront(nil)
  }
  @objc func chooseConfiguration(){
   guard draft.previous == nil else{return}

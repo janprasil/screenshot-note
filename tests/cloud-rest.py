@@ -151,11 +151,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def share(self, token):
-        assert self.command == 'POST' and connections[token]['active']
-        assert self.headers['Content-Type'] == 'application/json'
-        assert json.loads(self.body()) == {'audience': 'public'}
+        assert self.command in ('GET', 'POST', 'DELETE') and connections[token]['active']
         ident = self.path.split('/')[4]
         uuid.UUID(ident)
+        # Dialog Sdílet odkaz: výpis aktivního odkazu a zrušení všech.
+        if self.command == 'GET':
+            link = shares.get(ident)
+            self.reply([dict(link, revocable=True)] if link else [])
+            return
+        if self.command == 'DELETE':
+            link = shares.pop(ident, None)
+            self.reply(dict(revoked=[dict(id=link['id'], revoked_at='2026-11-20T00:00:00Z')] if link else []))
+            return
+        assert self.headers['Content-Type'] == 'application/json'
+        body = json.loads(self.body())
+        assert set(body) <= {'audience', 'replace'} and body.get('audience', 'public') in ('public', 'team') and isinstance(body.get('replace', False), bool)
+        audience = body.get('audience', 'public')
         share_calls.append(ident)
         address = 'http://127.0.0.1:' + str(self.server.server_port)
         special = {'00000000-0000-4000-8000-000000000409': (409, 'session_trashed'),
@@ -176,9 +187,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if ident not in jobs or jobs[ident]['state'] != 'committed':
             self.error(404, 'not_found')
             return
+        current = shares.get(ident)
+        if current and current['audience'] != audience:
+            if not body.get('replace'):
+                self.error(409, 'link_exists')
+                return
+            del shares[ident]
         status = 200 if ident in shares else 201
         share_statuses.append(status)
-        link = shares.setdefault(ident, dict(id=str(uuid.uuid4()), audience='public',
+        link = shares.setdefault(ident, dict(id=str(uuid.uuid4()), audience=audience,
                                              url=address + '/s/sn_share_v1_' + secrets.token_urlsafe(32),
                                              created_at='2026-11-20T00:00:00Z'))
         self.reply(dict(link, image_urls=[link['url'] + '/' + ident + '/1.png']), status)
@@ -291,16 +308,17 @@ try:
     assert result.returncode == 0, result.stdout + result.stderr
     assert not errors, errors
     assert dropped == {'manifest', 'image', 'commit'}
-    assert sum(1 for method, path in requests if method == 'DELETE') == 1
+    assert sum(1 for method, path in requests if method == 'DELETE' and not path.endswith('/share')) == 1 and sum(1 for method, path in requests if method == 'DELETE' and path.endswith('/share')) == 1
     assert len(jobs) == 4 and all(job['state'] == 'committed' for job in jobs.values())
     # Týmový upload po ztrátě členství: jeden 404, žádná smyčka, po návratu nahrán ručně.
     assert len(team_rejects) == 2 and sum(1 for job in jobs.values() if (job['manifest'].get('folder_id') or '').lower() == team_folder) == 1
     assert team_lists and all('library_id=' + team in query for query in team_lists)
     assert team_state.get('raced') and any(path == '/api/v1/sessions/' + team_note for _, path in requests)
-    assert len(shares) == 1 and share_calls.count(next(iter(shares))) == 3
+    # Relace z dialogu: 3 kopírování, odmítnuté týmové, výměna na týmový a zpět; nakonec zrušené.
+    assert len(shares) == 0 and max(share_calls.count(ident) for ident in set(share_calls)) == 6
     assert share_calls.count('00000000-0000-4000-8000-000000000429') == 1
     # 12 volání: druhý pokus během Retry-After se na server nedostane.
-    assert len(share_calls) == 13 and share_statuses == [201, 200, 200]
+    assert len(share_calls) == 16 and share_statuses == [201, 200, 200, 201, 201]
     assert all('/auth/' not in path and '/storage/' not in path and '/rest/' not in path for _, path in requests)
     print(result.stdout.strip())
     print('PASS: team folder wire contract (/me libraries, owner fields, library_id, author, membership loss → hidden folder and parked upload without retry loop)')

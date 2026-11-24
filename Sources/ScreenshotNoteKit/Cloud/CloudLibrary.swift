@@ -825,7 +825,11 @@ final class CloudLibrary {
  }
 }
 
-private struct CloudShareLink: Decodable { let url: String }
+private struct CloudShareLink: Decodable { let url: String; var audience: String? = nil; var revocable: Bool? = nil }
+/// Publikum sdíleného odkazu relace.
+enum ShareAudience: String { case `public`, team }
+/// Aktivní odkaz relace pro dialog Sdílet odkaz.
+struct ShareState: Equatable { var audience: ShareAudience; var url: URL; var revocable: Bool }
 extension CloudLibrary {
  private var shareAccount: String? { connection.flatMap { c in c.ownerID.map { c.endpoint + "|" + $0.uuidString } } }
  var shareRetryAt: Date { shareRetry.flatMap { $0.account == shareAccount ? $0.until : nil } ?? .distantPast }
@@ -840,12 +844,31 @@ extension CloudLibrary {
   return isCommitted(id, folder: folder) ? id : nil
  }
  /// Veřejná URL sdílené relace; server vrací pro aktivní odkaz pořád stejnou.
- @MainActor func shareLink(_ id: UUID) async throws -> URL {
+ @MainActor func shareLink(_ id: UUID) async throws -> URL { try await createShare(id, audience: .public, replace: false) }
+ /// Aktivní odkaz relace (nejvýš jeden: veřejný, nebo týmový) s informací, zda ho smím zrušit.
+ @MainActor func shareState(_ id: UUID) async throws -> ShareState? {
+  let (endpoint, data) = try await shareCall(id, method: "GET")
+  guard let links = try? JSONDecoder().decode(Envelope<[CloudShareLink]>.self, from: data).data else { throw CloudFailure.invalid }
+  guard let link = links.first(where: { $0.audience == ShareAudience.public.rawValue }) ?? links.first,
+        let audience = ShareAudience(rawValue: link.audience ?? "public"), let url = Self.shareURL(link.url, endpoint: endpoint) else { return nil }
+  return ShareState(audience: audience, url: url, revocable: link.revocable ?? true)
+ }
+ /// Vytvoří odkaz; `replace` v jedné transakci zruší odkaz druhého publika.
+ @MainActor func createShare(_ id: UUID, audience: ShareAudience, replace: Bool) async throws -> URL {
+  let body = try JSONSerialization.data(withJSONObject: ["audience": audience.rawValue, "replace": replace] as [String: Any])
+  let (endpoint, data) = try await shareCall(id, method: "POST", body: body)
+  guard let link = try? JSONDecoder().decode(Envelope<CloudShareLink>.self, from: data).data,
+        let url = Self.shareURL(link.url, endpoint: endpoint) else { throw CloudFailure.invalid }
+  return url
+ }
+ /// Zruší všechny aktivní odkazy relace, které smím zrušit.
+ @MainActor func revokeShares(_ id: UUID) async throws { _ = try await shareCall(id, method: "DELETE") }
+ @MainActor private func shareCall(_ id: UUID, method: String, body: Data? = nil) async throws -> (CloudEndpoint, Data) {
   try requireAccount(); guard let c = connection, let account = shareAccount, let endpoint = CloudEndpoint(c.endpoint), endpoint == self.endpoint else { throw CloudFailure.invalid }
   func limited(_ wait: TimeInterval) -> CloudFailure { CloudFailure(LF("Příliš mnoho požadavků na sdílení. Zkus to znovu za %ld s.", max(1, Int(ceil(wait)))), status: 429, retryAfter: wait, code: "rate_limited") }
   let wait = shareRetryAt.timeIntervalSince(now()); guard wait <= 0 else { throw limited(wait) }
-  let path = "/api/v1/sessions/" + id.uuidString.lowercased() + "/share", body = Data(#"{"audience":"public"}"#.utf8), data: Data
-  do { data = try await CloudTransport.shared.request(endpoint, path, method: "POST", token: c.token, body: body, limit: 65536) }
+  let path = "/api/v1/sessions/" + id.uuidString.lowercased() + "/share"
+  do { return (endpoint, try await CloudTransport.shared.request(endpoint, path, method: method, token: c.token, body: body, limit: 65536)) }
   catch let failure as CloudFailure {
    // Vlastní hlášky sdílení; obecné hlášky přenosu mluví o nahrávání.
    let message: String
@@ -863,9 +886,6 @@ extension CloudLibrary {
    }
    throw CloudFailure(message, status: failure.status, code: failure.code)
   } catch { throw CloudFailure(L("Odkaz se nepodařilo získat. Zkontroluj připojení k internetu a zkus to znovu."), code: "network") }
-  guard let link = try? JSONDecoder().decode(Envelope<CloudShareLink>.self, from: data).data,
-        let url = Self.shareURL(link.url, endpoint: endpoint) else { throw CloudFailure.invalid }
-  return url
  }
  /// Přijme jen `/s/sn_share_v1_<43 znaků>` na stejném originu jako API (schéma, host bez velikosti písmen, efektivní port).
  static func shareURL(_ raw: String, endpoint: CloudEndpoint) -> URL? {

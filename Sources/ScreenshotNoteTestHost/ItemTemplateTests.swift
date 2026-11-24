@@ -13,7 +13,7 @@ import Foundation
  note.comments=[RemoteNote.Comment(author_name:"Jan `x`",body:"Celá relace",created_at:"2026-11-22T13:05:00Z"),
   RemoteNote.Comment(author_name:"Eva",body:"K obrázku ![p](q)",created_at:"2026-03-05T08:07:00Z",image_index:2)]
  note.author=CloudAuthor(id:nil,name:"Autor")
- let parityCs="# Relace !\\[x](https://e.test/x.png) Druhý\n\n# Screenshots\n\n![Screenshot 1](<assets/S-1.png>)\n\nPopis 1\n\n![Screenshot 2](<assets/S-2.png>)\n\nPopis 2\n\n- **[1] Element** `#btn`: klik\n\nK obrázku !\\[p](q)\n`Eva` - `5. 3. 2026 08:07`\n\n# Description\n\nText\n\\---\n!\\[a](b)\n\nCelá relace\n`Jan 'x'` - `22. 11. 2026 13:05`\n"
+ let parityCs="# Relace !\\[x](https://e.test/x.png) Druhý\n\n# Screenshots\n\n![Screenshot 1](<assets/S-1.png>)\n\nPopis 1\n\n![Screenshot 2](<assets/S-2.png>)\n\nPopis 2\n\n- **[1] Element** `#btn`: klik\n\nK obrázku !\\[p](q)\n\n`Eva` - `5. 3. 2026 08:07`\n\n# Description\n\nText\n\\---\n!\\[a](b)\n\nCelá relace\n\n`Jan 'x'` - `22. 11. 2026 13:05`\n"
  let body=cloudSessionBody(note,images:["S-1.png","S-2.png"],language:"cs",timeZone:utc)
  assert(body==parityCs,body)
  assert(cloudSessionBody(note,images:["S-1.png","S-2.png"],language:"en",timeZone:utc).contains("`Eva` - `Mar 5, 2026, 08:07`"))

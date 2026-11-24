@@ -659,3 +659,8 @@
 "Výchozí název a šablony" = "Default title and templates";
 "Výchozí zkratky Screenshot Note" = "Screenshot Note default shortcuts";
 "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "The system shortcuts are taken. We kept the defaults; set them in Settings → Keyboard shortcuts after turning off the system shortcuts.";
+"Nadřazená složka cloudu" = "Cloud parent folder";
+"Nenastaveno, u nové cloudové složky se zeptám." = "Not set; I ask for each new cloud folder.";
+"Nové cloudové složky dostanou podsložku tady." = "New cloud folders get a subfolder here.";
+"Ptát se" = "Ask each time";
+"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "Subfolders named after your cloud folders are created here. New cloud folders are stored here automatically; change it in Settings.";

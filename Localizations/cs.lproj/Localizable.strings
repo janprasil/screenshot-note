@@ -659,3 +659,8 @@
 "Výchozí název a šablony" = "Výchozí název a šablony";
 "Výchozí zkratky Screenshot Note" = "Výchozí zkratky Screenshot Note";
 "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky.";
+"Nadřazená složka cloudu" = "Nadřazená složka cloudu";
+"Nenastaveno, u nové cloudové složky se zeptám." = "Nenastaveno, u nové cloudové složky se zeptám.";
+"Nové cloudové složky dostanou podsložku tady." = "Nové cloudové složky dostanou podsložku tady.";
+"Ptát se" = "Ptát se";
+"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení.";

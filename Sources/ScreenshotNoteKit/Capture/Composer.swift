@@ -39,6 +39,8 @@ final class ScreenshotThumbnailButton:NSButton {
   let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self,userInfo:nil)
   addTrackingArea(area);hoverTracking=area
  }
+ // Odebraný náhled si sledování myši smaže, aby AppKit neposílal události uvolněnému objektu.
+ override func viewWillMove(toWindow newWindow:NSWindow?){super.viewWillMove(toWindow:newWindow);if newWindow==nil,let area=hoverTracking{removeTrackingArea(area);hoverTracking=nil}}
  func addHoverAction(_ action:NSButton){action.isHidden = !hover;hoverActions.append(action);addSubview(action)}
  func setHovered(_ value:Bool){
   hover=value
@@ -80,7 +82,7 @@ final class Composer:NSObject,NSWindowDelegate {
  let titleField=CenteredTextField();let comment=SessionCommentField();var buttons:[NSButton]=[]
  // Souhrn kontextu podle obrázku; čte se jednou, soubor může mít desítky MiB.
  private var contextSummaries:[String:ContextSummary?]=[:]
- let thumbnails=NSView();let thumbnailScroll=NSScrollView();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
+ let thumbnails=NSView();let thumbnailScroll=NSScrollView();let previousShots=AppButton();let nextShots=AppButton();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
  let laterButton=AppButton();let saveButton=AppButton();var availableTopics:[Topic]=[]
  let copyLinkButton=AppButton();var sharing=false
  let addShotButton=AppButton();let captureOptions=AppButton();let captureGroup=DesignSurface(frame:.zero,fill:AppPalette.raised,radius:8);var onCapture:((Bool)->Void)?
@@ -112,7 +114,14 @@ final class Composer:NSObject,NSWindowDelegate {
   captureOptions.image=NSImage(systemSymbolName:"chevron.down",accessibilityDescription:nil);captureOptions.imagePosition = .imageOnly
   captureOptions.target=self;captureOptions.action=#selector(showCaptureOptions);captureOptions.toolTip=L("Další možnosti snímání");captureOptions.setAccessibilityLabel(L("Další možnosti snímání"));captureGroup.addSubview(captureOptions)
   refreshTopics()
-  thumbnailScroll.frame=NSRect(x:28,y:180,width:744,height:244);thumbnailScroll.hasHorizontalScroller=true;thumbnailScroll.autohidesScrollers=true;thumbnailScroll.drawsBackground=false;thumbnailScroll.documentView=thumbnails;view.addSubview(thumbnailScroll)
+  // Snímky se posouvají šipkami (po stránkách, plynule); posuvník je skrytý. Vrstva zrychlí kreslení při posunu.
+  thumbnailScroll.frame=NSRect(x:28,y:180,width:744,height:244);thumbnailScroll.hasHorizontalScroller=false;thumbnailScroll.drawsBackground=false;thumbnailScroll.wantsLayer=true;thumbnailScroll.documentView=thumbnails;view.addSubview(thumbnailScroll)
+  thumbnailScroll.contentView.postsBoundsChangedNotifications=true
+  NotificationCenter.default.addObserver(self,selector:#selector(updateShotArrows),name:NSView.boundsDidChangeNotification,object:thumbnailScroll.contentView)
+  for (arrow,symbol,label,x) in [(previousShots,"chevron.left",L("Předchozí snímky"),CGFloat(14)),(nextShots,"chevron.right",L("Další snímky"),CGFloat(750))]{
+   arrow.frame=NSRect(x:x,y:276,width:36,height:36);arrow.role = .secondary;arrow.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);arrow.imagePosition = .imageOnly
+   arrow.target=self;arrow.action=#selector(scrollShots(_:));arrow.toolTip=label;arrow.setAccessibilityLabel(label);view.addSubview(arrow)
+  }
   let input=AdaptiveInputBackground(frame:NSRect(x:28,y:98,width:744,height:40));view.addSubview(input)
   comment.frame=NSRect(x:12,y:8,width:682,height:24);comment.isBordered=false;comment.drawsBackground=false;comment.textColor = .textColor;comment.font = .systemFont(ofSize:14);comment.usesSingleLineMode=true;comment.lineBreakMode = .byTruncatingTail;comment.placeholderString=L("Přidat komentář…");comment.markdownText=draft.comment;comment.onExpand={[weak self] in self?.expandComment()};input.addSubview(comment)
   let expand=styledButton("",symbol:"line.3.horizontal",role:.quiet,frame:NSRect(x:702,y:4,width:34,height:32),target:self,action:#selector(expandComment));expand.toolTip=L("Otevřít Markdown editor");input.addSubview(expand)
@@ -254,17 +263,15 @@ final class Composer:NSObject,NSWindowDelegate {
   for view in thumbnails.subviews{view.removeFromSuperview()};buttons=[]
   thumbnails.frame=NSRect(x:0,y:0,width:max(744,CGFloat(draft.images.count)*238-14),height:226)
   for(i,image) in draft.images.enumerated(){
-   let button=ScreenshotThumbnailButton(frame:NSRect(x:CGFloat(i)*238,y:0,width:224,height:226));button.image=NSImage(contentsOf:root.appendingPathComponent(image));button.imageScaling = .scaleProportionallyUpOrDown;button.imagePosition = .imageOnly;button.tag=i;button.target=self;button.action=#selector(edit);button.toolTip=L("Kliknutím zvětšit a upravit");thumbnails.addSubview(button);buttons.append(button)
+   let button=ScreenshotThumbnailButton(frame:NSRect(x:CGFloat(i)*238,y:0,width:224,height:226));button.image=thumbnailImage(root.appendingPathComponent(image));button.imageScaling = .scaleProportionallyUpOrDown;button.imagePosition = .imageOnly;button.tag=i;button.target=self;button.action=#selector(edit);button.toolTip=L("Kliknutím zvětšit a upravit");thumbnails.addSubview(button);buttons.append(button)
    let text=draft.imageNotes?[image] ?? ""
    let preview=button.notePreview;preview.stringValue=text.components(separatedBy:.newlines).joined(separator:" ");preview.toolTip=text
    preview.frame=NSRect(x:34,y:5,width:180,height:23);preview.font = .systemFont(ofSize:11);preview.textColor=AppPalette.secondary;preview.usesSingleLineMode=true;preview.maximumNumberOfLines=1;preview.lineBreakMode = .byTruncatingTail;button.addSubview(preview)
    let area=button.imageDisplayRect
    let annotate=ThumbnailActionButton(title:"",target:self,action:#selector(edit));annotate.image=NSImage(systemSymbolName:"pencil.tip",accessibilityDescription:nil)
    annotate.expandedTitle=L("Anotace");annotate.setAccessibilityLabel(annotate.expandedTitle);annotate.tag=i
-   annotate.frame=NSRect(x:area.minX,y:area.midY,width:area.width,height:area.height/2);annotate.collapsedFrame=annotate.frame;button.addHoverAction(annotate)
-   let note=ThumbnailActionButton(title:"",target:self,action:#selector(editImageNote));note.image=NSImage(systemSymbolName:text.isEmpty ? "text.bubble":"text.bubble.fill",accessibilityDescription:nil)
-   note.expandedTitle=L("Poznámka");note.setAccessibilityLabel(L("Poznámka ke snímku"));note.tag=i
-   note.frame=NSRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2);note.collapsedFrame=note.frame;button.addHoverAction(note)
+   // Jediná akce na snímku: anotace a poznámka v jednom editoru.
+   annotate.frame=area;annotate.collapsedFrame=annotate.frame;annotate.expandedTitle=L("Anotace a poznámka");annotate.setAccessibilityLabel(annotate.expandedTitle);button.addHoverAction(annotate)
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
    let video=videoSidecars(root.appendingPathComponent(image)),info=fm.fileExists(atPath:video[0].path) ? readVideoInfo(video[1]):nil
    // S videem dostane odznak kontextu užší místo, přehrání má vždy 84 bodů.
@@ -277,7 +284,22 @@ final class Composer:NSObject,NSWindowDelegate {
    }
   }
   if draft.images.isEmpty{thumbnails.addSubview(label(L("Žádný obrázek. Přidej výřez nebo snímek celé obrazovky."),NSRect(x:8,y:102,width:720,height:24)))}
-  laterButton.isEnabled=true;saveButton.isEnabled = !draft.images.isEmpty;addShotButton.isEnabled=true;updatePreviousAvailability()
+  laterButton.isEnabled=true;saveButton.isEnabled = !draft.images.isEmpty;addShotButton.isEnabled=true;updatePreviousAvailability();updateShotArrows()
+ }
+ /// Šipky jen když se snímky nevejdou; levá je na začátku vypnutá, pravá na konci.
+ @objc func updateShotArrows(){
+  let offset=thumbnailScroll.contentView.bounds.origin.x,visible=thumbnailScroll.contentView.bounds.width,total=thumbnails.frame.width
+  let overflow=total>visible+1
+  previousShots.isHidden = !overflow;nextShots.isHidden = !overflow
+  previousShots.isEnabled=offset>1;nextShots.isEnabled=offset+visible<total-1
+  previousShots.needsDisplay=true;nextShots.needsDisplay=true
+ }
+ /// Posun o tolik celých snímků, kolik se vejde do okna, s krátkou animací.
+ @objc func scrollShots(_ sender:NSButton){
+  let clip=thumbnailScroll.contentView,step=max(238,floor(clip.bounds.width/238)*238)
+  let maxX=max(0,thumbnails.frame.width-clip.bounds.width)
+  let target=min(maxX,max(0,(sender === previousShots ? clip.bounds.origin.x-step:clip.bounds.origin.x+step)))
+  NSAnimationContext.runAnimationGroup({context in context.duration=0.25;context.allowsImplicitAnimation=true;clip.animator().setBoundsOrigin(NSPoint(x:target,y:0))},completionHandler:{[weak self] in guard let self else{return};MainActor.assumeIsolated{self.thumbnailScroll.reflectScrolledClipView(clip);self.updateShotArrows()}})
  }
  func snapshotFields(){guard window != nil else{return};window.makeFirstResponder(nil);draft.title=titleField.stringValue;draft.comment=comment.markdownText}
  @objc func addScreenshot(){captureScreenshot(full:false)}
@@ -372,16 +394,12 @@ final class Composer:NSObject,NSWindowDelegate {
  @objc func edit(_ sender:NSButton){
   guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images[sender.tag]
   childEditorOpen=true;defer{childEditorOpen=false};let editor=AnnotationEditor()
-  if editor.run(url:root.appendingPathComponent(name),caption:draft.imageNotes?[name] ?? ""){reloadThumbnails()};window.makeKeyAndOrderFront(nil)
+  // Editor ukáže vpravo i poznámku ke snímku; změněná poznámka se uloží spolu s anotacemi.
+  if editor.run(url:root.appendingPathComponent(name),caption:draft.imageNotes?[name] ?? "",note:true){
+   if let note=editor.noteResult{setImageNote(note,for:name)}else{reloadThumbnails()}
+  };window.makeKeyAndOrderFront(nil)
  }
 
- @objc func editImageNote(_ sender:NSButton){
-  guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images[sender.tag]
-  childEditorOpen=true;defer{childEditorOpen=false};window.makeFirstResponder(nil)
-  let editor=ImageNoteEditor()
-  if let value=editor.run(draft.imageNotes?[name] ?? "",image:root.appendingPathComponent(name)){setImageNote(value,for:name)}
-  window.makeKeyAndOrderFront(nil)
- }
  func setImageNote(_ value:String,for image:String){
   guard draft.images.contains(image) else{return}
   if draft.imageNotes == nil{draft.imageNotes=[:]}
@@ -408,4 +426,12 @@ final class Composer:NSObject,NSWindowDelegate {
  }
  @objc func cancel(){if let result=requestedCancel(confirm:Self.confirmDiscard){end(result)}};@objc func later(){end(1)};@objc func save(){end(2)}
  func windowShouldClose(_ sender:NSWindow)->Bool{cancel();return false}
+}
+
+/// Zmenšená kopie snímku pro pruh náhledů; velké PNG by při posunu zpomalovaly kreslení.
+func thumbnailImage(_ url:URL,maxPixel:Int=480)->NSImage?{
+ guard let source=CGImageSourceCreateWithURL(url as CFURL,nil),
+       let image=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceThumbnailMaxPixelSize:maxPixel,kCGImageSourceCreateThumbnailWithTransform:true] as CFDictionary)
+ else{return NSImage(contentsOf:url)}
+ return NSImage(cgImage:image,size:NSSize(width:image.width,height:image.height))
 }

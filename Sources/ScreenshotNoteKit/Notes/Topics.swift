@@ -155,10 +155,11 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let sidebar=DesignSurface(frame:NSRect(x:0,y:0,width:240,height:620),fill:AppPalette.raised);view.addSubview(sidebar)
   sidebar.addSubview(designLabel(L("Složky"),NSRect(x:20,y:562,width:200,height:30),size:19,weight:.semibold))
   let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("topic"));column.width=208;table.addTableColumn(column);table.headerView=nil;table.rowHeight=58;table.intercellSpacing=NSSize(width:0,height:3);table.delegate=self;table.dataSource=self;table.style = .plain;table.backgroundColor=AppPalette.raised;table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-  let scroll=NSScrollView(frame:NSRect(x:12,y:150,width:216,height:396));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
-  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:208,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
-  sidebar.addSubview(styledButton(L("Výchozí šablony…"),symbol:"doc.on.doc",role:.quiet,frame:NSRect(x:16,y:64,width:208,height:34),target:self,action:#selector(editDefaults)))
-  sidebar.addSubview(styledButton(L("Výchozí název…"),symbol:"textformat",role:.quiet,frame:NSRect(x:16,y:106,width:208,height:34),target:self,action:#selector(editGlobalDefaultTitle)))
+  let scroll=NSScrollView(frame:NSRect(x:12,y:68,width:216,height:478));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
+  // Dole jen Nová složka; výchozí název a šablony jsou v menu „⋯“.
+  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
+  let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:22,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
+  more.toolTip=L("Výchozí název a šablony");more.setAccessibilityLabel(L("Výchozí název a šablony"));sidebar.addSubview(more)
   // Název je nadpis; tužka nebo klik ho přepne do úprav.
   nameShell.isHidden=true;view.addSubview(nameShell)
   name.isBordered=false;name.drawsBackground=false;name.font = .systemFont(ofSize:23,weight:.semibold);name.textColor = .labelColor;name.usesSingleLineMode=true;name.lineBreakMode = .byTruncatingTail;name.isEditable=false;name.isSelectable=false;name.delegate=self
@@ -181,9 +182,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   fileLabel=sectionLabel(L("Společný soubor"),NSRect(x:272,y:196,width:600,height:18));view.addSubview(fileLabel);inputShell(file,frame:NSRect(x:272,y:154,width:600,height:36),in:view)
   contextToggle.title=L("Přikládat kontext z prohlížeče");contextToggle.frame=NSRect(x:272,y:120,width:380,height:22);contextToggle.target=self;contextToggle.action=#selector(toggleContext);view.addSubview(contextToggle)
   contextCaption=designLabel("",NSRect(x:292,y:96,width:580,height:18),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
-  contextButton=styledButton(L("Co přikládat…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
+  contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
   aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:128,width:600,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
-  defaultTitleButton=styledButton("",symbol:"textformat",role:.quiet,frame:NSRect(x:612,y:122,width:260,height:32),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
+  defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:662,y:122,width:210,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
   view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
   saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
@@ -200,6 +201,13 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   updateMode()
  }
  func numberOfRows(in tableView:NSTableView)->Int{rows.count}
+ @objc func showDefaultsMenu(_ sender:NSButton){
+  let menu=NSMenu();menu.autoenablesItems=false
+  for (title,symbol,action) in [(L("Výchozí název…"),"textformat",#selector(editGlobalDefaultTitle)),(L("Výchozí šablony…"),"doc.on.doc",#selector(editDefaults))]{
+   let item=NSMenuItem(title:title,action:action,keyEquivalent:"");item.target=self;item.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);menu.addItem(item)
+  }
+  menu.popUp(positioning:nil,at:NSPoint(x:0,y:sender.bounds.height+4),in:sender)
+ }
  func tableView(_ tableView:NSTableView,heightOfRow row:Int)->CGFloat{58}
  func tableView(_ tableView:NSTableView,rowViewForRow row:Int)->NSTableRowView?{DesignTopicRow()}
  func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{
@@ -338,7 +346,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-50
   aiTitleToggle.state=current?.aiTitle==true ? .on:.off;aiTitleToggle.isEnabled=editingManaged
   if let defaultTitleButton {
-   defaultTitleButton.frame.origin.y=top-56;defaultTitleButton.isEnabled = !cloud || editingManaged
+   defaultTitleButton.frame.origin.y=top-58;defaultTitleButton.isEnabled = !cloud || editingManaged
    defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
    defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
   }
@@ -353,7 +361,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func confirmCloudContext()->Bool {
   let alert=NSAlert();alert.alertStyle = .warning
   alert.messageText=L("Nahrávat kontext z prohlížeče do cloudu?")
-  alert.informativeText=L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.")
+  alert.informativeText=L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP.")
   alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Zrušit"))
   return alert.runModal() == .alertFirstButtonReturn
  }

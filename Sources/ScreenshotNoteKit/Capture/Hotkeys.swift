@@ -26,6 +26,29 @@ struct Shortcut:Codable {
  }
 }
 
+/// Při prvním spuštění nabídne převzít systémové zkratky pro snímky (⇧⌘4, ⇧⌘3, ⇧⌘5); jinak vysvětlí výchozí zkratky aplikace.
+@MainActor func offerSystemShortcuts(_ hotkeys:Hotkeys){
+ let done="shortcutOnboardingDone",defaults=UserDefaults.standard
+ guard !defaults.bool(forKey:done) else{return}
+ defaults.set(true,forKey:done)
+ // Kdo už si zkratky nastavil, dialog nedostane.
+ guard !(1...3).contains(where:{defaults.data(forKey:"shortcut\($0)") != nil}) else{return}
+ NSApp.activate(ignoringOtherApps:true)
+ let alert=NSAlert();alert.messageText=L("Nahradit systémové zkratky pro snímky?")
+ alert.informativeText=L("Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.")
+ alert.addButton(withTitle:L("Nahradit"));alert.addButton(withTitle:L("Ponechat výchozí"))
+ if alert.runModal() == .alertFirstButtonReturn {
+  let mods=UInt32(cmdKey|shiftKey)
+  for (id,key,name) in [(1,UInt32(21),"4"),(2,UInt32(20),"3"),(3,UInt32(23),"5")]{defaults.set(try? JSONEncoder().encode(Shortcut(key:key,modifiers:mods,name:name)),forKey:"shortcut\(id)")}
+  let errors=hotkeys.register();if !errors.isEmpty{showError(errors.joined(separator:"\n"))}
+  if let url=URL(string:"x-apple.systempreferences:com.apple.Keyboard-Settings.extension"){NSWorkspace.shared.open(url)}
+ } else {
+  let info=NSAlert();info.messageText=L("Výchozí zkratky Screenshot Note")
+  info.informativeText=LF("%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky.",Shortcut.load(1).display,Shortcut.load(2).display,Shortcut.load(3).display)
+  info.addButton(withTitle:L("Rozumím"));info.runModal()
+ }
+}
+
 final class Hotkeys {
  var refs:[EventHotKeyRef]=[];var handler:EventHandlerRef?;var callback:((Int)->Void)?
  private var monitor:Any?;private var registered=Set<Int>();private var lastTrigger:(Int,TimeInterval)?

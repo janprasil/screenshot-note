@@ -511,7 +511,7 @@
 "… a další selhané requesty: %ld" = "… a další selhané requesty: %ld";
 "Kontext z prohlížeče se nepodařilo uložit." = "Kontext z prohlížeče se nepodařilo uložit.";
 "Přikládat kontext z prohlížeče" = "Přikládat kontext z prohlížeče";
-"Co přikládat…" = "Co přikládat…";
+"Nastavení kontextu…" = "Nastavení kontextu…";
 "Pro cloudové složky připravujeme." = "Pro cloudové složky připravujeme.";
 "Snímky z prohlížeče se uloží bez kontextu." = "Snímky z prohlížeče se uloží bez kontextu.";
 "Kontext z prohlížeče se zatím ukládá jen do lokálních složek." = "Kontext z prohlížeče se zatím ukládá jen do lokálních složek.";
@@ -545,7 +545,7 @@
 "Nahrává se do cloudu: %@" = "Nahrává se do cloudu: %@";
 "Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu." = "Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu.";
 "Nahrávat kontext z prohlížeče do cloudu?" = "Nahrávat kontext z prohlížeče do cloudu?";
-"Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není.";
+"Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP." = "Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP.";
 "Zapnout" = "Zapnout";
 "Kontext snímku %ld se do cloudu nenahrál: %@" = "Kontext snímku %ld se do cloudu nenahrál: %@";
 "Komentář k objektu · Enter potvrdí, prázdný ho odebere" = "Komentář k objektu · Enter potvrdí, prázdný ho odebere";
@@ -644,3 +644,17 @@
 "aktivní" = "aktivní";
 "týmový" = "týmový";
 "veřejný" = "veřejný";
+
+/* Úpravy UI 25. 11. */
+"%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky." = "%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky.";
+"Anotace a poznámka" = "Anotace a poznámka";
+"Další snímky" = "Další snímky";
+"Nahradit" = "Nahradit";
+"Nahradit systémové zkratky pro snímky?" = "Nahradit systémové zkratky pro snímky?";
+"Ponechat výchozí" = "Ponechat výchozí";
+"Předchozí snímky" = "Předchozí snímky";
+"Rozumím" = "Rozumím";
+"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.";
+"Text pod snímkem, Markdown." = "Text pod snímkem, Markdown.";
+"Výchozí název a šablony" = "Výchozí název a šablony";
+"Výchozí zkratky Screenshot Note" = "Výchozí zkratky Screenshot Note";

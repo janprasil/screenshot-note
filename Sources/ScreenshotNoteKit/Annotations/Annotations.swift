@@ -177,11 +177,19 @@ final class ModalColorWell:NSColorWell {
  }
 }
 final class AnnotationToolButton:NSButton {
+ // Hover: světlejší podklad a tenký rámeček, aktivní nástroj zůstává fialový.
+ private var hovered=false;private var hoverArea:NSTrackingArea?
+ override func updateTrackingAreas(){super.updateTrackingAreas();if let area=hoverArea{removeTrackingArea(area)};let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self,userInfo:nil);addTrackingArea(area);hoverArea=area}
+ override func viewWillMove(toWindow newWindow:NSWindow?){super.viewWillMove(toWindow:newWindow);if newWindow==nil,let area=hoverArea{removeTrackingArea(area);hoverArea=nil;hovered=false}}
+ override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
+ override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
+ override func resetCursorRects(){super.resetCursorRects();if isEnabled{addCursorRect(bounds,cursor:.pointingHand)}}
  override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();needsDisplay=true}
  override func draw(_ dirtyRect:NSRect) {
   let active=state == .on
   let path=NSBezierPath(roundedRect:bounds.insetBy(dx:0.5,dy:0.5),xRadius:6,yRadius:6)
-  (active ? AppPalette.action:AppPalette.raised).setFill();path.fill()
+  (active ? AppPalette.action.withAlphaComponent(hovered ? 0.88:1):(hovered ? AppPalette.accent.withAlphaComponent(0.16):AppPalette.raised)).setFill();path.fill()
+  if hovered && !active{AppPalette.accent.withAlphaComponent(0.45).setStroke();path.lineWidth=1;path.stroke()}
   let color=active ? NSColor.white:NSColor.labelColor
   let glyph=NSRect(x:bounds.midX-10,y:bounds.midY-10,width:20,height:20)
   drawAdaptiveSymbol(image,in:glyph,color:color)
@@ -194,7 +202,10 @@ func annotationWindowSize(image:NSSize,available:NSSize)->NSSize {
 }
 
 final class AnnotationEditor:NSObject,NSWindowDelegate {
- var window:NSWindow!;var canvas:DrawingView!;var accepted=false;var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:NSRect?
+ var window:NSWindow!;var canvas:DrawingView!;var accepted=false;
+ /// Panel poznámky ke snímku vpravo (~20 % šířky); `noteResult` je nová hodnota, nil = beze změny.
+ private var noteView:NSTextView?;private var initialNote="";private(set) var noteResult:String?
+var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:NSRect?
  var tools:[Tool]=[.select,.pen,.arrow,.ellipse,.rectangle,.text,.crop];var toolButtons:[NSButton]=[]
  var onValuePickerPresented:((NSWindow,[NSButton])->Void)?
  /// Položka s videem: anotace se kreslí nad přehrávačem a při uložení se vypálí do MP4.
@@ -202,8 +213,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  let colors=ModalColorWell();var width:NSButton!;var size:NSButton!;var textControls:[NSView]=[];var styleButtons:[NSButton]=[]
  func icon(_ symbol:String,_ help:String,_ action:Selector,_ frame:NSRect)->NSButton{let b=AnnotationToolButton(image:NSImage(systemSymbolName:symbol,accessibilityDescription:help) ?? NSImage(),target:self,action:action);b.frame=frame;b.toolTip=help;b.bezelStyle = .texturedRounded;b.autoresizingMask=[.minYMargin];window.contentView!.addSubview(b);return b}
  /// `caption` je popisek obrázku; čísla nových anotací Element navážou na řádky v něm.
- func run(url:URL,caption:String="")->Bool{
-  workingURL=url
+ func run(url:URL,caption:String="",note:Bool=false)->Bool{
+  workingURL=url;initialNote=caption
   do{baseData=try Data(contentsOf:url)}catch{return false}
   var document:AnnotationDocument?
   if FileManager.default.fileExists(atPath:annotationSidecar(url).path){do{document=try JSONDecoder().decode(AnnotationDocument.self,from:Data(contentsOf:annotationSidecar(url)));baseData=document!.base}catch{showError(L("Nelze načíst editovatelné anotace: ")+error.localizedDescription);return false}}
@@ -216,7 +227,10 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   // Video se neořezává; starší oříznutí plakátu se u videa nepoužije.
   if isVideo{document?.crop=NSRect(origin:.zero,size:image.size)}
   let screen=NSApp.keyWindow?.screen?.visibleFrame ?? capturePresentationScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1200,height:850)
-  let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size),w=dimensions.width,h=dimensions.height
+  let dimensions=annotationWindowSize(image:document?.crop.size ?? image.size,available:screen.size)
+  // S poznámkou se okno rozšíří o panel vpravo, obraz dostane zhruba 80 % šířky.
+  let notePanel:CGFloat=note ? max(240,round(dimensions.width*0.25)):0
+  let w=min(dimensions.width+notePanel,screen.width-40),h=dimensions.height
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(740,w),height:min(340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
   var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text nebo přidat číslovaný komentář"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
@@ -234,7 +248,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   size=icon("textformat.size",L("Velikost textu"),#selector(sizeMenu),NSRect(x:460+shift,y:h-48,width:36,height:34));textControls.append(size)
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
-  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32,height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  if note{addNotePanel(frame:NSRect(x:w-16-notePanel,y:65,width:notePanel,height:h-122),text:caption)}
   if let info {
    // Přehrávač ukazuje původní záznam, jinak by se dřívější anotace zobrazily dvakrát.
    let original=videoOriginals(url).appendingPathComponent("video.mp4"),source=fm.fileExists(atPath:original.path) ? original:video[0]
@@ -257,7 +272,20 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  func encodedMarks()throws->Data{let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys];return try encoder.encode(canvas.marks)}
  func recordInitialState(){initialMarks=try? encodedMarks();initialCrop=canvas.viewport}
  var hasUnsavedChanges:Bool{initialMarks != (try? encodedMarks()) || initialCrop != canvas.viewport}
- func requestedCloseChoice(confirm:()->AnnotationCloseChoice)->AnnotationCloseChoice{hasUnsavedChanges ? confirm():.discard}
+ func requestedCloseChoice(confirm:()->AnnotationCloseChoice)->AnnotationCloseChoice{hasUnsavedChanges || noteChanged ? confirm():.discard}
+ var noteChanged:Bool{noteView.map{$0.string != initialNote} ?? false}
+ func addNotePanel(frame:NSRect,text:String){
+  guard let content=window.contentView else{return}
+  let panel=NSView(frame:frame);panel.autoresizingMask=[.minXMargin,.height]
+  let title=designLabel(L("Poznámka ke snímku"),NSRect(x:0,y:frame.height-24,width:frame.width,height:22),size:13,weight:.semibold);title.autoresizingMask=[.minYMargin];panel.addSubview(title)
+  let hint=designLabel(L("Text pod snímkem, Markdown."),NSRect(x:0,y:frame.height-44,width:frame.width,height:18),size:11,color:AppPalette.secondary);hint.autoresizingMask=[.minYMargin];panel.addSubview(hint)
+  let shell=AdaptiveInputBackground(frame:NSRect(x:0,y:0,width:frame.width,height:frame.height-54));shell.autoresizingMask=[.width,.height];panel.addSubview(shell)
+  let scroll=NSScrollView(frame:shell.bounds.insetBy(dx:8,dy:8));scroll.autoresizingMask=[.width,.height];scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;scroll.drawsBackground=false
+  let view=NSTextView(frame:NSRect(origin:.zero,size:scroll.contentSize));view.isRichText=false;view.allowsUndo=true;view.drawsBackground=false;view.font = .systemFont(ofSize:13);view.textColor = .textColor
+  view.isAutomaticQuoteSubstitutionEnabled=false;view.isAutomaticDashSubstitutionEnabled=false;view.isVerticallyResizable=true;view.autoresizingMask=[.width];view.textContainer?.widthTracksTextView=true
+  view.string=text;view.setAccessibilityLabel(L("Poznámka ke snímku"));scroll.documentView=view;shell.addSubview(scroll);noteView=view
+  content.addSubview(panel)
+ }
  func saveWorkingImage()throws{
   guard hasUnsavedChanges else{return}
   guard let url=workingURL,let data=canvas.png() else{throw NSError(domain:"ScreenshotNote",code:6,userInfo:[NSLocalizedDescriptionKey:L("Anotace se nepodařilo uložit.")])}
@@ -328,6 +356,7 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
   if elementKey(36) || elementKey(76){return}
   window.makeFirstResponder(nil);canvas.finishText()
   do{try saveWorkingImage()}catch{showError(error.localizedDescription);return}
+  if noteChanged{noteResult=noteView?.string.trimmingCharacters(in:.whitespacesAndNewlines)}
   colors.deactivate();NSColorPanel.shared.orderOut(nil);accepted=true;NSApp.stopModal()
  }
  @objc func cancel(){

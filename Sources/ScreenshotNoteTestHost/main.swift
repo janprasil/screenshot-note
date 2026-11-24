@@ -298,18 +298,16 @@ if CommandLine.arguments.contains("--self-test") {
  let imageAfterNote=try Data(contentsOf:deleteRoot.appendingPathComponent("b.png"));assert(imageBeforeNote==imageAfterNote)
  let thumbnail=compose.buttons[0] as! ScreenshotThumbnailButton
  let hoverActions=thumbnail.subviews.compactMap{$0 as? ThumbnailActionButton}
- assert(hoverActions.count==2)
- let annotate=hoverActions[0],note=hoverActions[1]
- assert(annotate.isHidden && note.isHidden)
- assert(annotate.frame.minY==note.frame.maxY && annotate.frame.width==note.frame.width && annotate.frame.height==note.frame.height)
+ // Jediná akce nad snímkem: anotace a poznámka v jednom editoru přes celou plochu obrázku.
+ assert(hoverActions.count==1)
+ let annotate=hoverActions[0]
+ assert(annotate.isHidden && annotate.frame==thumbnail.imageDisplayRect)
  assert(thumbnail.notePreview.stringValue=="# Per-image note **Detail**" && thumbnail.notePreview.lineBreakMode == .byTruncatingTail && thumbnail.notePreview.maximumNumberOfLines==1)
  thumbnail.setHovered(true);assert(!annotate.isHidden)
- assert(annotate.action == #selector(Composer.edit) && note.action == #selector(Composer.editImageNote))
- annotate.setExpanded(true,animated:false)
- assert(annotate.expandedTitle==L("Anotace") && note.expandedTitle==L("Poznámka") && annotate.frame==annotate.collapsedFrame && annotate.overlayOpacity>note.overlayOpacity)
- let notePoint=thumbnail.convert(NSPoint(x:note.frame.midX,y:note.frame.midY),to:thumbnail.superview)
- assert(thumbnail.hitTest(notePoint) === note)
- thumbnail.setHovered(false);assert(annotate.isHidden && note.isHidden && annotate.frame==annotate.collapsedFrame)
+ assert(annotate.action == #selector(Composer.edit) && annotate.expandedTitle==L("Anotace a poznámka"))
+ let annotatePoint=thumbnail.convert(NSPoint(x:annotate.frame.midX,y:annotate.frame.midY),to:thumbnail.superview)
+ assert(thumbnail.hitTest(annotatePoint) === annotate)
+ thumbnail.setHovered(false);assert(annotate.isHidden && annotate.frame==annotate.collapsedFrame)
  compose.setImageNote("",for:"b.png");assert(compose.draft.imageNotes?["b.png"]==nil)
  print("PASS: thumbnail hover actions and per-image notes independent of PNG editing")
 

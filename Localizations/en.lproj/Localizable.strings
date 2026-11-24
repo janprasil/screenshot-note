@@ -511,7 +511,7 @@
 "… a další selhané requesty: %ld" = "… more failed requests: %ld";
 "Kontext z prohlížeče se nepodařilo uložit." = "Could not save the browser context.";
 "Přikládat kontext z prohlížeče" = "Attach browser context";
-"Co přikládat…" = "What to attach…";
+"Nastavení kontextu…" = "Context settings…";
 "Pro cloudové složky připravujeme." = "Coming soon for cloud folders.";
 "Snímky z prohlížeče se uloží bez kontextu." = "Browser screenshots are saved without context.";
 "Kontext z prohlížeče se zatím ukládá jen do lokálních složek." = "Browser context is saved to local folders only for now.";
@@ -545,7 +545,7 @@
 "Nahrává se do cloudu: %@" = "Uploaded to the cloud: %@";
 "Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu." = "Console, requests and the element map are uploaded to the cloud as screenshot attachments. This setting applies to this Mac only.";
 "Nahrávat kontext z prohlížeče do cloudu?" = "Upload browser context to the cloud?";
-"Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP. Šifrování zatím není." = "Each Chrome screenshot uploads the page address and title, the console, the request list (HAR) and the element map with texts as configured. Cookies and authorization headers are always hidden. All folder members can see the attachments on the web and in MCP. Encryption is not available yet.";
+"Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP." = "Each Chrome screenshot uploads the page address and title, the console, the request list (HAR) and the element map with texts as configured. Cookies and authorization headers are always hidden. All folder members can see the attachments on the web and in MCP.";
 "Zapnout" = "Turn On";
 "Kontext snímku %ld se do cloudu nenahrál: %@" = "Context of screenshot %ld was not uploaded to the cloud: %@";
 "Komentář k objektu · Enter potvrdí, prázdný ho odebere" = "Comment · Enter to confirm, empty removes it";
@@ -644,3 +644,17 @@
 "aktivní" = "active";
 "týmový" = "team";
 "veřejný" = "public";
+
+/* Úpravy UI 25. 11. */
+"%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky." = "%@ selection, %@ full screen, %@ video recording. Change them in Settings → Keyboard shortcuts.";
+"Anotace a poznámka" = "Annotate and note";
+"Další snímky" = "Next screenshots";
+"Nahradit" = "Replace";
+"Nahradit systémové zkratky pro snímky?" = "Replace the system screenshot shortcuts?";
+"Ponechat výchozí" = "Keep defaults";
+"Předchozí snímky" = "Previous screenshots";
+"Rozumím" = "Got it";
+"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Screenshot Note can use ⇧⌘4 for a selection, ⇧⌘3 for the full screen and ⇧⌘5 for video recording. Then turn off the system shortcuts in System Settings → Keyboard → Keyboard Shortcuts → Screenshots; we open it for you.";
+"Text pod snímkem, Markdown." = "Text below the screenshot, Markdown.";
+"Výchozí název a šablony" = "Default title and templates";
+"Výchozí zkratky Screenshot Note" = "Screenshot Note default shortcuts";

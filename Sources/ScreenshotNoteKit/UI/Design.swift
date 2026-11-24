@@ -31,6 +31,8 @@ class AppButton:NSButton {
  var hovered=false;private var tracking:NSTrackingArea?
  override func updateTrackingAreas(){super.updateTrackingAreas();if let area=tracking{removeTrackingArea(area)};let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self,userInfo:nil);tracking=area;addTrackingArea(area)}
  override func resetCursorRects(){super.resetCursorRects();if isEnabled{addCursorRect(bounds,cursor:.pointingHand)}}
+ // Odebrané tlačítko nesmí dostávat události myši (sledování vlastníka nedrží), jinak posun pod kurzorem padá.
+ override func viewWillMove(toWindow newWindow:NSWindow?){super.viewWillMove(toWindow:newWindow);if newWindow==nil,let area=tracking{removeTrackingArea(area);tracking=nil;hovered=false}}
  override func mouseEntered(with event:NSEvent){hovered=true;needsDisplay=true}
  override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
  override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();needsDisplay=true}
@@ -84,6 +86,11 @@ func installDesignRoot(_ window:NSWindow,headerHeight:CGFloat=106,showClose:Bool
 }
 func animateDesign(_ block:()->Void){NSAnimationContext.runAnimationGroup{context in context.duration=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0:0.16;context.allowsImplicitAnimation=true;block()}}
 final class DesignTopicRow:NSTableRowView {
+ // Tenký rozdělovač mezi složkami.
+ override func drawBackground(in dirtyRect:NSRect){
+  super.drawBackground(in:dirtyRect)
+  AppPalette.stroke.withAlphaComponent(0.7).setFill();NSRect(x:14,y:isFlipped ? bounds.maxY-1:0,width:bounds.width-28,height:1).fill()
+ }
  override func drawSelection(in dirtyRect:NSRect){if isSelected{AppPalette.accent.withAlphaComponent(0.14).setFill();NSBezierPath(roundedRect:bounds.insetBy(dx:4,dy:2),xRadius:8,yRadius:8).fill()}}
 }
 

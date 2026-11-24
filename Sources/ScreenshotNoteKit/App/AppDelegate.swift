@@ -69,6 +69,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   recording.onFinish={[weak self] result in self?.recordingFinished(result)}
   let errors=CommandLine.arguments.contains("--preview-test") ? [] : hotkeys.register();if !errors.isEmpty{DispatchQueue.main.async{showError(errors.joined(separator:"\n"))}}
   DistributedNotificationCenter.default().addObserver(self,selector:#selector(external(_:)),name:NSNotification.Name("cz.janprasil.screenshotnote.capture"),object:nil)
+  // První spuštění: nabídka zkratek (ne v testech a automatických bězích s přepínači).
+  if !CommandLine.arguments.dropFirst().contains(where:{$0.hasPrefix("--")}),!isExportingDesign{DispatchQueue.main.asyncAfter(deadline:.now()+1){[weak self] in guard let self else{return};MainActor.assumeIsolated{offerSystemShortcuts(self.hotkeys)}}}
   if CommandLine.arguments.contains("--preview-test"){previewTest()}
   else if CommandLine.arguments.contains("--capture"){DispatchQueue.main.asyncAfter(deadline:.now()+0.3){self.capture(full:CommandLine.arguments.contains("--fullscreen"))}}
  }

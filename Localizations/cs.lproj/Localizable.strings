@@ -614,3 +614,33 @@
 "Video" = "Video";
 "Anotace se do videa nepodařilo vložit." = "Anotace se do videa nepodařilo vložit.";
 "Vkládám anotace do videa…" = "Vkládám anotace do videa…";
+
+/* Dialog Sdílet odkaz */
+"Jen členové týmu" = "Jen členové týmu";
+"Kdo není přihlášený, bude vyzván k přihlášení. Zrušení odkaz hned zastaví." = "Kdo není přihlášený, bude vyzván k přihlášení. Zrušení odkaz hned zastaví.";
+"Kdokoli s odkazem" = "Kdokoli s odkazem";
+"Kdokoli s odkazem uvidí relaci „%@“, její text a snímky bez přihlášení. Komentáře se nesdílí." = "Kdokoli s odkazem uvidí relaci „%@“, její text a snímky bez přihlášení. Komentáře se nesdílí.";
+"Nastavit a zkopírovat odkaz na relaci" = "Nastavit a zkopírovat odkaz na relaci";
+"Načítám odkaz…" = "Načítám odkaz…";
+"Odkaz může změnit jen jeho autor nebo owner či admin týmu." = "Odkaz může změnit jen jeho autor nebo owner či admin týmu.";
+"Odkaz může zrušit jen jeho autor nebo owner či admin týmu." = "Odkaz může zrušit jen jeho autor nebo owner či admin týmu.";
+"Pracuji…" = "Pracuji…";
+"Přepnout na týmový odkaz" = "Přepnout na týmový odkaz";
+"Přepnout na veřejný odkaz" = "Přepnout na veřejný odkaz";
+"Přihlášení členové týmu uvidí relaci „%@“, její text a snímky. Komentáře se nesdílí." = "Přihlášení členové týmu uvidí relaci „%@“, její text a snímky. Komentáře se nesdílí.";
+"Relace bez názvu" = "Relace bez názvu";
+"Ruším…" = "Ruším…";
+"Sdílet odkaz" = "Sdílet odkaz";
+"Sdílet odkaz…" = "Sdílet odkaz…";
+"Současný %@ odkaz přestane fungovat a vznikne nový." = "Současný %@ odkaz přestane fungovat a vznikne nový.";
+"Týmový odkaz" = "Týmový odkaz";
+"Veřejný odkaz" = "Veřejný odkaz";
+"Vytvořit týmový odkaz" = "Vytvořit týmový odkaz";
+"Vytvořit veřejný odkaz" = "Vytvořit veřejný odkaz";
+"Zavřít" = "Zavřít";
+"Zrušení odkaz hned zastaví. Náhledy v aplikacích jako Slack si mohou krátce ponechat kopii." = "Zrušení odkaz hned zastaví. Náhledy v aplikacích jako Slack si mohou krátce ponechat kopii.";
+"Zrušit odkaz" = "Zrušit odkaz";
+"Zrušit odkaz…" = "Zrušit odkaz…";
+"aktivní" = "aktivní";
+"týmový" = "týmový";
+"veřejný" = "veřejný";

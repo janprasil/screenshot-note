@@ -614,3 +614,33 @@
 "Video" = "Video";
 "Anotace se do videa nepodařilo vložit." = "Could not add the annotations to the video.";
 "Vkládám anotace do videa…" = "Adding annotations to the video…";
+
+/* Dialog Sdílet odkaz */
+"Jen členové týmu" = "Team members only";
+"Kdo není přihlášený, bude vyzván k přihlášení. Zrušení odkaz hned zastaví." = "People who are not signed in are asked to sign in first. Revoking stops the link right away.";
+"Kdokoli s odkazem" = "Anyone with the link";
+"Kdokoli s odkazem uvidí relaci „%@“, její text a snímky bez přihlášení. Komentáře se nesdílí." = "Anyone with the link can view “%@”, its text and screenshots without signing in. Comments are not shared.";
+"Nastavit a zkopírovat odkaz na relaci" = "Set up and copy a link to the session";
+"Načítám odkaz…" = "Loading the link…";
+"Odkaz může změnit jen jeho autor nebo owner či admin týmu." = "Only the person who created the link or a team owner or admin can change it.";
+"Odkaz může zrušit jen jeho autor nebo owner či admin týmu." = "Only the person who created the link or a team owner or admin can revoke it.";
+"Pracuji…" = "Working…";
+"Přepnout na týmový odkaz" = "Switch to team link";
+"Přepnout na veřejný odkaz" = "Switch to public link";
+"Přihlášení členové týmu uvidí relaci „%@“, její text a snímky. Komentáře se nesdílí." = "Signed-in members of your team can view “%@”, its text and screenshots. Comments are not shared.";
+"Relace bez názvu" = "Untitled session";
+"Ruším…" = "Revoking…";
+"Sdílet odkaz" = "Share link";
+"Sdílet odkaz…" = "Share link…";
+"Současný %@ odkaz přestane fungovat a vznikne nový." = "The current %@ link stops working and a new one is created.";
+"Týmový odkaz" = "Team link";
+"Veřejný odkaz" = "Public link";
+"Vytvořit týmový odkaz" = "Create team link";
+"Vytvořit veřejný odkaz" = "Create public link";
+"Zavřít" = "Close";
+"Zrušení odkaz hned zastaví. Náhledy v aplikacích jako Slack si mohou krátce ponechat kopii." = "Revoking stops the link right away. Previews in apps like Slack may keep a copy for a short time.";
+"Zrušit odkaz" = "Revoke link";
+"Zrušit odkaz…" = "Revoke link…";
+"aktivní" = "active";
+"týmový" = "team";
+"veřejný" = "public";

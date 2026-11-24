@@ -213,6 +213,13 @@ func cloudFolderUnitTests()throws {
  // Během Retry-After klient na server vůbec nejde.
  let early=await shareFailure(shared.uuidString);assert(early?.status==429)
  clock=clock.addingTimeInterval(61);let later=try await sharer.shareLink(shared);assert(later==link)
+ // Dialog Sdílet odkaz: stav, druhé publikum jen s replace, výměna a zrušení všech.
+ let shown=try await sharer.shareState(shared);assert(shown==ShareState(audience:.public,url:link,revocable:true))
+ do{_ = try await sharer.createShare(shared,audience:.team,replace:false);assert(false)}catch{assert((error as? CloudFailure)?.code=="link_exists")}
+ let teamURL=try await sharer.createShare(shared,audience:.team,replace:true);assert(teamURL != link)
+ let teamState=try await sharer.shareState(shared);assert(teamState?.audience == .team)
+ let publicAgain=try await sharer.createShare(shared,audience:.public,replace:true);assert(publicAgain != link && publicAgain != teamURL)
+ try await sharer.revokeShares(shared);let revokedState=try await sharer.shareState(shared);assert(revokedState==nil)
  // 429 bez Retry-After čeká 30 s; po odpojení účtu se zámek nepoužije.
  let bare=await shareFailure("00000000-0000-4000-8000-000000000430");assert(bare?.status==429 && abs(sharer.shareRetryAt.timeIntervalSince(clock)-30)<1)
  try sharer.forgetConnection();assert(sharer.shareRetryAt == .distantPast);try vault.save(original)

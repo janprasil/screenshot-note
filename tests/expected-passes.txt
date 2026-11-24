@@ -71,7 +71,7 @@ PASS: team folder shown as „Tým · Bugy“ after personal ones, library_id li
 PASS: team loss racing the session list never purges local files
 PASS: text box wrapping, unchanged font size, rotated corner anchoring, persistence and undo
 PASS: text-only cloud edit goes via PATCH with revision, session_changed rebases per field, same-field conflict parks and keeps local text, changed image rejected
-PASS: thumbnail hover actions and per-image notes independent of PNG editing
+PASS: thumbnail card opens the editor, note below the image, per-image notes independent of PNG editing
 PASS: title filenames, diacritics, unsafe characters, single/multiple images and independent collisions
 PASS: titles, Markdown headings, multiple images, legacy drafts, annotations PNG dimensions
 PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels

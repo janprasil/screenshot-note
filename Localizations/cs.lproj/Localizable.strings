@@ -181,7 +181,6 @@
 
 "Vytvořit novou poznámku." = "Vytvořit novou poznámku.";
 
-"Anotace" = "Anotace";
 
 "Konfiguraci uložené relace nelze změnit." = "Konfiguraci uložené relace nelze změnit.";
 
@@ -647,7 +646,6 @@
 
 /* Úpravy UI 25. 11. */
 "%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky." = "%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky.";
-"Anotace a poznámka" = "Anotace a poznámka";
 "Další snímky" = "Další snímky";
 "Nahradit" = "Nahradit";
 "Nahradit systémové zkratky pro snímky?" = "Nahradit systémové zkratky pro snímky?";
@@ -675,3 +673,4 @@
 "Tvar zatím nemá komentář." = "Tvar zatím nemá komentář.";
 "Přidat popis" = "Přidat popis";
 "Bez komentáře" = "Bez komentáře";
+"Snímek %ld · anotace a poznámka" = "Snímek %ld · anotace a poznámka";

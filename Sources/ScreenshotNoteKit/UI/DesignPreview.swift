@@ -42,8 +42,6 @@ func exportDesignPreviews(to directory:URL)throws{
   let composer=Composer(draft:Draft(images:["sample-\(language)-0.png","sample-\(language)-1.png"],comment:L("Zvýraznit vybranou platbu a zjednodušit potvrzení objednávky."),title:L("Průchod objednávkou"),topic:demo,imageNotes:["sample-\(language)-0.png":L("Zvýraznit vybranou platbu a zjednodušit potvrzení objednávky.")]),root:root);composer.show();exportDesignWindow(composer.window,name:"capture")
   if let thumbnail=composer.buttons.first as? ScreenshotThumbnailButton{
    thumbnail.setHovered(true)
-   let action=thumbnail.subviews.compactMap{$0 as? ThumbnailActionButton}.first
-   action?.setExpanded(true,animated:false)
    exportDesignWindow(composer.window,name:"capture-hover")
    thumbnail.setHovered(false)
   }

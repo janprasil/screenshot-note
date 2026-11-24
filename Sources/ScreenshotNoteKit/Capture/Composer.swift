@@ -2,61 +2,56 @@ import AppKit
 import Carbon
 import ServiceManagement
 
-final class ThumbnailActionButton:AppButton {
- var expandedTitle=""
- var collapsedFrame=NSRect.zero
- var expandsLeft=false
- var overlayOpacity:CGFloat{hovered ? 0.76:0.48}
- func setExpanded(_ expanded:Bool,animated:Bool){hovered=expanded;needsDisplay=true}
- override func mouseEntered(with event:NSEvent){setExpanded(true,animated:false)}
- override func mouseExited(with event:NSEvent){setExpanded(false,animated:false)}
- override func draw(_ dirtyRect:NSRect){
-  NSColor.black.withAlphaComponent(overlayOpacity).setFill();bounds.fill()
-  let symbol=image?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:17,weight:.medium))
-  let font=NSFont.systemFont(ofSize:13,weight:.semibold)
-  let text=expandedTitle as NSString,textWidth=text.size(withAttributes:[.font:font]).width
-  let width=textWidth+27,x=(bounds.width-width)/2,y=(bounds.height-20)/2
-  drawAdaptiveSymbol(symbol,in:NSRect(x:x,y:y,width:20,height:20),color:.white)
-  text.draw(in:NSRect(x:x+27,y:y+2,width:textWidth+1,height:19),withAttributes:[.font:font,.foregroundColor:NSColor.white])
- }
+/// Šipka posunu snímků: klik ani hover neprojdou na snímek pod ní, ani když je vypnutá.
+final class ShotArrowButton:AppButton {
+ override func hitTest(_ point:NSPoint)->NSView?{isHidden ? nil:(frame.contains(point) ? self:nil)}
+ override func mouseDown(with event:NSEvent){if isEnabled{super.mouseDown(with:event)}}
 }
 
 final class ScreenshotThumbnailButton:NSButton {
  let notePreview=NSTextField(labelWithString:"")
  var imageDisplayRect:NSRect{
-  let space=NSRect(x:7,y:39,width:bounds.width-14,height:bounds.height-46)
+  // Nahoře odebrání a odznaky videa či kontextu, dole číslo a poznámka.
+  let space=NSRect(x:7,y:34,width:bounds.width-14,height:bounds.height-68)
   guard let image,image.size.width>0,image.size.height>0 else{return space}
   let scale=min(space.width/image.size.width,space.height/image.size.height),size=NSSize(width:image.size.width*scale,height:image.size.height*scale)
   return NSRect(x:space.midX-size.width/2,y:space.midY-size.height/2,width:size.width,height:size.height)
  }
  private var hover=false
- private var hoverActions:[NSButton]=[]
  private var hoverTracking:NSTrackingArea?
- override func resetCursorRects(){super.resetCursorRects();addCursorRect(bounds,cursor:.pointingHand)}
  override func updateTrackingAreas(){
   super.updateTrackingAreas()
   if let area=hoverTracking{removeTrackingArea(area)}
-  let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self,userInfo:nil)
+  let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.mouseMoved,.activeAlways,.inVisibleRect,.cursorUpdate],owner:self,userInfo:nil)
   addTrackingArea(area);hoverTracking=area
  }
  // Odebraný náhled si sledování myši smaže, aby AppKit neposílal události uvolněnému objektu.
  override func viewWillMove(toWindow newWindow:NSWindow?){super.viewWillMove(toWindow:newWindow);if newWindow==nil,let area=hoverTracking{removeTrackingArea(area);hoverTracking=nil}}
- func addHoverAction(_ action:NSButton){action.isHidden = !hover;hoverActions.append(action);addSubview(action)}
- func setHovered(_ value:Bool){
-  hover=value
-  for action in hoverActions{
-   if !value{(action as? ThumbnailActionButton)?.setExpanded(false,animated:false)}
-   action.isHidden = !value
+ func setHovered(_ value:Bool){hover=value;needsDisplay=true}
+ /// Hover jen když kurzor míří na kartu, ne na šipku nebo křížek nad ní.
+ private func covered(_ event:NSEvent)->Bool{guard let content=window?.contentView,let hit=content.hitTest(content.convert(event.locationInWindow,from:nil)) else{return true};return !hit.isDescendant(of:self)}
+ override func mouseEntered(with event:NSEvent){setHovered(!covered(event))}
+ override func mouseMoved(with event:NSEvent){let value = !covered(event);if value != hover{setHovered(value)}}
+ /// Klik otevře editor; podržení a tažení do strany posouvá řadu snímků jako skrytý posuvník.
+ override func mouseDown(with event:NSEvent){
+  guard let scroll=enclosingScrollView,let window else{super.mouseDown(with:event);return}
+  let clip=scroll.contentView,start=event.locationInWindow.x,origin=clip.bounds.origin.x
+  let limit=max(0,(scroll.documentView?.frame.width ?? 0)-clip.bounds.width);var dragging=false
+  while let next=window.nextEvent(matching:[.leftMouseDragged,.leftMouseUp]){
+   if next.type == .leftMouseUp{if !dragging{sendAction(action,to:target)};break}
+   let dx=next.locationInWindow.x-start
+   if !dragging,abs(dx)>4,limit>0{dragging=true;NSCursor.closedHand.push()}
+   if dragging{clip.scroll(to:NSPoint(x:min(limit,max(0,origin-dx)),y:clip.bounds.origin.y));scroll.reflectScrolledClipView(clip)}
   }
-  needsDisplay=true
+  if dragging{NSCursor.pop()}
  }
- override func mouseEntered(with event:NSEvent){setHovered(true)}
+ override func cursorUpdate(with event:NSEvent){(covered(event) ? NSCursor.arrow:NSCursor.pointingHand).set()}
  override func mouseExited(with event:NSEvent){setHovered(false)}
  override func draw(_ dirtyRect:NSRect){
   let card=NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:10,yRadius:10)
   AppPalette.raised.setFill();card.fill()
   if let image{image.draw(in:imageDisplayRect)}
-  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:7),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:10,weight:.medium),.foregroundColor:AppPalette.secondary])
+  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:bounds.height-21),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:10,weight:.medium),.foregroundColor:AppPalette.secondary])
   if hover{AppPalette.accent.withAlphaComponent(0.8).setStroke();card.lineWidth=1.5;card.stroke()}
  }
 
@@ -82,7 +77,7 @@ final class Composer:NSObject,NSWindowDelegate {
  let titleField=CenteredTextField();let comment=SessionCommentField();var buttons:[NSButton]=[]
  // Souhrn kontextu podle obrázku; čte se jednou, soubor může mít desítky MiB.
  private var contextSummaries:[String:ContextSummary?]=[:]
- let thumbnails=NSView();let thumbnailScroll=NSScrollView();let previousShots=AppButton();let nextShots=AppButton();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
+ let thumbnails=NSView();let thumbnailScroll=NSScrollView();let previousShots=ShotArrowButton();let nextShots=ShotArrowButton();let topicLink=ContextLinkButton();let sessionLink=ContextLinkButton();let topicPicker=NSPopUpButton();let topicDescription=NSTextField(labelWithString:"")
  let laterButton=AppButton();let saveButton=AppButton();var availableTopics:[Topic]=[]
  let copyLinkButton=AppButton();var sharing=false
  let addShotButton=AppButton();let captureOptions=AppButton();let captureGroup=DesignSurface(frame:.zero,fill:AppPalette.raised,radius:8);var onCapture:((Bool)->Void)?
@@ -266,12 +261,9 @@ final class Composer:NSObject,NSWindowDelegate {
    let button=ScreenshotThumbnailButton(frame:NSRect(x:CGFloat(i)*238,y:0,width:224,height:226));button.image=thumbnailImage(root.appendingPathComponent(image));button.imageScaling = .scaleProportionallyUpOrDown;button.imagePosition = .imageOnly;button.tag=i;button.target=self;button.action=#selector(edit);button.toolTip=L("Kliknutím zvětšit a upravit");thumbnails.addSubview(button);buttons.append(button)
    let text=draft.imageNotes?[image] ?? ""
    let preview=button.notePreview;preview.stringValue=text.components(separatedBy:.newlines).joined(separator:" ");preview.toolTip=text
-   preview.frame=NSRect(x:34,y:5,width:180,height:23);preview.font = .systemFont(ofSize:11);preview.textColor=AppPalette.secondary;preview.usesSingleLineMode=true;preview.maximumNumberOfLines=1;preview.lineBreakMode = .byTruncatingTail;button.addSubview(preview)
-   let area=button.imageDisplayRect
-   let annotate=ThumbnailActionButton(title:"",target:self,action:#selector(edit));annotate.image=NSImage(systemSymbolName:"pencil.tip",accessibilityDescription:nil)
-   annotate.expandedTitle=L("Anotace");annotate.setAccessibilityLabel(annotate.expandedTitle);annotate.tag=i
-   // Jediná akce na snímku: anotace a poznámka v jednom editoru.
-   annotate.frame=area;annotate.collapsedFrame=annotate.frame;annotate.expandedTitle=L("Anotace a poznámka");annotate.setAccessibilityLabel(annotate.expandedTitle);button.addHoverAction(annotate)
+   preview.frame=NSRect(x:34,y:button.bounds.height-24,width:180,height:18);preview.font = .systemFont(ofSize:11);preview.textColor=AppPalette.secondary;preview.usesSingleLineMode=true;preview.maximumNumberOfLines=1;preview.lineBreakMode = .byTruncatingTail;button.addSubview(preview)
+   // Klik na kartu otevře editor anotací a poznámky; hover jen ohraničí kartu.
+   button.setAccessibilityLabel(LF("Snímek %ld · anotace a poznámka",i+1))
    let remove=styledButton("",symbol:"xmark",role:.quiet,frame:NSRect(x:CGFloat(i)*238+196,y:198,width:24,height:24),target:self,action:#selector(removeImage(_:)));remove.tag=i;remove.toolTip=L("Odebrat tento obrázek z relace");thumbnails.addSubview(remove)
    let video=videoSidecars(root.appendingPathComponent(image)),info=fm.fileExists(atPath:video[0].path) ? readVideoInfo(video[1]):nil
    // S videem dostane odznak kontextu užší místo, přehrání má vždy 84 bodů.

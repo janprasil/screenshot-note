@@ -664,10 +664,6 @@
 "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář." = "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář.";
 "Všechny komentáře" = "Všechny komentáře";
 "Odebrat" = "Odebrat";
-"Potvrdit komentář (⌘Enter)" = "Potvrdit komentář (⌘Enter)";
-"Popis elementu · ⌘Enter potvrdí, Esc zruší výběr" = "Popis elementu · ⌘Enter potvrdí, Esc zruší výběr";
-"Markdown · ⌘Enter potvrdí, Esc zavře" = "Markdown · ⌘Enter potvrdí, Esc zavře";
-"Tvar zatím nemá komentář." = "Tvar zatím nemá komentář.";
 "Přidat popis" = "Přidat popis";
 "Bez komentáře" = "Bez komentáře";
 "Snímek %ld · anotace a poznámka" = "Snímek %ld · anotace a poznámka";
@@ -676,3 +672,7 @@
 "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯." = "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯.";
 "Nadřazená složka cloudu…" = "Nadřazená složka cloudu…";
 "Ptát se na složku u nové cloudové složky" = "Ptát se na složku u nové cloudové složky";
+"Komentář k anotaci" = "Komentář k anotaci";
+"Popis elementu" = "Popis elementu";
+"Uložit komentář (⌘Enter)" = "Uložit komentář (⌘Enter)";
+"Text obsahuje Markdown · kliknutím otevřít Markdown editor" = "Text obsahuje Markdown · kliknutím otevřít Markdown editor";

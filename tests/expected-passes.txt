@@ -91,3 +91,11 @@ PASS: recording files beside the poster, copy/remove with the item, assets rende
 PASS: video and key frame cloud attachments: kinds, MIME types, size limits, queue file names and legacy jobs
 PASS: area capture maps elements of the selected region only and stores its geometry
 PASS: AI title folder setting round-trip: legacy server hidden, off by default, PUT {enabled} persisted, kept on folder save, plan error, member cannot change
+PASS: retention: plain 404 without reason still purges .trash as before, no retention notice
+PASS: retention: failed move keeps the index record and files, no notice
+PASS: retention: 404 reason retention moves active, edited and subfolder sessions with video and context to .trash, renames on name clash and rewrites links, keeps web-trashed files, notifies once
+PASS: retention: later syncs and trash cleanup skip retained .trash files
+PASS: retention: user restore from .trash after retention keeps files and explains why
+PASS: retention: transport parses error.reason, absent reason stays nil
+PASS: retention: error in the middle of the check loop still notifies about sessions already moved
+PASS: retention: combined folder blocks saved to .trash as notes with their images

@@ -1,4 +1,5 @@
 import AppKit
+import VideoToolbox
 import AVFoundation
 import CoreImage
 import ScreenCaptureKit
@@ -6,10 +7,11 @@ import UniformTypeIdentifiers
 
 /// Limity videa podle rozhodnutí v issue #32 (web #85 je ověřuje znovu).
 enum RecordingLimits {
- static let fps:Int32=10
- static let maxSide=1280
- // Průměr není strop; 0,85 Mbit/s nechá na 60 s přes 25 % rezervy do 8 MiB limitu webu.
- static let bitrate=850_000
+ static let fps:Int32=20
+ static let maxSide=1920
+ // Průměr 1,75 Mbit/s, strop 2 Mbit/s omezí špičky; video nad 16 MiB do cloudu neprojde s hláškou.
+ static let bitrate=1_750_000
+ static let peakBytesPerSecond=250_000
  static let maxDuration:TimeInterval=60
  static let maxFrames=12
  static let countdowns=[3,5,10]
@@ -73,7 +75,15 @@ struct KeyFrameSelector<Frame> {
 /// Výsledek záznamu v pracovní složce: MP4, poster (první snímek) a klíčové snímky s časem.
 struct RecordingResult {var video:URL;var durationMs:Int;var width:Int;var height:Int;var poster:CGImage;var frames:[(ms:Int,image:CGImage)];var startedAt:Date? = nil}
 
-/// Záznam obrazovky, okna nebo oblasti do MP4 (H.264, 10 fps, ~1,2 Mbit/s).
+/// H.264: průměrný tok, strop za sekundu a klíčový snímek po 3 s.
+func recordingVideoSettings(width:Int,height:Int,bitrate:Int=RecordingLimits.bitrate)->[String:Any] {
+ [AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height,
+  AVVideoCompressionPropertiesKey:[AVVideoAverageBitRateKey:bitrate,AVVideoExpectedSourceFrameRateKey:RecordingLimits.fps,
+   AVVideoMaxKeyFrameIntervalKey:Int(RecordingLimits.fps)*3,AVVideoProfileLevelKey:AVVideoProfileLevelH264HighAutoLevel,
+   kVTCompressionPropertyKey_DataRateLimits as String:[max(RecordingLimits.peakBytesPerSecond*bitrate/RecordingLimits.bitrate,1),1]] as [String:Any]]
+}
+
+/// Záznam obrazovky, okna nebo oblasti do MP4 (H.264, 20 fps, ~1,75 Mbit/s).
 final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked Sendable {
  private let queue=DispatchQueue(label:"cz.janprasil.screenshotnote.recording")
  private let writer:AVAssetWriter;private let input:AVAssetWriterInput
@@ -88,9 +98,7 @@ final class ScreenRecorder:NSObject,SCStreamOutput,SCStreamDelegate,@unchecked S
   self.output=output;self.width=width;self.height=height
   try? FileManager.default.removeItem(at:output)
   writer=try AVAssetWriter(outputURL:output,fileType:.mp4)
-  input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height,
-   AVVideoCompressionPropertiesKey:[AVVideoAverageBitRateKey:RecordingLimits.bitrate,AVVideoExpectedSourceFrameRateKey:RecordingLimits.fps,
-    AVVideoMaxKeyFrameIntervalKey:Int(RecordingLimits.fps)*2,AVVideoProfileLevelKey:AVVideoProfileLevelH264HighAutoLevel]])
+  input=AVAssetWriterInput(mediaType:.video,outputSettings:recordingVideoSettings(width:width,height:height))
   input.expectsMediaDataInRealTime=true
   writer.shouldOptimizeForNetworkUse=true
   guard writer.canAdd(input) else{throw NSError(domain:"ScreenshotNote",code:40,userInfo:[NSLocalizedDescriptionKey:L("Záznam videa se nepodařilo připravit.")])}

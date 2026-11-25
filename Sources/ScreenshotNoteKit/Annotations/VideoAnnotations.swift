@@ -89,9 +89,7 @@ func burnVideoOverlay(_ overlay:CGImage,source:URL,to output:URL,bitrate:Int=Rec
  let width=Int(track.naturalSize.width),height=Int(track.naturalSize.height)
  try? fm.removeItem(at:output)
  let writer=try AVAssetWriter(outputURL:output,fileType:.mp4)
- let input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height,
-  AVVideoCompressionPropertiesKey:[AVVideoAverageBitRateKey:bitrate,AVVideoExpectedSourceFrameRateKey:RecordingLimits.fps,
-   AVVideoMaxKeyFrameIntervalKey:Int(RecordingLimits.fps)*2,AVVideoProfileLevelKey:AVVideoProfileLevelH264HighAutoLevel]])
+ let input=AVAssetWriterInput(mediaType:.video,outputSettings:recordingVideoSettings(width:width,height:height,bitrate:bitrate))
  input.expectsMediaDataInRealTime=false;input.transform=track.preferredTransform
  let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,sourcePixelBufferAttributes:nil)
  guard writer.canAdd(input) else{throw failure()};writer.add(input);writer.shouldOptimizeForNetworkUse=true

@@ -102,8 +102,6 @@ enum FolderDialogs {
  /// Kam přesunout: osobní cloud, nebo tým, kde je uživatel owner/admin; nil = zrušeno.
  @MainActor static func library(for name:String,teams:[CloudLibraryRef],personal:Bool=true)->CloudLibraryRef?? {
   guard !teams.isEmpty else{return .some(nil)}
-  // Bez osobního tarifu zbývají jen týmy; jeden tým se vybere sám.
-  if !personal,teams.count==1{return .some(teams[0])}
   let alert=NSAlert();alert.messageText=LF("Kam přesunout složku „%@“?",name)
   alert.informativeText=L("Týmovou složku uvidí a doplňují všichni členové týmu.")
   let popup=NSPopUpButton(frame:NSRect(x:0,y:0,width:330,height:28),pullsDown:false)

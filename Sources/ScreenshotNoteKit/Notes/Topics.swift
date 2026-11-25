@@ -262,7 +262,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func windowShouldClose(_ sender:NSWindow)->Bool{confirmLeave()}
  /// Hodnoty formuláře; u cloudové složky se kontext a výchozí název ukládají hned, proto se nepočítají.
  private func formState()->[String] {
-  let cloud=editingCloud,policy=cloud ? "":((try? JSONEncoder().encode(contextPolicy)).map{String(decoding:$0,as:UTF8.self)} ?? "")
+  let cloud=editingCloud,encoder=JSONEncoder();encoder.outputFormatting = .sortedKeys
+  let policy=cloud ? "":((try? encoder.encode(contextPolicy)).map{String(decoding:$0,as:UTF8.self)} ?? "")
   return [name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),detail.stringValue,folder.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),String(mode.indexOfSelectedItem),mode.indexOfSelectedItem==1 ? file.stringValue:"",template,fileTemplate ?? "",commentTemplate ?? "",imageTemplate ?? "",policy,cloud ? "":(defaultTitleValue ?? ""),pendingDefault ? "1":""]
  }
  private func markLoaded(){loadedForm=formState()}

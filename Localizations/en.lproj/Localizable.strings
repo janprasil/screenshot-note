@@ -536,9 +536,6 @@
 "Jen adresa stránky" = "Page address only";
 "cookies a tokeny vždy skryté" = "cookies and tokens always hidden";
 "Odebrat kontext" = "Remove context";
-"%ld selhaný" = "%ld failed";
-"%ld selhané" = "%ld failed";
-"%ld selhaných" = "%ld failed";
 "Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší" = "Page element · click to select, click again or ⌥ for the parent, Esc to cancel";
 "Popis elementu · Enter potvrdí, Esc zruší výběr" = "Element note · Enter to confirm, Esc to cancel";
 "Nahrává se do cloudu: %@" = "Uploaded to the cloud: %@";

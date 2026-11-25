@@ -22,6 +22,10 @@ import AppKit
  let screen=CGRect(x:0,y:0,width:1800,height:1169)
  let full=[window(7,0,CGRect(x:0,y:0,width:1800,height:39)),window(7,0,CGRect(x:0,y:39,width:1800,height:158)),window(7,0,CGRect(x:99,y:65,width:1112,height:458)),window(7,0,CGRect(x:0,y:161,width:1800,height:1008))]
  try check(captureTarget(windows:full,pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser targets the content strip Chrome reports as its window")
+ // Displej s výřezem: pruhy začínají pod menu barem (y 39), Chrome hlásí stejný pruh s obsahem.
+ try check(captureTarget(windows:Array(full.dropFirst()),pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser below the menu bar targets the content strip")
+ // Běžné okno na celou šířku před maximalizovaným oknem téhož prohlížeče zůstává cílem.
+ try check(captureTarget(windows:[window(7,0,CGRect(x:0,y:39,width:1800,height:600)),window(7,0,CGRect(x:0,y:39,width:1800,height:1130))],pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":39,"width":1800,"height":600],"front window is not swapped for a maximized window behind it")
  try check(captureTarget(windows:windows,pid:7,screens:[CGRect(x:0,y:0,width:1920,height:1080)])?["windowBounds"] as? [String:CGFloat]==["x":10,"y":20,"width":1200,"height":800],"windowed browser keeps its window bounds")
  try check(["com.google.Chrome","com.microsoft.edgemac","company.thebrowser.Browser","org.chromium.Chromium"].allSatisfy(chromiumBundleIDs.contains) && !chromiumBundleIDs.contains("com.apple.Safari"),"Chromium bundle IDs")
 
@@ -200,7 +204,6 @@ import AppKit
  try Data([8]).write(to:work.appendingPathComponent("h.png"));try files!.write(besides:work.appendingPathComponent("h.png"))
  let fresh=Composer(draft:Draft(images:["h.png"],comment:"",contexts:["h.png":"h.png.context.json"]),root:work);fresh.dropImageContext("h.png")
  try check(fresh.draft.images==["h.png"] && fresh.draft.contexts==nil && fm.fileExists(atPath:work.appendingPathComponent("h.png").path) && !contextSidecars(work.appendingPathComponent("h.png")).contains{fm.fileExists(atPath:$0.path)},"remove context from a new image")
- try check(contextBadgeTitle(ContextSummary(files!.context)!)=="2 chyby · 2 selhané","context badge title")
 
  // Draft ze starší verze bez pole contexts; neplatné mapování se zahodí.
  let old=root.appendingPathComponent("old");try fm.createDirectory(at:old,withIntermediateDirectories:true)

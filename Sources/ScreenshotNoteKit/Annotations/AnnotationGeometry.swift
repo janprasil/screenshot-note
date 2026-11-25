@@ -1,6 +1,22 @@
 import AppKit
 
 extension Mark {
+ /// Šipka: konce jsou points[0] a points[1], volitelný points[2] je bod uprostřed oblouku.
+ var arrowStart:NSPoint{points.first ?? .zero}
+ var arrowEnd:NSPoint{points.count>1 ? points[1]:arrowStart}
+ var arrowMid:NSPoint{points.count>2 ? points[2]:NSPoint(x:(arrowStart.x+arrowEnd.x)/2,y:(arrowStart.y+arrowEnd.y)/2)}
+ /// Řídicí bod kvadratické křivky, která prochází `arrowMid` v polovině.
+ var arrowControl:NSPoint{let a=arrowStart,b=arrowEnd,m=arrowMid;return NSPoint(x:2*m.x-(a.x+b.x)/2,y:2*m.y-(a.y+b.y)/2)}
+ func arrowPoint(_ t:CGFloat)->NSPoint{let a=arrowStart,b=arrowEnd,c=arrowControl,u=1-t;return NSPoint(x:u*u*a.x+2*u*t*c.x+t*t*b.x,y:u*u*a.y+2*u*t*c.y+t*t*b.y)}
+ /// Otočení zapečené do bodů; změna středu oblouku pak neposune pivot ani konce.
+ var unrotatedArrow:Mark{guard rotation != 0 else{return self};var result=self;result.points=points.map{rotatedPoint($0)};result.rotation=0;return result}
+ /// Nový střed oblouku; blízko rovné čáry se šipka narovná.
+ func bendingArrow(to mid:NSPoint,tolerance:CGFloat)->Mark{
+  var result=self;let a=arrowStart,b=arrowEnd
+  let straight=NSPoint(x:(a.x+b.x)/2,y:(a.y+b.y)/2)
+  result.points=hypot(mid.x-straight.x,mid.y-straight.y)<=tolerance ? [a,b]:[a,b,mid]
+  return result
+ }
  var corners:[NSPoint]{let r=bounds;return [NSPoint(x:r.minX,y:r.minY),NSPoint(x:r.maxX,y:r.minY),NSPoint(x:r.maxX,y:r.maxY),NSPoint(x:r.minX,y:r.maxY)]}
  func rotatedPoint(_ point:NSPoint,angle:CGFloat)->NSPoint{
   let r=bounds,dx=point.x-r.midX,dy=point.y-r.midY
@@ -60,9 +76,10 @@ private enum TransformCursors {
 
 struct AnnotationTransformDrag {
  enum Kind{
-  case resize(Int),rotate
+  case resize(Int),rotate,bend
   func cursor(for mark:Mark)->NSCursor{
    switch self{
+   case .bend:return .openHand
    case .rotate:return TransformCursors.rotate
    case .resize(let corner):
     let from=mark.rotatedPoint(mark.corners[(corner+2)%4]),to=mark.rotatedPoint(mark.corners[corner])
@@ -94,7 +111,10 @@ extension DrawingView {
   let handle=rotationHandle(mark);let line=NSBezierPath();line.move(to:NSPoint(x:(corners[2].x+corners[3].x)/2,y:(corners[2].y+corners[3].y)/2));line.line(to:handle);line.lineWidth=1;line.stroke()
   let circle=NSBezierPath(ovalIn:NSRect(x:handle.x-8,y:handle.y-8,width:16,height:16));AppPalette.paper.setFill();circle.fill();AppPalette.accent.setStroke();circle.lineWidth=1;circle.stroke()
   drawAdaptiveSymbol(NSImage(systemSymbolName:"arrow.clockwise",accessibilityDescription:nil),in:NSRect(x:handle.x-5,y:handle.y-5,width:10,height:10),color:AppPalette.accent)
+  if mark.tool == .arrow{let b=bendHandle(mark);let dot=NSBezierPath(ovalIn:NSRect(x:b.x-6,y:b.y-6,width:12,height:12));AppPalette.accent.setFill();dot.fill();AppPalette.paper.setStroke();dot.lineWidth=2;dot.stroke()}
  }
+ /// Puntík uprostřed šipky; tažením se šipka prohne.
+ func bendHandle(_ mark:Mark)->NSPoint{displayPoint(mark.rotatedPoint(mark.arrowMid))}
  func installTransformCursors(){
   guard tool == .select,editingIndex == nil,let i=selected,marks.indices.contains(i),marks[i].tool != .element else{return}
   let mark=marks[i]
@@ -105,8 +125,10 @@ extension DrawingView {
   }
   let p=rotationHandle(mark)
   addCursorRect(NSRect(x:p.x-10,y:p.y-10,width:20,height:20),cursor:TransformCursors.rotate)
+  if mark.tool == .arrow{let b=bendHandle(mark);addCursorRect(NSRect(x:b.x-9,y:b.y-9,width:18,height:18),cursor:.openHand)}
  }
  func transformHandle(at p:NSPoint,for mark:Mark)->AnnotationTransformDrag.Kind?{
+  if mark.tool == .arrow{let b=bendHandle(mark);if hypot(p.x-b.x,p.y-b.y)<=9{return .bend}}
   let rotation=rotationHandle(mark)
   if hypot(p.x-rotation.x,p.y-rotation.y)<=10{return .rotate}
   let corners=selectionCorners(mark)
@@ -137,6 +159,8 @@ extension DrawingView {
    let anchor=original.rotatedPoint(original.corners[fixed]),moving=original.rotatedPoint(original.corners[corner]);let dx=moving.x-anchor.x,dy=moving.y-anchor.y
    let factor=max(0.05,min(20,1+((p.x-drag.start.x)*dx+(p.y-drag.start.y)*dy)/max(1,dx*dx+dy*dy)))
    marks[drag.index]=original.resized(by:factor,fixedCorner:fixed)
+  case .bend:
+   marks[drag.index]=original.unrotatedArrow.bendingArrow(to:p,tolerance:4/scale)
   case .rotate:
    let r=original.bounds;var angle=original.rotation+atan2(p.y-r.midY,p.x-r.midX)-atan2(drag.start.y-r.midY,drag.start.x-r.midX)
    if event.modifierFlags.contains(.shift){angle=(angle / (.pi/12)).rounded()*(.pi/12)}

@@ -92,10 +92,31 @@ jobs:
           dmg="dist/Screenshot-Note-$VERSION.dmg"
           hdiutil create -volname "Screenshot Note" -srcfolder "$APP" -ov -format UDZO "$dmg"
           (cd dist && shasum -a 256 "$(basename "$dmg")" > "$(basename "$dmg").sha256")
+      # Staging DMG je stejná binárka, jen s jiným originem v Info.plist a novým ad-hoc podpisem.
+      - env:
+          APP: ${{ steps.build.outputs.app }}
+          SCREENSHOT_NOTE_ENV: test
+          SCREENSHOT_NOTE_WEB_ORIGIN: https://sn-staging.cfy.performance4.cz
+          SCREENSHOT_NOTE_VERSION: ${{ needs.plan.outputs.version }}
+          SCREENSHOT_NOTE_BUILD: ${{ needs.plan.outputs.build }}
+        run: |
+          mkdir staging-app staging
+          app="staging-app/Screenshot Note.app"
+          ditto "$APP" "$app"
+          python3 scripts/configure-build.py "$app/Contents/Info.plist"
+          codesign --force --options runtime --sign - "$app/Contents/MacOS/screenshot-note-bridge"
+          codesign --force --options runtime --sign - "$app"
+          codesign --verify --strict "$app"
+          hdiutil create -volname "Screenshot Note (staging)" -srcfolder "$app" -ov -format UDZO staging/Screenshot-Note-staging.dmg
+          (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: staging
+          path: staging/
 
   publish-rc:
     needs: [plan, build]
@@ -111,6 +132,20 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: gh release create "$TAG" dist/* -R "$REPO" --target "$SHA" --prerelease --title "Screenshot Note ${TAG#v}" --notes-file release-notes/release-notes.md
+      # Průběžné vydání staging drží stálou URL; soubory se při každém RC přepíšou.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          notes="Rolling staging build of ${TAG#v} ($SHA), replaced on every release candidate. Web origin: https://sn-staging.cfy.performance4.cz. Ad-hoc signed, not notarized: on first launch right-click the app → Open."
+          if gh release view staging -R "$REPO" >/dev/null 2>&1; then
+            gh release upload staging staging/* -R "$REPO" --clobber
+            gh release edit staging -R "$REPO" --prerelease --notes "$notes"
+          else
+            gh release create staging staging/* -R "$REPO" --target "$SHA" --prerelease --title "Screenshot Note staging" --notes "$notes"
+          fi
 
   promote:
     needs: plan
@@ -132,4 +167,7 @@ jobs:
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
           gh release download "$RC_TAG" -R "$REPO" -D dist
+          # Stálý název pro odkaz releases/latest/download/Screenshot-Note.dmg.
+          cp dist/Screenshot-Note-*.dmg dist/Screenshot-Note.dmg
+          (cd dist && shasum -a 256 Screenshot-Note.dmg > Screenshot-Note.dmg.sha256)
           gh release create "$TAG" dist/* -R "$REPO" --target "$SHA" --latest --title "Screenshot Note ${TAG#v}" --notes-file release-notes.md

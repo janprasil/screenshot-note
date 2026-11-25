@@ -88,9 +88,12 @@ jobs:
           APP: ${{ steps.build.outputs.app }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          mkdir dist
+          mkdir dist dmg-root
           dmg="dist/Screenshot-Note-$VERSION.dmg"
-          hdiutil create -volname "Screenshot Note" -srcfolder "$APP" -ov -format UDZO "$dmg"
+          # Odkaz na Applications umožní instalaci přetažením.
+          ditto "$APP" "dmg-root/Screenshot Note.app"
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname "Screenshot Note" -srcfolder dmg-root -ov -format UDZO "$dmg"
           (cd dist && shasum -a 256 "$(basename "$dmg")" > "$(basename "$dmg").sha256")
       # Staging DMG je stejná binárka, jen s jiným originem v Info.plist a novým ad-hoc podpisem.
       - env:
@@ -102,12 +105,13 @@ jobs:
         run: |
           mkdir staging-app staging
           app="staging-app/Screenshot Note.app"
+          ln -s /Applications staging-app/Applications
           ditto "$APP" "$app"
           python3 scripts/configure-build.py "$app/Contents/Info.plist"
           codesign --force --options runtime --sign - "$app/Contents/MacOS/screenshot-note-bridge"
           codesign --force --options runtime --sign - "$app"
           codesign --verify --strict "$app"
-          hdiutil create -volname "Screenshot Note (staging)" -srcfolder "$app" -ov -format UDZO staging/Screenshot-Note-staging.dmg
+          hdiutil create -volname "Screenshot Note (staging)" -srcfolder staging-app -ov -format UDZO staging/Screenshot-Note-staging.dmg
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: actions/upload-artifact@v7
         with:

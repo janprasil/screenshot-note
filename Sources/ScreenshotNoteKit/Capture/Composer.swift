@@ -53,7 +53,9 @@ final class ScreenshotThumbnailButton:NSButton {
   let card=NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:10,yRadius:10)
   AppPalette.raised.setFill();card.fill()
   if let image{image.draw(in:imageDisplayRect)}
-  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:bounds.height-21),withAttributes:Self.numberAttributes)
+  // Číslo sedí na účaří poznámky vedle něj.
+  let font=Self.numberAttributes[.font] as? NSFont,baseline=notePreview.superview===self ? notePreview.frame.minY+notePreview.firstBaselineOffsetFromTop:bounds.height-11
+  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:baseline-(font?.ascender ?? 9)),withAttributes:Self.numberAttributes)
   if hover{AppPalette.accent.withAlphaComponent(0.8).setStroke();card.lineWidth=1.5;card.stroke()}
  }
 
@@ -151,7 +153,8 @@ final class Composer:NSObject,NSWindowDelegate {
   let i=topicPicker.indexOfSelectedItem;guard availableTopics.indices.contains(i) else{return}
   guard draft.previous == nil || draft.topic?.id == availableTopics[i].id else{return}
   draft.topic=availableTopics[i];let topic=availableTopics[i];topicDescription.stringValue=topic.detail+(topic.detail.isEmpty ? "":" · ")+(topic.combined ? L("Jeden společný MD"):L("MD pro každou relaci"))
-  topicLink.title=topic.displayName;topicLink.toolTip=topic.displayName+(topic.detail.isEmpty ? "":"\n"+topic.detail)
+  topicLink.title=topic.displayName;topicLink.toolTip=topic.displayName+"\n"+topic.storageKind+(topic.detail.isEmpty ? "":"\n"+topic.detail)
+  topicLink.image=NSImage(systemSymbolName:topic.storageSymbol,accessibilityDescription:topic.storageKind)
   refreshPreviousSessions()
  }
  @objc func refreshSavedSessions(){refreshPreviousSessions()}
@@ -217,7 +220,7 @@ final class Composer:NSObject,NSWindowDelegate {
   childEditorOpen=true;defer{childEditorOpen=false};snapshotFields()
   let choices=Topics.all
   let picker=SessionChoiceDialog()
-  if let index=picker.run(title:L("Vybrat konfiguraci"),choices:choices.map{SessionChoice(title:$0.displayName,detail:$0.detail+" · "+$0.folder)},current:choices.firstIndex{$0.id==draft.topic?.id} ?? 0){
+  if let index=picker.run(title:L("Vybrat konfiguraci"),choices:choices.map{SessionChoice(title:$0.displayName,detail:$0.choiceDetail)},current:choices.firstIndex{$0.id==draft.topic?.id} ?? 0){
    if draft.previous != nil && draft.topic?.id != choices[index].id{switchToNewSession()}
    draft.topic=choices[index];refreshTopics()
   };window.makeKeyAndOrderFront(nil)

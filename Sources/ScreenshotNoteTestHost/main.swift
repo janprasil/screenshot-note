@@ -6,6 +6,8 @@ import CoreGraphics
 // Testovací host: stejné přepínače jako dřív v appce, binárka se do .app nebalí.
 // Výstup do roury po řádcích, aby PASS řádky přežily pád testu.
 setvbuf(stdout,nil,_IOLBF,0)
+// Testovací host nikdy nekontroluje aktualizace.
+Updates.disabled=true
 // Testy a náhledy pracují s vlastním dočasným indexem.
 if CommandLine.arguments.contains(where:{($0.hasSuffix("-test") && $0 != "--preview-test") || $0=="--design-export"}){
  SessionIndex.shared=SessionIndex(file:fm.temporaryDirectory.appendingPathComponent("sn-index-"+UUID().uuidString+".json"))
@@ -521,6 +523,8 @@ if CommandLine.arguments.contains("--self-test") {
  AppLanguage.override="en";let exported=try String(contentsOf:translatedOutput.appendingPathComponent(readableSessionName("Český uživatelský nadpis",created:Date())+".md"),encoding:.utf8);assert(exported.contains("# Description") && exported.contains("# Český uživatelský nadpis"))
  AppLanguage.override="cs";assert(L("Uložit")=="Uložit")
  print("PASS: Czech/English system-language resolution, complete translation catalogs, bilingual Markdown discovery and unchanged user content")
+ try updateTests()
+ print("PASS: updater starts only in production builds with an HTTPS feed and public key, never in tests; release candidates are opt-in")
  let manyRoot=root.appendingPathComponent("many");try fm.createDirectory(at:manyRoot,withIntermediateDirectories:true)
  let customDestination=manyRoot.appendingPathComponent("output")
  var customTopic=topic;customTopic.folder=customDestination.path;customTopic.combined=true;customTopic.combinedFile="All.md";customTopic.markdownTemplate="{text}\n\n### {title}\n\n{screenshots}\n";customTopic.combinedTemplate="{sessions}"

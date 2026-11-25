@@ -5,6 +5,7 @@ import CoreGraphics
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
  var parkedEntry:NSMenuItem?
+ var updateEntry:NSMenuItem?
  let cloudSettings=CloudSettings()
  var item:NSStatusItem!;var statusMenu:NSMenu?;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
@@ -34,6 +35,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   // Starší místní poznámky jednou přijdou o skryté značky.
   for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
   NativeHostRegistration.applyStoredSetting()
+  Updates.shared.start()
   settings=SettingsController(hotkeys:hotkeys)
   item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength);item.button?.image=NSImage(systemSymbolName:"camera.viewfinder",accessibilityDescription:"Screenshot Note")
   let menu=NSMenu();menu.delegate=self
@@ -54,6 +56,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    if symbol=="folder"{folderEntry=entry}
    if symbol=="square.and.pencil"{addRecordingItems(to:menu)}
    menu.addItem(entry)
+   if symbol=="info.circle",Updates.shared.isRunning {
+    let update=NSMenuItem(title:L("Zkontrolovat aktualizace…"),action:#selector(Updates.checkForUpdates(_:)),keyEquivalent:"");update.target=Updates.shared
+    let mark=NSImage(systemSymbolName:"arrow.triangle.2.circlepath",accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
+    mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;update.image=mark;updateEntry=update;menu.addItem(update)
+   }
    if symbol=="icloud" {
     // Odložené položky fronty jsou vidět i bez otevřeného okna cloudu.
     let parked=NSMenuItem(title:L("Odložené cloudové položky…"),action:#selector(openParked),keyEquivalent:"");parked.target=self
@@ -188,7 +195,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  @objc func openParked(){Task{@MainActor in FolderDialogs.resolveParked()}}
  @objc func preferences(){settings.show()}
  @objc func aboutApp(){AboutController.shared.show()}
- func menuNeedsUpdate(_ menu:NSMenu){if menu === item?.menu{updateFolderMenu();parkedEntry?.isHidden=CloudLibrary.shared.parkedItems.isEmpty}}
+ func menuNeedsUpdate(_ menu:NSMenu) {
+  guard menu === item?.menu else{return}
+  updateFolderMenu();parkedEntry?.isHidden=CloudLibrary.shared.parkedItems.isEmpty
+  updateEntry?.title=Updates.shared.updateWaiting ? L("Nainstalovat aktualizaci…"):L("Zkontrolovat aktualizace…")
+ }
  /// Ukončení aplikace (i odhlášení systému) odloží otevřenou poznámku jako rozpracovanou.
  func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
   guard let composer,let root=session else{return .terminateNow}

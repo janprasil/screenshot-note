@@ -99,3 +99,4 @@ PASS: retention: user restore from .trash after retention keeps files and explai
 PASS: retention: transport parses error.reason, absent reason stays nil
 PASS: retention: error in the middle of the check loop still notifies about sessions already moved
 PASS: retention: combined folder blocks saved to .trash as notes with their images
+PASS: updater starts only in production builds with an HTTPS feed and public key, never in tests; release candidates are opt-in

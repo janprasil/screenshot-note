@@ -32,5 +32,18 @@ class BuildConfiguration(unittest.TestCase):
             with self.subTest(short=short, build=build), self.assertRaises(ValueError):
                 config.version(short, build)
 
+    def test_update_feed(self):
+        key = "A" * 43 + "="
+        self.assertEqual(config.updates("production", None, None), {})
+        self.assertEqual(config.updates("production", "https://example.invalid/appcast.xml", key),
+                         {"SUFeedURL": "https://example.invalid/appcast.xml", "SUPublicEDKey": key, "SURequireSignedFeed": True, "SUVerifyUpdateBeforeExtraction": True})
+        for environment, feed, public in [("production", "https://example.invalid/appcast.xml", None), ("production", None, key),
+                                          ("test", "https://example.invalid/appcast.xml", key), ("local", "https://example.invalid/appcast.xml", key),
+                                          ("production", "http://example.invalid/appcast.xml", key), ("production", "https://user@example.invalid/a.xml", key),
+                                          ("production", "https://example.invalid/a.xml?x=1", key), ("production", "https://example.invalid/a.xml?", key), ("production", "https://example.invalid/a.xml#", key), ("production", "https://example.invalid/a.xml\n", key),
+                                          ("production", "https://example.invalid/appcast.xml", "short"), ("production", "https://example.invalid/appcast.xml", "!" * 44)]:
+            with self.subTest(environment=environment, feed=feed, key=public), self.assertRaises(ValueError):
+                config.updates(environment, feed, public)
+
 
 unittest.main()

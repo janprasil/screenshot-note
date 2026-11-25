@@ -55,7 +55,7 @@ Exported Markdown contains no hidden markers. The app remembers its sessions in 
 
 ## Build
 
-Requires macOS 13 or later, Python 3 and Xcode or the Xcode Command Line Tools. There are no third-party package dependencies.
+Requires macOS 13 or later, Python 3 and Xcode or the Xcode Command Line Tools. The only third-party dependency is [Sparkle](https://sparkle-project.org) (MIT) for in-app updates; SwiftPM downloads it and `build.sh` embeds and signs `Sparkle.framework`.
 
 ```sh
 ./build.sh
@@ -91,6 +91,23 @@ SIGNING_IDENTITY='your personal signing identity' ./build.sh
 ```
 
 The default build uses an ad-hoc signature. Updating such a build can require renewing its screen-recording permission.
+
+### Updates
+
+Release builds can check for updates with Sparkle. The updater starts only in a
+production build that has both an update feed and the EdDSA public key baked in:
+
+```sh
+SCREENSHOT_NOTE_FEED_URL=https://example.com/appcast.xml SCREENSHOT_NOTE_ED_PUBLIC_KEY=BASE64_KEY ./build.sh
+```
+
+The feed must be plain HTTPS. These builds also require a signed appcast and verify
+each update before extracting it. Local, test and preview builds, and the test host,
+never contact a feed. Without a feed (every build today) the "Check for Updates…"
+menu item and the Updates row in Settings are hidden. Release candidates are
+offered only to users who turn on "Include release candidates" in Settings.
+Updates stay off in release builds until the app is signed with a Developer ID and
+notarized, because screen-recording permission is bound to the code signature.
 
 ## Design and screenshots
 

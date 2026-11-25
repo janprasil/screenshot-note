@@ -157,3 +157,16 @@ import AppKit
  canvas.marks=[bent]
  try check(canvas.hit(NSPoint(x:50,y:40))==0 && canvas.hit(NSPoint(x:50,y:2))==nil,"hit test follows the curve")
 }
+
+// Text u pravého okraje se zalomí do obrázku a do mezery pod 60 px se posune.
+@MainActor func textFitTests()throws{
+ func check(_ condition:Bool,_ message:String)throws{if !condition{throw BrowserBridgeError(message:message)}}
+ let canvas=DrawingView(image:NSImage(size:NSSize(width:200,height:100)),frame:NSRect(x:0,y:0,width:200,height:100))
+ canvas.marks=[Mark(tool:.text,points:[NSPoint(x:120,y:40)],color:.red,width:3,text:"je to na hovno dlouhý text",bold:false,italic:false,underline:false,fontSize:36)]
+ canvas.fitTextToImage(0)
+ try check(canvas.marks[0].textWidth==80 && canvas.marks[0].bounds.maxX<=200.001,"long text wraps inside the image")
+ canvas.marks[0].points[0].x=190;canvas.marks[0].textWidth=nil;canvas.fitTextToImage(0)
+ try check(canvas.marks[0].points[0].x==140 && canvas.marks[0].bounds.maxX<=200.001,"text at the edge moves left")
+ canvas.marks[0].text="ok";canvas.marks[0].points[0].x=10;canvas.marks[0].textWidth=nil;canvas.marks[0].fontSize=14;canvas.fitTextToImage(0)
+ try check(canvas.marks[0].textWidth==nil,"short text keeps natural width")
+}

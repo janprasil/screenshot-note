@@ -257,7 +257,12 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:AppPalette.secondary));cell.toolTip=topic.displayName+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
  }
  // Znovuvybrání stejné složky po překreslení seznamu nesmí přepsat rozpracovaný formulář.
- func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row),rows[row].id != editingID{load(rows[row])}}
+ func tableViewSelectionDidChange(_ notification:Notification){
+  let row=table.selectedRow
+  if rows.indices.contains(row){if rows[row].id != editingID{load(rows[row])}}
+  // Zrušený výběr uložené složky vrátí uložené hodnoty, aby formulář neukazoval zahozené změny.
+  else if let saved=list.first(where:{$0.id==editingID}),hasUnsavedChanges{load(saved)}
+ }
  func selectionShouldChange(in tableView:NSTableView)->Bool{confirmLeave()}
  func windowShouldClose(_ sender:NSWindow)->Bool{confirmLeave()}
  /// Hodnoty formuláře; u cloudové složky se kontext a výchozí název ukládají hned, proto se nepočítají.
@@ -274,8 +279,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let alert=NSAlert();alert.messageText=editingID==nil ? L("Nová složka ještě není uložená."):L("Složka má neuložené změny.")
   alert.informativeText=L("Když odejdeš, změny se zahodí.")
   alert.addButton(withTitle:L("Zůstat"));alert.addButton(withTitle:L("Odejít bez uložení"))
-  guard alert.runModal() == .alertSecondButtonReturn else{return false}
-  loadedForm=nil;return true
+  // Základ se obnoví až načtením jiné složky; formulář, který zůstal otevřený, se dál hlídá.
+  return alert.runModal() == .alertSecondButtonReturn
  }
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false

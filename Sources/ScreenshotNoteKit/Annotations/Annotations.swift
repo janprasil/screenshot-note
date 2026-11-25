@@ -74,7 +74,12 @@ final class DrawingView:NSView,NSTextViewDelegate {
   mark.color.setStroke();mark.color.setFill();let p=NSBezierPath();p.lineWidth=mark.width;p.lineCapStyle = .round;p.lineJoinStyle = .round
   switch mark.tool{
   case .pen:p.move(to:first);for q in mark.points.dropFirst(){p.line(to:q)};p.stroke()
-  case .arrow:p.move(to:first);p.line(to:last);let angle=atan2(last.y-first.y,last.x-first.x),length=max(15,mark.width*4);for offset in [-CGFloat.pi/6,CGFloat.pi/6]{p.move(to:last);p.line(to:NSPoint(x:last.x-length*cos(angle+offset),y:last.y-length*sin(angle+offset)))};p.stroke()
+  case .arrow:
+   // Kvadratický oblouk přes bod uprostřed; hrot míří po tečně v konci.
+   let a=mark.arrowStart,b=mark.arrowEnd,c=mark.arrowControl
+   p.move(to:a);p.curve(to:b,controlPoint1:NSPoint(x:a.x+2/3*(c.x-a.x),y:a.y+2/3*(c.y-a.y)),controlPoint2:NSPoint(x:b.x+2/3*(c.x-b.x),y:b.y+2/3*(c.y-b.y)))
+   let from=hypot(b.x-c.x,b.y-c.y)>0.5 ? c:a,angle=atan2(b.y-from.y,b.x-from.x),length=max(15,mark.width*4)
+   for offset in [-CGFloat.pi/6,CGFloat.pi/6]{p.move(to:b);p.line(to:NSPoint(x:b.x-length*cos(angle+offset),y:b.y-length*sin(angle+offset)))};p.stroke()
   case .ellipse:let shape=NSBezierPath(ovalIn:mark.bounds);shape.lineWidth=mark.width;shape.stroke()
   case .rectangle:p.appendRect(mark.bounds);p.stroke()
   case .element:paintElement(mark)
@@ -99,7 +104,8 @@ final class DrawingView:NSView,NSTextViewDelegate {
    if mark.tool == .ellipse {let rx=max(1,r.width/2),ry=max(1,r.height/2);let value=pow((p.x-r.midX)/rx,2)+pow((p.y-r.midY)/ry,2);return abs(sqrt(value)-1)<=max(tolerance,mark.width)/min(rx,ry)}
    if mark.tool == .element {return elementHit(mark,at:p,tolerance:tolerance)}
    if mark.tool == .rectangle {return r.insetBy(dx:-tolerance,dy:-tolerance).contains(p) && !r.insetBy(dx:tolerance,dy:tolerance).contains(p)}
-   for j in 1..<mark.points.count{let a=mark.points[j-1],b=mark.points[j],dx=b.x-a.x,dy=b.y-a.y;let t=max(0,min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/max(0.001,dx*dx+dy*dy)));if hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<=max(tolerance,mark.width){return true}};return false
+   let line=mark.tool == .arrow ? (0...24).map{mark.arrowPoint(CGFloat($0)/24)}:mark.points
+   for j in 1..<line.count{let a=line[j-1],b=line[j],dx=b.x-a.x,dy=b.y-a.y;let t=max(0,min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/max(0.001,dx*dx+dy*dy)));if hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<=max(tolerance,mark.width){return true}};return false
   }}
  func choose(_ index:Int?){defer{updateNoteButton()};selected=index;if let i=index{let m=marks[i];color=m.color;thickness=m.width;fontSize=m.fontSize;bold=m.bold;italic=m.italic;underline=m.underline};needsDisplay=true;window?.invalidateCursorRects(for:self);changed?()}
  override func mouseDown(with event:NSEvent){finishText();window?.makeFirstResponder(self);if tool == .select && beginTransform(with:event){return};guard imageRect.contains(convert(event.locationInWindow,from:nil)) else{choose(nil);return};let p=point(event)
@@ -188,12 +194,24 @@ final class AnnotationToolButton:NSButton {
  override func mouseExited(with event:NSEvent){hovered=false;needsDisplay=true}
  override func resetCursorRects(){super.resetCursorRects();if isEnabled{addCursorRect(bounds,cursor:.pointingHand)}}
  override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();needsDisplay=true}
+ /// Popisek vedle ikony; nil = jen ikona.
+ var caption:String?{didSet{needsDisplay=true}}
+ static let captionFont=NSFont.systemFont(ofSize:13,weight:.semibold)
+ /// Šířka tlačítka s popiskem: okraj, ikona, mezera, text, okraj.
+ static func labeledWidth(_ text:String)->CGFloat{ceil(10+18+6+(text as NSString).size(withAttributes:[.font:captionFont]).width+12)}
  override func draw(_ dirtyRect:NSRect) {
   let active=state == .on
   let path=NSBezierPath(roundedRect:bounds.insetBy(dx:0.5,dy:0.5),xRadius:6,yRadius:6)
   (active ? AppPalette.action.withAlphaComponent(hovered ? 0.88:1):(hovered ? AppPalette.accent.withAlphaComponent(0.16):AppPalette.raised)).setFill();path.fill()
   if hovered && !active{AppPalette.accent.withAlphaComponent(0.45).setStroke();path.lineWidth=1;path.stroke()}
   let color=active ? NSColor.white:NSColor.labelColor
+  if let caption {
+   drawAdaptiveSymbol(image,in:NSRect(x:10,y:bounds.midY-9,width:18,height:18),color:color)
+   let attributes:[NSAttributedString.Key:Any]=[.font:Self.captionFont,.foregroundColor:color]
+   let size=(caption as NSString).size(withAttributes:attributes)
+   (caption as NSString).draw(at:NSPoint(x:34,y:bounds.midY-size.height/2),withAttributes:attributes)
+   return
+  }
   let glyph=NSRect(x:bounds.midX-10,y:bounds.midY-10,width:20,height:20)
   drawAdaptiveSymbol(image,in:glyph,color:color)
  }
@@ -210,6 +228,8 @@ final class AnnotationEditor:NSObject,NSWindowDelegate {
  private var noteView:NSTextView?;private var initialNote="";private(set) var noteResult:String?
 var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:NSRect?
  var tools:[Tool]=[.select,.pen,.arrow,.ellipse,.rectangle,.text,.crop];var toolButtons:[NSButton]=[]
+ /// Krátké popisky nástrojů a oddělovač za nimi; rozvržení lišty počítá `layoutToolbar`.
+ var toolLabels:[String]=[];var toolDivider:NSView?
  var onValuePickerPresented:((NSWindow,[NSButton])->Void)?
  /// Položka s videem: anotace se kreslí nad přehrávačem a při uložení se vypálí do MP4.
  var isVideo=false;var videoPlayer:VideoAnnotationPlayer?;var burning=false;let burnProgress=NSProgressIndicator()
@@ -237,20 +257,23 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   let w=min(dimensions.width+notePanel,screen.width-40),h=note ? min(max(dimensions.height,540),screen.height-40):dimensions.height
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:w,height:h),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=isVideo ? L("Upravit video"):L("Upravit screenshot");window.delegate=self;window.minSize=NSSize(width:min(max(740,notePanel+460),w),height:min(note ? 540:340,h))
   _ = installDesignRoot(window,headerHeight:62,showClose:false)
+  var labels=[L("Výběr"),L("Kreslit"),L("Šipka"),L("Elipsa"),L("Rámeček"),L("Text"),L("Oříznout")]
   var symbols=["cursorarrow","pencil.tip","arrow.up.right","circle","rectangle","textformat","crop"],helps=[L("Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo"),L("Kreslení"),L("Šipka"),L("Kruh / elipsa"),L("Rámeček"),L("Text přímo do obrázku"),L("Oříznout · tažením označ zachovanou oblast")]
   // Video se neořezává; anotace platí pro celý záznam.
-  if isVideo{tools.removeAll{$0 == .crop};symbols.removeLast();helps.removeLast()}
+  if isVideo{tools.removeAll{$0 == .crop};symbols.removeLast();helps.removeLast();labels.removeLast()}
   // Nástroj Element jen u obrázku s mapou elementů z prohlížeče.
   let elements=elementTargets(mapElements(contextFile:contextSidecars(url)[0],imageSize:image.size),imageHeight:image.size.height)
-  if !elements.isEmpty{tools.append(.element);symbols.append("cursorarrow.and.square.on.square.dashed");helps.append(L("Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší"))}
+  if !elements.isEmpty{tools.append(.element);symbols.append("cursorarrow.and.square.on.square.dashed");helps.append(L("Element stránky · klik vybere, opakovaný klik nebo ⌥ rodiče, Esc zruší"));labels.append(L("Element"))}
+  toolLabels=labels
   let shift=CGFloat(tools.count-7)*44
   _ = icon("arrow.counterclockwise",L("Vrátit poslední úpravu"),#selector(undoMark),NSRect(x:16,y:h-48,width:36,height:34))
-  for x in [CGFloat(64),390+shift]{let divider=DesignDivider(NSRect(x:x,y:h-43,width:1,height:24));divider.autoresizingMask=[.minYMargin];window.contentView!.addSubview(divider)}
+  for x in [CGFloat(64),390+shift]{let divider=DesignDivider(NSRect(x:x,y:h-43,width:1,height:24));divider.autoresizingMask=[.minYMargin];window.contentView!.addSubview(divider);if x>64{toolDivider=divider}}
   for i in tools.indices{let b=icon(symbols[i],helps[i],#selector(selectTool(_:)),NSRect(x:78+CGFloat(i)*44,y:h-48,width:36,height:34));b.tag=i;b.setButtonType(.toggle);toolButtons.append(b)}
   colors.frame=NSRect(x:406+shift,y:h-48,width:38,height:34);colors.toolTip=L("Barva vybraného objektu nebo nového tahu");colors.color = .systemRed;colors.target=self;colors.action=#selector(changeColor);colors.autoresizingMask=[.minYMargin];window.contentView!.addSubview(colors)
   width=icon("lineweight",L("Tloušťka čáry"),#selector(widthMenu),NSRect(x:460+shift,y:h-48,width:36,height:34))
   size=icon("textformat.size",L("Velikost textu"),#selector(sizeMenu),NSRect(x:460+shift,y:h-48,width:36,height:34));textControls.append(size)
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
+  layoutToolbar()
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
   canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-122));canvas.density=annotationDensity(baseData);canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
   if note{addNotePanel(frame:NSRect(x:w-16-notePanel,y:65,width:notePanel,height:h-122),text:caption)}
@@ -272,6 +295,25 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   sync();presentScreenshotPanel(window);window.makeFirstResponder(canvas);if isExportingDesign{exportDesignWindow(window,name:"annotations");return false};NSApp.runModal(for:window);window.orderOut(nil)
   return accepted
  }
+ /// Nástroje s popisky, když se lišta vejde do šířky okna; jinak jen ikony s tooltipem.
+ func layoutToolbar(){
+  guard let content=window?.contentView,toolButtons.count == toolLabels.count else{return}
+  let y=content.bounds.height-48,widths=toolLabels.map{AnnotationToolButton.labeledWidth($0)}
+  // Za nástroji: oddělovač, barva, tloušťka a tři styly textu, vpravo zavření.
+  let labeled=78+widths.reduce(0,+)+CGFloat(widths.count-1)*6+12+250+60 <= content.bounds.width
+  var x:CGFloat=78
+  for(i,button) in toolButtons.enumerated(){
+   let w=labeled ? widths[i]:36
+   (button as? AnnotationToolButton)?.caption=labeled ? toolLabels[i]:nil
+   button.frame=NSRect(x:x,y:y,width:w,height:34);x+=w+(labeled ? 6:8)
+  }
+  let end=x-(labeled ? 6:8)+12
+  toolDivider?.frame.origin.x=end
+  colors.frame.origin.x=end+16
+  width?.frame.origin.x=end+70;size?.frame.origin.x=end+70
+  for(i,b) in styleButtons.enumerated(){b.frame.origin.x=end+114+CGFloat(i)*44}
+ }
+ func windowDidResize(_ notification:Notification){layoutToolbar()}
  func layoutPlayer(){guard let player=videoPlayer,let content=window?.contentView else{return};player.view.frame=canvas.convert(canvas.imageRect,to:content)}
  func encodedMarks()throws->Data{let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys];return try encoder.encode(canvas.marks)}
  func recordInitialState(){initialMarks=try? encodedMarks();initialCrop=canvas.viewport}

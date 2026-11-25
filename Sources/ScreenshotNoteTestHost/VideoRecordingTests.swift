@@ -4,16 +4,17 @@ import AVFoundation
 
 // Video ze záznamu obrazovky; parita Markdownu s webem (tests/video.test.mjs, videoParity).
 @MainActor func videoRecordingTests() throws {
- // Rozměr: delší strana nejvýš 1280, sudé hodnoty.
- assert(recordingSize(width:2880,height:1800)==(1280,800))
+ // Rozměr: delší strana nejvýš 1920, sudé hodnoty.
+ assert(recordingSize(width:2880,height:1800)==(1920,1200))
  assert(recordingSize(width:1000,height:501)==(1000,500))
  assert(recordingSize(width:1,height:1)==(2,2))
- assert(recordingSize(width:1800,height:2880)==(800,1280))
+ assert(recordingSize(width:1800,height:2880)==(1200,1920))
  // Délka m:ss jako web videoDuration.
  assert([500,59499,59500,60500,0].map(videoDuration)==["0:01","0:59","1:00","1:01","0:00"])
- assert(RecordingLimits.fps==10 && RecordingLimits.maxSide==1280 && RecordingLimits.bitrate==850_000 && RecordingLimits.maxDuration==60 && RecordingLimits.maxFrames==12)
- // 60 s při cílovém bitrate se s rezervou vejde do 8 MiB limitu cloudu.
+ assert(RecordingLimits.fps==20 && RecordingLimits.maxSide==1920 && RecordingLimits.bitrate==1_750_000 && RecordingLimits.maxDuration==60 && RecordingLimits.maxFrames==12)
+ // 60 s při cílovém bitrate i stropu se vejde do 16 MiB limitu cloudu.
  assert(Double(RecordingLimits.bitrate)*RecordingLimits.maxDuration/8<Double(CloudAttachment.videoLimit)*0.8)
+ assert(Double(RecordingLimits.peakBytesPerSecond)*RecordingLimits.maxDuration<Double(CloudAttachment.videoLimit)*0.9)
  // Odpočet: výchozí 3 s, jen 3/5/10.
  let savedCountdown=UserDefaults.standard.object(forKey:"recordingCountdown")
  UserDefaults.standard.removeObject(forKey:"recordingCountdown");assert(recordingCountdown==3)
@@ -22,6 +23,9 @@ import AVFoundation
  // Oblast v souřadnicích displeje (počátek vlevo nahoře).
  assert(displaySourceRect(CGRect(x:100,y:200,width:300,height:400),screen:CGRect(x:0,y:0,width:1440,height:900))==CGRect(x:100,y:300,width:300,height:400))
  assert(displaySourceRect(CGRect(x:1540,y:100,width:200,height:100),screen:CGRect(x:1440,y:0,width:1920,height:1080))==CGRect(x:100,y:880,width:200,height:100))
+ // Nastavení enkodéru (strop datového toku) AVAssetWriter přijme.
+ let probe=fm.temporaryDirectory.appendingPathComponent("recorder-\(UUID().uuidString).mp4");defer{try? fm.removeItem(at:probe)}
+ _ = try ScreenRecorder(output:probe,width:1920,height:1200)
  print("PASS: recording size, duration format, limits, countdown setting and region coordinates")
  
  // Esc: jen během výběru, odpočtu a záznamu; zapnutí je idempotentní a vypnutí uvolní zkratku.
@@ -124,7 +128,7 @@ import AVFoundation
 
  // Cloudové přílohy: typ, limit, název souboru ve frontě a hlavičky snímku.
  let video=CloudAttachment(index:2,kind:"video",bytes:10,sha256:"a")
- assert(video.filename=="2.mp4" && video.contentType=="video/mp4" && video.sizeLimit==8*1024*1024 && !video.isContext)
+ assert(video.filename=="2.mp4" && video.contentType=="video/mp4" && video.sizeLimit==16*1024*1024 && !video.isContext)
  let shot=CloudAttachment(index:2,kind:"frame-12",bytes:10,sha256:"b",timestampMs:900,video:"a")
  assert(shot.filename=="2.frame-12.png" && shot.contentType=="image/png" && shot.sizeLimit==4*1024*1024)
  assert(CloudAttachment(index:1,kind:"har",bytes:1,sha256:"").filename=="1.har" && CloudAttachment(index:1,kind:"context",bytes:1,sha256:"").contentType=="application/json")

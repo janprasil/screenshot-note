@@ -30,6 +30,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    quotaShown=(message,Date());DispatchQueue.main.async{showError(message)}
   }
   folderTimer=Timer.scheduledTimer(withTimeInterval:5,repeats:true){[weak self] _ in self?.refreshCloudFolders()}
+  NotificationCenter.default.addObserver(forName:.cloudConnectionActivated,object:nil,queue:.main){[weak self] _ in
+   // Až po dokončení refreshConnection (connecting už je false).
+   DispatchQueue.main.async{self?.nextFolderRefresh = .distantPast;self?.refreshCloudFolders()}
+  }
   refreshCloudFolders()
   // Starší místní poznámky jednou přijdou o skryté značky.
   for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
@@ -98,13 +102,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     let key="folder-transfer-offer:"+sessionFingerprint(Data((c.endpoint+owner.uuidString+c.id.uuidString).utf8))
     if !UserDefaults.standard.bool(forKey:key) {
      let local=Topics.local
-     let alert=NSAlert();alert.messageText=L("Synchronizovat lokální složky s cloudem?");alert.informativeText=L("Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované.")
-     let boxes=local.map{topic->NSButton in let box=NSButton(checkboxWithTitle:topic.displayName,target:nil,action:nil);box.state = .on;return box}
-     let stack=NSStackView(views:boxes);stack.orientation = .vertical;stack.alignment = .leading;stack.frame=NSRect(x:0,y:0,width:330,height:CGFloat(boxes.count)*24);alert.accessoryView=stack
-     alert.addButton(withTitle:L("Synchronizovat"));alert.addButton(withTitle:L("Teď ne"))
-     let choice=alert.runModal();UserDefaults.standard.set(true,forKey:key)
-     let chosen=zip(local,boxes).filter{$0.1.state == .on}.map(\.0)
-     if choice == .alertFirstButtonReturn,!chosen.isEmpty{await FolderDialogs.move(chosen,confirm:false)}
+     let answer=FolderListDialog().run(title:L("Synchronizovat lokální složky s cloudem?"),message:L("Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované."),
+      folders:local.map(\.displayName),checkboxes:true,buttons:[L("Synchronizovat"),L("Teď ne")])
+     UserDefaults.standard.set(true,forKey:key)
+     let chosen=zip(local,answer.checked).filter{$0.1}.map(\.0)
+     if answer.choice == 0,!chosen.isEmpty{await FolderDialogs.move(chosen,confirm:false)}
     }
    }
   }

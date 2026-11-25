@@ -171,8 +171,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   scroll.scrollerStyle = .overlay;scroll.verticalScroller?.controlSize = .small
   sidebar.addSubview(DesignDivider(NSRect(x:16,y:64,width:208,height:1)))
   // Dole jen Nová složka; výchozí název a šablony jsou v menu „⋯“.
-  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
-  let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:22,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
+  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:16,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
+  let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:16,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
   more.toolTip=L("Výchozí název a šablony");more.setAccessibilityLabel(L("Výchozí název a šablony"));sidebar.addSubview(more)
   // Název je nadpis; tužka nebo klik ho přepne do úprav.
   nameShell.isHidden=true;view.addSubview(nameShell)
@@ -201,10 +201,12 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
   aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:122,width:380,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
   defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:662,y:122,width:210,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
-  view.addSubview(DesignDivider(NSRect(x:272,y:62,width:600,height:1)))
-  deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
-  saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
-  saveButton=styledButton(L("Uložit složku"),symbol:"checkmark",role:.primary,frame:NSRect(x:700,y:22,width:172,height:34),target:self,action:#selector(saveTopic));view.addSubview(saveButton)
+  // Linka ve stejné výšce jako v postranním panelu, tlačítka s odstupem pod ní.
+  view.addSubview(DesignDivider(NSRect(x:272,y:64,width:600,height:1)))
+  deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:16,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
+  // Hláška svisle na středu tlačítek.
+  saveStatus.frame=NSRect(x:272,y:25,width:244,height:16);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
+  saveButton=styledButton(L("Uložit složku"),symbol:"checkmark",role:.primary,frame:NSRect(x:700,y:16,width:172,height:34),target:self,action:#selector(saveTopic));view.addSubview(saveButton)
   NotificationCenter.default.addObserver(self,selector:#selector(foldersChanged),name:.cloudFoldersChanged,object:nil)
   reloadFolders();if present{presentScreenshotPanel(window)}
  }
@@ -419,7 +421,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   aiTitleToggle.state=(pending ?? (current?.aiTitle==true)) ? .on:.off;aiTitleToggle.isEnabled=editingManaged && pending==nil && (planned || current?.aiTitle==true)
   if cloud,let current,current.aiTitle==nil,!aiTitleRequested.contains(current.id),!isExportingDesign{aiTitleRequested.insert(current.id);Task{@MainActor in _ = try? await CloudFolders.shared.aiTitle(current);self.list=Topics.all;self.updateContext()}}
   if let defaultTitleButton {
-   defaultTitleButton.frame.origin.y=top-62;defaultTitleButton.isEnabled = !cloud || editingManaged
+   // Pod tlačítkem kontextu s odstupem 8 px, aby nepřerostlo linku nad tlačítky.
+   defaultTitleButton.frame.origin.y=top-48;defaultTitleButton.isEnabled = !cloud || editingManaged
    defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
    defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
   }

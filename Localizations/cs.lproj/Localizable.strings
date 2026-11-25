@@ -243,6 +243,8 @@
 "Zrušit párování" = "Zrušit párování";
 "Připojení nelze ověřit. Zkus to později znovu." = "Připojení nelze ověřit. Zkus to později znovu.";
 "Ověřuji připojení…" = "Ověřuji připojení…";
+"Čekám na potvrzení v prohlížeči…" = "Čekám na potvrzení v prohlížeči…";
+"Synchronizuji složky…" = "Synchronizuji složky…";
 "Lokální poznámky nevyžadují účet. Cloud se aktivuje samostatně na webu." = "Lokální poznámky nevyžadují účet. Cloud se aktivuje samostatně na webu.";
 "Čekám na potvrzení párování na webu." = "Čekám na potvrzení párování na webu.";
 "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu." = "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu.";
@@ -349,6 +351,7 @@
 "Vyber místní adresář pro cloudovou složku „%@“." = "Vyber místní adresář pro cloudovou složku „%@“.";
 "Vybrat" = "Vybrat";
 "Vybrat pro každou zvlášť…" = "Vybrat pro každou zvlášť…";
+"Každou zvlášť…" = "Každou zvlášť…";
 "Výchozí složka" = "Výchozí složka";
 "Výzkum uživatelů" = "Výzkum uživatelů";
 "Změněno na jiném Macu. Načetl jsem novou verzi." = "Změněno na jiném Macu. Načetl jsem novou verzi.";

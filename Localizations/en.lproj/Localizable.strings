@@ -243,6 +243,8 @@
 "Zrušit párování" = "Cancel pairing";
 "Připojení nelze ověřit. Zkus to později znovu." = "The connection could not be verified. Try again later.";
 "Ověřuji připojení…" = "Checking connection…";
+"Čekám na potvrzení v prohlížeči…" = "Waiting for confirmation in the browser…";
+"Synchronizuji složky…" = "Syncing folders…";
 "Lokální poznámky nevyžadují účet. Cloud se aktivuje samostatně na webu." = "Local notes need no account. Cloud is activated separately on the web.";
 "Čekám na potvrzení párování na webu." = "Waiting for pairing confirmation on the web.";
 "Zapomenutí smaže přístup pouze z tohoto Macu. Zařízení odvolej v nastavení webu." = "Forgetting removes access only from this Mac. Revoke the device in web settings.";
@@ -349,6 +351,7 @@
 "Vyber místní adresář pro cloudovou složku „%@“." = "Choose a local directory for the cloud folder “%@”.";
 "Vybrat" = "Choose";
 "Vybrat pro každou zvlášť…" = "Choose for each…";
+"Každou zvlášť…" = "Each separately…";
 "Výchozí složka" = "Default folder";
 "Výzkum uživatelů" = "User research";
 "Změněno na jiném Macu. Načetl jsem novou verzi." = "Changed on another Mac. The new version has been loaded.";

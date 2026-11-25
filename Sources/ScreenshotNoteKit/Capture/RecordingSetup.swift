@@ -41,7 +41,7 @@ final class RecordingSetup {
  }
  /// Zobrazí překryvy a lištu bez aktivace aplikace (cílová aplikace si nechá vzhled aktivního okna).
  func show() {
-  for dim in dims{dim.orderFrontRegardless()}
+  allowBackgroundCursor();for dim in dims{dim.orderFrontRegardless()}
   bar.orderFrontRegardless()
   // Klíčový je překryv pod myší: jen klíčové okno dostává pohyb myši pro kurzor.
   (dims.first{$0.frame.contains(NSEvent.mouseLocation)} ?? dims.first)?.makeKey()

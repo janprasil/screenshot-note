@@ -120,7 +120,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   if let i=selected,let start=dragStart,let original=dragOriginal{marks[i].points=original.map{NSPoint(x:$0.x+p.x-start.x,y:$0.y+p.y-start.y)};needsDisplay=true;return}
   guard var mark=pending else{return};if mark.tool == .pen{mark.points.append(p)}else{mark.points[1]=p};pending=mark;needsDisplay=true
  }
- override func mouseUp(with event:NSEvent){defer{updateNoteButton()};if let mark=pending{marks.append(mark);pending=nil;tool = .select;choose(marks.count-1)};if let rect=cropPreview{applyCrop(rect)};cropStart=nil;cropPreview=nil;dragStart=nil;dragOriginal=nil
+ override func mouseUp(with event:NSEvent){defer{updateNoteButton()};if dragStart != nil,let i=selected{fitTextToImage(i)};if let mark=pending{marks.append(mark);pending=nil;tool = .select;choose(marks.count-1)};if let rect=cropPreview{applyCrop(rect)};cropStart=nil;cropPreview=nil;dragStart=nil;dragOriginal=nil
   if transformDrag != nil {
    transformDrag=nil
    let p=convert(event.locationInWindow,from:nil)
@@ -137,7 +137,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
  override func updateTrackingAreas(){super.updateTrackingAreas();if let trackingArea{removeTrackingArea(trackingArea)};let area=NSTrackingArea(rect:.zero,options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self,userInfo:nil);addTrackingArea(area);trackingArea=area}
  override func mouseMoved(with event:NSEvent){guard tool == .element else{return};let p=convert(event.locationInWindow,from:nil);let hovered=imageRect.contains(p) ? smallestElement(at:imagePoint(p),in:visibleElements)?.index:nil;if hovered != hoverElement{hoverElement=hovered;needsDisplay=true}}
  override func mouseExited(with event:NSEvent){if hoverElement != nil{hoverElement=nil;needsDisplay=true}}
- func updateSelected(){if let i=selected,marks.indices.contains(i){snapshot();marks[i].color=color;marks[i].width=thickness;marks[i].fontSize=fontSize;marks[i].bold=bold;marks[i].italic=italic;marks[i].underline=underline;updateInline()};needsDisplay=true}
+ func updateSelected(){if let i=selected,marks.indices.contains(i){snapshot();marks[i].color=color;marks[i].width=thickness;marks[i].fontSize=fontSize;marks[i].bold=bold;marks[i].italic=italic;marks[i].underline=underline;fitTextToImage(i);updateInline()};needsDisplay=true}
  func startText(_ index:Int){
   guard marks.indices.contains(index),marks[index].tool == .text else{return}
   snapshot();editingIndex=index;updateNoteButton()
@@ -163,7 +163,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   edit.textStorage?.setAttributes(attrs,range:NSRange(location:0,length:(edit.string as NSString).length));edit.setSelectedRange(NSRange(location:min(selection.location,(edit.string as NSString).length),length:min(selection.length,max(0,(edit.string as NSString).length-selection.location))))
   edit.needsDisplay=true
  }
- func textDidChange(_ notification:Notification){guard let edit=inline,let i=editingIndex else{return};marks[i].text=edit.string;updateInline();needsDisplay=true}
+ func textDidChange(_ notification:Notification){guard let edit=inline,let i=editingIndex else{return};marks[i].text=edit.string;fitTextToImage(i);updateInline();needsDisplay=true}
  func textView(_ textView:NSTextView,doCommandBy selector:Selector)->Bool{if selector==#selector(NSResponder.insertNewline(_:)) || selector==#selector(NSResponder.cancelOperation(_:)){finishText();return true};return false}
  func finishText(){commitElementNote();guard !closingText,let i=editingIndex else{return};closingText=true;marks[i].text=inline?.string ?? marks[i].text;inline?.removeFromSuperview();inline=nil;editingIndex=nil;if marks[i].text.isEmpty{let numbered=marks[i].number != nil;marks.remove(at:i);selected=nil;if numbered{renumberElements()}};window?.makeFirstResponder(self);closingText=false;tool = .select;needsDisplay=true;changed?()}
  /// Jen anotace na průhledném pozadí v rozměru obrazu; bez anotací nil.

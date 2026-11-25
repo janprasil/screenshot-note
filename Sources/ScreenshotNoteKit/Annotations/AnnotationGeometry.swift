@@ -92,6 +92,17 @@ struct AnnotationTransformDrag {
  var index:Int;var original:Mark;var start:NSPoint;var kind:Kind
 }
 extension DrawingView {
+ /// Text nesmí přetéct pravý okraj obrázku: zalomí se na zbývající šířku, u samého okraje se posune doleva.
+ func fitTextToImage(_ index:Int){
+  guard marks.indices.contains(index),marks[index].tool == .text,marks[index].rotation == 0,var origin=marks[index].points.first else{return}
+  var mark=marks[index];let minimum=min(viewport.width,60)
+  let natural=((mark.text.isEmpty ? "Text":mark.text) as NSString).size(withAttributes:mark.attributes).width
+  if viewport.maxX-origin.x<minimum{origin.x=max(viewport.minX,viewport.maxX-minimum);mark.points[0]=origin}
+  let available=viewport.maxX-origin.x
+  if let width=mark.textWidth{if width>available{mark.textWidth=available}}
+  else if natural>available{mark.textWidth=available}
+  marks[index]=mark
+ }
  func displayPoint(_ p:NSPoint)->NSPoint{let r=imageRect;return NSPoint(x:r.minX+(p.x-viewport.minX)*scale,y:r.minY+(p.y-viewport.minY)*scale)}
  func imagePoint(_ p:NSPoint)->NSPoint{let r=imageRect;return NSPoint(x:(p.x-r.minX)/scale+viewport.minX,y:(p.y-r.minY)/scale+viewport.minY)}
  func selectionCorners(_ mark:Mark)->[NSPoint]{
@@ -153,7 +164,7 @@ extension DrawingView {
    let fixed=(corner+2)%4
    if original.tool == .text {
     let start=original.unrotatedPoint(drag.start),end=original.unrotatedPoint(p)
-    marks[drag.index]=original.resizingText(by:NSPoint(x:end.x-start.x,y:end.y-start.y))
+    marks[drag.index]=original.resizingText(by:NSPoint(x:end.x-start.x,y:end.y-start.y));fitTextToImage(drag.index)
     break
    }
    let anchor=original.rotatedPoint(original.corners[fixed]),moving=original.rotatedPoint(original.corners[corner]);let dx=moving.x-anchor.x,dy=moving.y-anchor.y

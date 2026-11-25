@@ -42,8 +42,10 @@ final class Updates:NSObject,SPUUpdaterDelegate,SPUStandardUserDriverDelegate,NS
 
  // MARK: SPUStandardUserDriverDelegate
  var supportsGentleScheduledUpdateReminders:Bool{true}
+ /// Plánovanou kontrolu ukáže jen menu; okno otevře až uživatel.
+ func standardUserDriverShouldHandleShowingScheduledUpdate(_ update:SUAppcastItem,andInImmediateFocus immediateFocus:Bool)->Bool{false}
  func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate:Bool,forUpdate update:SUAppcastItem,state:SPUUserUpdateState) {
-  if !state.userInitiated{updateWaiting=true}
+  if !handleShowingUpdate{updateWaiting=true}
  }
  func standardUserDriverWillFinishUpdateSession(){updateWaiting=false}
 }

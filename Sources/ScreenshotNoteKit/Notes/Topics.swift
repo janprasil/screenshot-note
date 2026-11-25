@@ -26,6 +26,11 @@ struct Topic:Codable,Equatable {
  var savesLocally:Bool{cloudFolderID == nil ? cloudOnly != true:!folder.isEmpty}
  var savesToCloud:Bool{cloudFolderID != nil || cloudOnly == true || uploadToCloud == true}
  var destination:URL{URL(fileURLWithPath:folder,isDirectory:true)}
+ /// Typ úložiště pro výběr složky: tým, osobní cloud, nebo jen na tomto Macu.
+ var storageKind:String{cloudTeam==true ? LF("Tým %@",cloudOwnerName ?? L("Tým")):cloudFolderID != nil ? L("Osobní cloud"):L("Jen na tomto Macu")}
+ var storageSymbol:String{cloudTeam==true ? "person.2":cloudFolderID != nil ? "icloud":"folder"}
+ /// Řádek pod názvem ve výběru: typ, popis a místní adresář bez prázdných částí.
+ var choiceDetail:String{[storageKind,detail,folder].filter{!$0.isEmpty}.joined(separator:" · ")}
 }
 enum Topics {
  static func checkedDestination(_ path:String)throws->URL {
@@ -116,7 +121,7 @@ final class StarButton:AppButton {
   drawAdaptiveSymbol(symbol,in:NSRect(x:bounds.midX-9,y:bounds.midY-9,width:18,height:18),color:isOn ? .systemYellow:AppPalette.secondary)
  }
 }
-final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NSTextFieldDelegate {
+final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NSTextFieldDelegate,NSWindowDelegate {
  var window:NSWindow!;var list=Topics.all;var editingID:String?;let table=NSTableView()
  private let connection:()->CloudConnection?
  var signedIn:Bool{connection()?.ownerID != nil}
@@ -147,10 +152,16 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  // Výchozí název relace bez názvu; u cloudové složky platí hned na serveru, u místní s uložením.
  private(set) var defaultTitleButton:AppButton!;var defaultTitleValue:String?=nil
  let mode=NSPopUpButton()
+ // Stav formuláře po načtení složky; rozdíl znamená neuložené změny.
+ private var loadedForm:[String]?
+ // Zapínání AI názvu čeká na server; mezitím přepínač drží zvolenou hodnotu.
+ private var pendingAITitle:(id:String,value:Bool)?
+ // AI nastavení chybějící v katalogu se dotáže jednou za otevření.
+ private var aiTitleRequested=Set<String>()
  func show(present:Bool=true,reload:Bool=true){
   if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
   if !isExportingDesign && reload{list=Topics.all}
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:900,height:620),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Konfigurace");window.isReleasedWhenClosed=false
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:900,height:620),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Konfigurace");window.isReleasedWhenClosed=false;window.delegate=self
   let view=installDesignRoot(window,headerHeight:108)
   let sidebar=DesignSurface(frame:NSRect(x:0,y:0,width:240,height:620),fill:AppPalette.raised);view.addSubview(sidebar)
   sidebar.addSubview(designLabel(L("Složky"),NSRect(x:20,y:562,width:200,height:30),size:19,weight:.semibold))
@@ -184,23 +195,31 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   askBeforeDelete.title=L("Ptát se před smazáním v cloudu");askBeforeDelete.frame=NSRect(x:272,y:104,width:600,height:22);askBeforeDelete.target=self;askBeforeDelete.action=#selector(toggleAskBeforeDelete);askBeforeDelete.isHidden=true;view.addSubview(askBeforeDelete)
   fileLabel=sectionLabel(L("Společný soubor"),NSRect(x:272,y:196,width:600,height:18));view.addSubview(fileLabel);inputShell(file,frame:NSRect(x:272,y:154,width:600,height:36),in:view)
   contextToggle.title=L("Přikládat kontext z prohlížeče");contextToggle.frame=NSRect(x:272,y:120,width:380,height:22);contextToggle.target=self;contextToggle.action=#selector(toggleContext);view.addSubview(contextToggle)
-  contextCaption=designLabel("",NSRect(x:292,y:96,width:580,height:18),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
+  contextCaption=designLabel("",NSRect(x:292,y:90,width:358,height:28),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
+  // Dlouhý popis se zalomí, aby nezasahoval pod tlačítka vpravo.
+  contextCaption.usesSingleLineMode=false;contextCaption.maximumNumberOfLines=2;contextCaption.lineBreakMode = .byWordWrapping;contextCaption.cell?.wraps=true;contextCaption.cell?.truncatesLastVisibleLine=true
   contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
-  aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:128,width:600,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
+  aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:122,width:380,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
   defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:662,y:122,width:210,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
-  view.addSubview(DesignDivider(NSRect(x:272,y:72,width:600,height:1)))
+  view.addSubview(DesignDivider(NSRect(x:272,y:62,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
   saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
   saveButton=styledButton(L("Uložit složku"),symbol:"checkmark",role:.primary,frame:NSRect(x:700,y:22,width:172,height:34),target:self,action:#selector(saveTopic));view.addSubview(saveButton)
   NotificationCenter.default.addObserver(self,selector:#selector(foldersChanged),name:.cloudFoldersChanged,object:nil)
   reloadFolders();if present{presentScreenshotPanel(window)}
  }
- @objc func foldersChanged(){if !isExportingDesign{list=Topics.all};if window?.isVisible==true{if list.contains(where:{$0.id==editingID}){reloadTable();updateMode()}else{reloadFolders()}}}
+ @objc func foldersChanged(){
+  if !isExportingDesign{list=Topics.all}
+  guard window?.isVisible==true else{return}
+  // Rozpracovaná nová složka zůstane otevřená i po změně seznamu.
+  if editingID==nil,loadedForm != nil{table.reloadData();return}
+  if list.contains(where:{$0.id==editingID}){reloadTable();updateMode()}else{reloadFolders()}
+ }
  private func reloadTable(){table.reloadData();if let row=rows.firstIndex(where:{$0.id==editingID}){table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)}}
  func reloadFolders(){
   table.reloadData();let row=rows.firstIndex{$0.id==editingID} ?? (rows.isEmpty ? nil:0)
   if let row{table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);load(rows[row])}
-  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading()}
+  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading();loadedForm=nil}
   updateMode()
  }
  func numberOfRows(in tableView:NSTableView)->Int{rows.count}
@@ -237,12 +256,31 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let secondary=(cloud ? (topic.folder.isEmpty ? L("Bez místního adresáře"):L("Cloud")):L("Jen na tomto Macu"))+" · "+(topic.combined ? L("Společný soubor"):L("Samostatné relace"))
   cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:AppPalette.secondary));cell.toolTip=topic.displayName+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
  }
- func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row){load(rows[row])}}
+ // Znovuvybrání stejné složky po překreslení seznamu nesmí přepsat rozpracovaný formulář.
+ func tableViewSelectionDidChange(_ notification:Notification){let row=table.selectedRow;if rows.indices.contains(row),rows[row].id != editingID{load(rows[row])}}
+ func selectionShouldChange(in tableView:NSTableView)->Bool{confirmLeave()}
+ func windowShouldClose(_ sender:NSWindow)->Bool{confirmLeave()}
+ /// Hodnoty formuláře; u cloudové složky se kontext a výchozí název ukládají hned, proto se nepočítají.
+ private func formState()->[String] {
+  let cloud=editingCloud,policy=cloud ? "":((try? JSONEncoder().encode(contextPolicy)).map{String(decoding:$0,as:UTF8.self)} ?? "")
+  return [name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),detail.stringValue,folder.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),String(mode.indexOfSelectedItem),mode.indexOfSelectedItem==1 ? file.stringValue:"",template,fileTemplate ?? "",commentTemplate ?? "",imageTemplate ?? "",policy,cloud ? "":(defaultTitleValue ?? ""),pendingDefault ? "1":""]
+ }
+ private func markLoaded(){loadedForm=formState()}
+ var hasUnsavedChanges:Bool{guard !isExportingDesign,let loadedForm else{return false};return formState() != loadedForm}
+ /// Neuložené změny: zůstat, nebo odejít bez uložení.
+ func confirmLeave()->Bool {
+  guard hasUnsavedChanges else{return true}
+  let alert=NSAlert();alert.messageText=editingID==nil ? L("Nová složka ještě není uložená."):L("Složka má neuložené změny.")
+  alert.informativeText=L("Když odejdeš, změny se zahodí.")
+  alert.addButton(withTitle:L("Zůstat"));alert.addButton(withTitle:L("Odejít bez uložení"))
+  guard alert.runModal() == .alertSecondButtonReturn else{return false}
+  loadedForm=nil;return true
+ }
  func load(_ topic:Topic){
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
   template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
-  detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode()
+  detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode();markLoaded()
  }
  /// Týmovou složku smí nastavovat jen vlastník nebo správce; člen mění jen místní adresář.
  private var editingManaged:Bool{list.first{$0.id==editingID}?.canManageCloudFolder ?? true}
@@ -281,6 +319,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    syncButton.title=L("Synchronizovat s cloudem");syncButton.image=NSImage(systemSymbolName:"icloud.and.arrow.up",accessibilityDescription:nil);syncButton.role = .secondary
    syncButton.isHidden = !signedIn || !saved;syncButton.toolTip=L("Nahraje relace do cloudu a změní složku na cloudovou.")
    syncCaption.stringValue=signedIn ? (saved ? L("Relace jsou zatím jen na tomto Macu."):L("Synchronizaci zapneš po uložení složky.")):L("Pro synchronizaci připoj Mac v Cloudové knihovně.")
+   // Bez tarifu tlačítko vede na tarify místo přesunu.
+   if signedIn,saved,!CloudFolders.shared.canMoveToCloud{syncButton.title=L("Aktivovat cloud…");syncButton.image=NSImage(systemSymbolName:"icloud",accessibilityDescription:nil);syncButton.toolTip=L("Cloud vyžaduje aktivní tarif nebo zkušební období.");syncCaption.stringValue=L("Synchronizace potřebuje tarif nebo zkušební období.")}
   }
   deleteButton?.isHidden = !saved || !editingManaged
   let current=list.first{$0.id==editingID}
@@ -293,13 +333,17 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   syncButton.needsDisplay=true
  }
  @objc func addTopic(){
+  guard confirmLeave() else{return}
   saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;commentTemplate=defaults.comment;imageTemplate=defaults.image;contextPolicy=ContextPolicy();defaultTitleValue=nil;table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
-  name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();beginNameEdit()
+  name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();markLoaded();beginNameEdit()
  }
  @objc func syncSelected(){
   guard let topic=list.first(where:{$0.id==editingID}) else{return}
   if topic.cloudFolderID != nil{Task{@MainActor in await CloudLibrary.shared.sync();await CloudFolders.shared.refresh(CloudLibrary.shared.connection)};return}
+  if signedIn,!CloudFolders.shared.canMoveToCloud{Task{@MainActor in if await FolderDialogs.cloudReady(){self.updateMode();self.syncSelected()}else{self.updateMode()}};return}
   guard signedIn else{return}
+  // Přesun pracuje s uloženou složkou; neuložené změny by se ztratily.
+  if hasUnsavedChanges{showError(L("Nejdřív ulož změny složky, pak ji synchronizuj s cloudem."));return}
   Task{@MainActor in
    await FolderDialogs.move([topic]);self.list=Topics.all
    if let moved=CloudFolders.shared.records.first(where:{$0.migratedLocalIDs?.contains(topic.id)==true}),let target=self.list.first(where:{$0.cloudFolderID==moved.id}){self.editingID=target.id}
@@ -356,26 +400,32 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let cloud=editingCloud
   // Bez společného souboru je řádek hned pod režimem ukládání.
   let top:CGFloat=mode.indexOfSelectedItem==1 ? 126:178
-  contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-24;contextButton.frame.origin.y=top-6
+  contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-30;contextButton.frame.origin.y=top-6;askBeforeDelete.frame.origin.y=top-84
   contextToggle.state=contextPolicy.enabled ? .on:.off;contextToggle.isEnabled=editingManaged || cloud
   contextButton.isEnabled=contextPolicy.enabled && (editingManaged || cloud)
   contextCaption.stringValue=contextPolicy.enabled ? (cloud ? LF("Nahrává se do cloudu: %@",contextPolicySummary(contextPolicy)):contextPolicySummary(contextPolicy)):L("Snímky z prohlížeče se uloží bez kontextu.")
   // Starší server nastavení nezná (nil); přepínač se pak nezobrazí.
   let current=list.first{$0.id==editingID}
-  aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-50
-  aiTitleToggle.state=current?.aiTitle==true ? .on:.off;aiTitleToggle.isEnabled=editingManaged
+  aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-56
+  let pending=pendingAITitle.flatMap{$0.id==editingID ? $0.value:nil}
+  // AI názvy osobní složky potřebují tarif; týmovou platí tým.
+  let planned=current?.cloudTeam==true || CloudFolders.shared.personalCloudAllowed
+  aiTitleToggle.state=(pending ?? (current?.aiTitle==true)) ? .on:.off;aiTitleToggle.isEnabled=editingManaged && pending==nil && (planned || current?.aiTitle==true)
+  if cloud,let current,current.aiTitle==nil,!aiTitleRequested.contains(current.id),!isExportingDesign{aiTitleRequested.insert(current.id);Task{@MainActor in _ = try? await CloudFolders.shared.aiTitle(current);self.list=Topics.all;self.updateContext()}}
   if let defaultTitleButton {
-   defaultTitleButton.frame.origin.y=top-58;defaultTitleButton.isEnabled = !cloud || editingManaged
+   defaultTitleButton.frame.origin.y=top-62;defaultTitleButton.isEnabled = !cloud || editingManaged
    defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
    defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
   }
-  aiTitleToggle.toolTip=editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
+  aiTitleToggle.toolTip = !planned ? L("AI názvy potřebují aktivní cloudový tarif nebo zkušební období."):editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
   contextToggle.toolTip=cloud ? L("Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
  }
  @objc func toggleContext(){
   if contextToggle.state == .on,editingCloud,!confirmCloudContext(){contextToggle.state = .off;return}
-  contextPolicy.enabled=contextToggle.state == .on;updateContext()
+  contextPolicy.enabled=contextToggle.state == .on;applyCloudContext();updateContext()
  }
+ /// Kontext cloudové složky je místní nastavení Macu; platí hned jako AI názvy.
+ private func applyCloudContext(){if let folder=list.first(where:{$0.id==editingID})?.cloudFolderID{CloudContextPolicies.set(contextPolicy,for:folder)}}
  /// Varování před nahráním kontextu do cloudu; data čte každý člen složky.
  func confirmCloudContext()->Bool {
   let alert=NSAlert();alert.alertStyle = .warning
@@ -418,8 +468,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard let topic=list.first(where:{$0.id==editingID}),topic.cloudFolderID != nil else{return}
   let enable=aiTitleToggle.state == .on
   if enable,!confirmAITitle(){aiTitleToggle.state = .off;return}
-  aiTitleToggle.isEnabled=false
+  pendingAITitle=(topic.id,enable);updateContext()
   Task{@MainActor in
+   defer{if pendingAITitle?.id==topic.id{pendingAITitle=nil};updateContext()}
    // Výsledek patří složce, která požadavek spustila; jiná vybraná složka se jen překreslí.
    do {
     let setting=try await CloudFolders.shared.aiTitle(topic,enable:enable)
@@ -469,7 +520,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    contextPolicy.includeConsole=console.state == .on;contextPolicy.includeNetwork=network.state == .on;contextPolicy.includeBodies=bodies.state == .on
    contextPolicy.includeElements=elements.state == .on;contextPolicy.includeElementText=texts.state == .on
    contextPolicy.redactHeaders=ContextPolicy.names([headers.stringValue]);contextPolicy.redactQueryParams=ContextPolicy.names([params.stringValue])
-   updateContext()
+   applyCloudContext();updateContext()
   }
   withExtendedLifetime(link){};window.makeKeyAndOrderFront(nil)
  }
@@ -511,7 +562,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    // Člen týmu ukládá jen místní adresář; nastavení složky na server neposílá.
    if !original.canManageCloudFolder {
     do{if original.folder != path{try CloudFolders.shared.setFolder(original,path:path)}}catch{showError(error.localizedDescription);return}
-    list=Topics.all;reloadTable();showStatus(L("Konfigurace byla uložena."));refreshCloud();return
+    list=Topics.all;reloadTable();markLoaded();showStatus(L("Konfigurace byla uložena."));refreshCloud();return
    }
    var changed=original;changed.name=title;changed.detail=detail.stringValue;changed.combined=mode.indexOfSelectedItem==1;changed.combinedFile=filename
    changed.markdownTemplate=original.markdownTemplate==nil && template==defaultMarkdownTemplate ? nil:template;changed.combinedTemplate=fileTemplate
@@ -519,7 +570,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
    guard confirmTemplateChange(original,template:changed.markdownTemplate,file:changed.combinedTemplate,comment:changed.commentTemplate,image:changed.imageTemplate) else{return}
    do{if original.folder != path{try CloudFolders.shared.setFolder(original,path:path)}}catch{showError(error.localizedDescription);return}
    changed.folder=path
-   guard changed != (list.first{$0.id==editingID}.map{var value=$0;value.folder=path;return value}) else{list=Topics.all;reloadTable();showStatus(L("Konfigurace byla uložena."));refreshCloud();return}
+   guard changed != (list.first{$0.id==editingID}.map{var value=$0;value.folder=path;return value}) else{list=Topics.all;reloadTable();markLoaded();showStatus(L("Konfigurace byla uložena."));refreshCloud();return}
    saveButton.isEnabled=false;saveStatus.stringValue=L("Ukládám do cloudu…")
    Task{@MainActor in
     defer{self.saveButton.isEnabled=true}

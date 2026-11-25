@@ -13,7 +13,9 @@ enum LibraryKind: String { case personal, team }
 enum LibraryRole: String { case owner, admin, member; static func manages(_ raw: String?) -> Bool { raw.flatMap(Self.init(rawValue:)).map { $0 != .member } ?? false } }
 
 /// Odpověď /me; `libraries` chybí u staršího serveru (jen osobní library).
-struct CloudOwner: Decodable { let id: UUID; let email: String?; var libraries: [CloudLibraryRef]? = nil }
+/// Stav cloudu osobní knihovny z /me; nil = starší server nebo vypnutý billing.
+struct CloudAccess: Decodable, Equatable { let state: String; let upload_allowed: Bool }
+struct CloudOwner: Decodable { let id: UUID; let email: String?; var libraries: [CloudLibraryRef]? = nil; var cloud: CloudAccess? = nil }
 
 struct CloudManifest: Codable,Equatable {
  struct Image: Codable,Equatable { let index: Int; let bytes: Int; let sha256: String }

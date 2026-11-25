@@ -16,13 +16,24 @@ swift build -c release
 bin="$(swift build -c release --show-bin-path)"
 cp -X "$bin/ScreenshotNote" "$app/Contents/MacOS/ScreenshotNote"
 cp -X "$bin/screenshot-note-bridge" "$app/Contents/MacOS/screenshot-note-bridge"
+# Sparkle jako framework v bundlu; appka není v sandboxu, XPC služby nepotřebuje.
+mkdir -p "$app/Contents/Frameworks"
+ditto "$bin/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
+rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
 xattr -cr "$app"
 # Stabilní podpis drží přístup do Klíčenky napříč buildy; ad-hoc podpis se mění s každým buildem.
 # Hardened runtime brání vložení cizích knihoven; appka žádné výjimky nepotřebuje.
 identity="${SIGNING_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application/ {print $2; exit}')}"
-codesign --force --options runtime --sign "${identity:--}" "$app/Contents/MacOS/screenshot-note-bridge"
-codesign --force --options runtime --sign "${identity:--}" "$app"
-codesign --verify --strict "$app"
+# Ad-hoc podpis nemá Team ID, takže by hardened runtime odmítl načíst Sparkle.framework.
+runtime=(--options runtime);[[ -z "$identity" || "$identity" == "-" ]] && runtime=()
+# Podpis zevnitř ven bez --deep: helpery Sparkle, framework, bridge a nakonec appka.
+sparkle="$app/Contents/Frameworks/Sparkle.framework"
+for part in "$sparkle/Versions/B/Autoupdate" "$sparkle/Versions/B/Updater.app" "$sparkle"; do
+ codesign --force "${runtime[@]}" --sign "${identity:--}" "$part"
+done
+codesign --force "${runtime[@]}" --sign "${identity:--}" "$app/Contents/MacOS/screenshot-note-bridge"
+codesign --force "${runtime[@]}" --sign "${identity:--}" "$app"
+codesign --verify --strict --deep "$app"
 # Kouřový test produkční binárky: start, lokalizace a odmítnutí starých testovacích přepínačů.
 "$app/Contents/MacOS/ScreenshotNote" --language-check >/dev/null
 smoke=0;"$app/Contents/MacOS/ScreenshotNote" --self-test 2>/dev/null || smoke=$?
@@ -31,7 +42,7 @@ smoke=0;"$app/Contents/MacOS/ScreenshotNote" --self-test 2>/dev/null || smoke=$?
 tests_app="$build_root/Screenshot Note Tests.app"
 ditto "$app" "$tests_app"
 cp -X "$bin/ScreenshotNoteTestHost" "$tests_app/Contents/MacOS/ScreenshotNote"
-codesign --force --options runtime --sign "${identity:--}" "$tests_app"
+codesign --force "${runtime[@]}" --sign "${identity:--}" "$tests_app"
 tests="$tests_app/Contents/MacOS/ScreenshotNote"
 test_log="$build_root/tests.log"
 (

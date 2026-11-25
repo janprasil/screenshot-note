@@ -711,3 +711,8 @@
 "Synchronizovat lokální složky s cloudem?" = "Sync local folders with the cloud?";
 "Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované." = "Selected folders will be uploaded to the cloud and available on the web and other devices. For matching names you'll choose to merge or rename. Local files are kept.";
 "Synchronizovat" = "Sync";
+"Zkontrolovat aktualizace…" = "Check for Updates…";
+"Nainstalovat aktualizaci…" = "Install Update…";
+"Aktualizace" = "Updates";
+"Automaticky kontrolovat nové verze." = "Check for new versions automatically.";
+"Nabízet i testovací verze (RC)" = "Include release candidates";

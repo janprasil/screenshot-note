@@ -17,7 +17,7 @@ concurrency:
 jobs:
   codeql:
     name: codeql-${{ matrix.language }}
-    runs-on: macos-15
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -28,8 +28,11 @@ jobs:
         include:
           - language: swift
             build-mode: manual
+            os: macos-15
+          # Workflow soubory nepotřebují Mac runner.
           - language: actions
             build-mode: none
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,11 +41,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-      # Self-testy počítají s češtinou jako jazykem systému.
+      # Analýza potřebuje jen kompilaci; testy a balení .app běží v CI jobu build.
       - if: matrix.build-mode == 'manual'
-        run: defaults write -g AppleLanguages -array cs en
-      - if: matrix.build-mode == 'manual'
-        run: ./build.sh
+        run: swift build
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}

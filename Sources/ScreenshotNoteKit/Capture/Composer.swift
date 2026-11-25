@@ -9,6 +9,8 @@ final class ShotArrowButton:AppButton {
 }
 
 final class ScreenshotThumbnailButton:NSButton {
+ /// Atributy čísla karty jednou: font vytvářený při každém kreslení se při posunu řady (macOS 26) vrátil jako nil a CoreText spadl.
+ static let numberAttributes:[NSAttributedString.Key:Any]=[.font:nonNilFont(NSFont.monospacedSystemFont(ofSize:10,weight:.medium),fallback:10),.foregroundColor:AppPalette.secondary]
  let notePreview=NSTextField(labelWithString:"")
  var imageDisplayRect:NSRect{
   // Nahoře odebrání a odznaky videa či kontextu, dole číslo a poznámka.
@@ -51,7 +53,7 @@ final class ScreenshotThumbnailButton:NSButton {
   let card=NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:10,yRadius:10)
   AppPalette.raised.setFill();card.fill()
   if let image{image.draw(in:imageDisplayRect)}
-  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:bounds.height-21),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:10,weight:.medium),.foregroundColor:AppPalette.secondary])
+  (String(format:"%02d",tag+1) as NSString).draw(at:NSPoint(x:10,y:bounds.height-21),withAttributes:Self.numberAttributes)
   if hover{AppPalette.accent.withAlphaComponent(0.8).setStroke();card.lineWidth=1.5;card.stroke()}
  }
 
@@ -85,6 +87,10 @@ final class Composer:NSObject,NSWindowDelegate {
  private var pointerScreenFrame:NSRect?
  deinit{screenTimer?.invalidate()}
  var expandedContent:NSView?;var expandedFrame:NSRect?;var isCompact=false
+ /// Během záznamu: místo snímání tlačítko Zastavit (i ve sbaleném okně); zastavení obslouží AppDelegate.
+ var onStopRecording:(()->Void)?
+ private(set) var recordingState:RecordingController.State = .idle
+ let stopRecordingButton=AppButton()
  let imageCount=NSTextField(labelWithString:"")
  var childEditorOpen=false
  let sessionPicker=NSPopUpButton();var previousChoices:[PreviousSession]=[]
@@ -108,6 +114,7 @@ final class Composer:NSObject,NSWindowDelegate {
   captureOptions.role = .quiet
   captureOptions.image=NSImage(systemSymbolName:"chevron.down",accessibilityDescription:nil);captureOptions.imagePosition = .imageOnly
   captureOptions.target=self;captureOptions.action=#selector(showCaptureOptions);captureOptions.toolTip=L("Další možnosti snímání");captureOptions.setAccessibilityLabel(L("Další možnosti snímání"));captureGroup.addSubview(captureOptions)
+  configureStopButton(stopRecordingButton);view.addSubview(stopRecordingButton);updateRecordingControls()
   refreshTopics()
   // Snímky se posouvají šipkami (po stránkách, plynule); posuvník je skrytý. Vrstva zrychlí kreslení při posunu.
   thumbnailScroll.frame=NSRect(x:28,y:180,width:744,height:244);thumbnailScroll.hasHorizontalScroller=false;thumbnailScroll.drawsBackground=false;thumbnailScroll.wantsLayer=true;thumbnailScroll.documentView=thumbnails;view.addSubview(thumbnailScroll)
@@ -174,6 +181,18 @@ final class Composer:NSObject,NSWindowDelegate {
   captureGroup.frame=NSRect(x:trailing-174,y:432,width:174,height:32)
   addShotButton.frame=NSRect(x:0,y:0,width:140,height:32)
   captureOptions.frame=NSRect(x:141,y:0,width:33,height:32)
+  stopRecordingButton.frame=captureGroup.frame
+ }
+ private func configureStopButton(_ button:AppButton){button.role = .primary;button.image=NSImage(systemSymbolName:"stop.circle",accessibilityDescription:nil);button.imagePosition = .imageLeading;button.target=self;button.action=#selector(stopRecording)}
+ @objc func stopRecording(){onStopRecording?()}
+ /// Stav záznamu z AppDelegate: snímání se skryje, místo něj Zastavit (při nastavení a odpočtu Zrušit).
+ func setRecordingState(_ state:RecordingController.State){recordingState=state;updateRecordingControls()}
+ private var stopTitle:String{recordingState == .recording ? L("Zastavit záznam"):L("Zrušit záznam")}
+ private func updateRecordingControls() {
+  let active=recordingState != .idle
+  captureGroup.isHidden=active;stopRecordingButton.isHidden = !active
+  stopRecordingButton.title=stopTitle;stopRecordingButton.isEnabled=recordingState != .finishing;stopRecordingButton.needsDisplay=true
+  if isCompact,let window{layoutCompact(window,animate:false)}
  }
  func shareableSessionID()->UUID?{CloudLibrary.shared.shareableSessionID(draft,index:SessionIndex.shared,serverImages:CloudFolders.shared.serverImages)}
  func copyLinkWidth(maximum:CGFloat)->CGFloat{min(maximum,ceil((copyLinkButton.title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width)+47)}
@@ -333,13 +352,20 @@ final class Composer:NSObject,NSWindowDelegate {
  @objc func toggleCompact(){if isCompact{expandCompact()}else{collapseCompact()}}
  func collapseCompact(){
   guard !isCompact,let window=window else{return};snapshotFields();expandedFrame=window.frame;expandedContent=window.contentView
-  let compact=DesignSurface(frame:NSRect(x:0,y:0,width:230,height:42))
-  let restore=styledButton(L("Rozbalit poznámku"),symbol:"arrow.up.left.and.arrow.down.right",role:.quiet,frame:NSRect(x:6,y:5,width:218,height:32),target:self,action:#selector(toggleCompact));restore.toolTip=L("Vrátit snímky, nadpis a komentář");compact.addSubview(restore)
-  let old=window.frame;window.contentView=compact;let size=window.frameRect(forContentRect:NSRect(x:0,y:0,width:230,height:42)).size
-  let frame=NSRect(x:old.maxX-size.width,y:old.maxY-size.height,width:size.width,height:size.height)
-  window.setFrame(frame,display:true,animate:window.isVisible && !isExportingDesign && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion);isCompact=true
+  isCompact=true;layoutCompact(window,animate:window.isVisible && !isExportingDesign && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+  // Sbalené okno se nesdílí do snímků obrazovky (záznam vlastní aplikaci vynechává i tak).
+  window.sharingType = .none
  }
- func expandCompact(){guard isCompact,let content=expandedContent,let frame=expandedFrame else{return};let visible=window.isVisible;let current=window.frame;let destination=NSRect(x:current.maxX-frame.width,y:current.maxY-frame.height,width:frame.width,height:frame.height);window.contentView=content;window.setFrame(destination,display:true,animate:visible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !isExportingDesign);isCompact=false;expandedContent=nil;expandedFrame=nil;if visible{window.makeKeyAndOrderFront(nil)}}
+ /// Obsah sbaleného okna: Rozbalit, během záznamu navíc Zastavit; pravý horní roh zůstává na místě.
+ private func layoutCompact(_ window:NSWindow,animate:Bool) {
+  let recording=recordingState != .idle,width:CGFloat=recording ? 230+150:230
+  let compact=DesignSurface(frame:NSRect(x:0,y:0,width:width,height:42))
+  let restore=styledButton(L("Rozbalit poznámku"),symbol:"arrow.up.left.and.arrow.down.right",role:.quiet,frame:NSRect(x:6,y:5,width:218,height:32),target:self,action:#selector(toggleCompact));restore.toolTip=L("Vrátit snímky, nadpis a komentář");compact.addSubview(restore)
+  if recording{let stop=AppButton(title:stopTitle,target:nil,action:nil);configureStopButton(stop);stop.frame=NSRect(x:230,y:5,width:144,height:32);stop.isEnabled=recordingState != .finishing;compact.addSubview(stop)}
+  let old=window.frame;window.contentView=compact;let size=window.frameRect(forContentRect:NSRect(x:0,y:0,width:width,height:42)).size
+  window.setFrame(NSRect(x:old.maxX-size.width,y:old.maxY-size.height,width:size.width,height:size.height),display:true,animate:animate)
+ }
+ func expandCompact(){guard isCompact,let content=expandedContent,let frame=expandedFrame else{return};window.sharingType = .readOnly;let visible=window.isVisible;let current=window.frame;let destination=NSRect(x:current.maxX-frame.width,y:current.maxY-frame.height,width:frame.width,height:frame.height);window.contentView=content;window.setFrame(destination,display:true,animate:visible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !isExportingDesign);isCompact=false;expandedContent=nil;expandedFrame=nil;if visible{window.makeKeyAndOrderFront(nil)}}
  func reveal(){expandCompact();presentScreenshotPanel(window)}
  @discardableResult func appendCapturedImage(_ filename:String,context:Bool=false)->Bool{
   guard !draft.images.contains(filename),!filename.contains("/"),fm.fileExists(atPath:root.appendingPathComponent(filename).path) else{return false}
@@ -420,4 +446,9 @@ func thumbnailImage(_ url:URL,maxPixel:Int=480)->NSImage?{
        let image=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceThumbnailMaxPixelSize:maxPixel,kCGImageSourceCreateThumbnailWithTransform:true] as CFDictionary)
  else{return NSImage(contentsOf:url)}
  return NSImage(cgImage:image,size:NSSize(width:image.width,height:image.height))
+}
+
+/// Systémové API fontů je anotované jako nenulové, ale může vrátit nil; nil ve slovníku atributů shodí CoreText.
+func nonNilFont(_ font:NSFont,fallback size:CGFloat)->NSFont{
+ unsafeBitCast(font,to:Int.self) == 0 ? (NSFont(name:"Menlo",size:size) ?? NSFont.systemFont(ofSize:size)):font
 }

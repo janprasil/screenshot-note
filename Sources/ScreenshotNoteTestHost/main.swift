@@ -334,6 +334,18 @@ if CommandLine.arguments.contains("--self-test") {
  assert(recordItem.isEnabled && recordItem.action == #selector(Composer.recordVideo));captureProbe.recordVideo()
  assert(recorded==1)
  captureProbe.onRecord=nil
+ // Během záznamu se snímání skryje, Zastavit je v okně i ve sbaleném stavu a zastaví záznam.
+ var stops=0;captureProbe.onStopRecording={stops+=1}
+ captureProbe.setRecordingState(.recording)
+ assert(captureProbe.captureGroup.isHidden && !captureProbe.stopRecordingButton.isHidden && captureProbe.stopRecordingButton.title==L("Zastavit záznam"))
+ captureProbe.stopRecording();assert(stops==1)
+ captureProbe.collapseCompact()
+ let compactStop=captureProbe.window.contentView!.subviews.compactMap{$0 as? AppButton}.first{$0.action == #selector(Composer.stopRecording)}
+ assert(compactStop != nil && captureProbe.window.sharingType == .none)
+ captureProbe.setRecordingState(.idle)
+ assert(!captureProbe.window.contentView!.subviews.contains{($0 as? AppButton)?.action == #selector(Composer.stopRecording)})
+ captureProbe.expandCompact();assert(!captureProbe.captureGroup.isHidden && captureProbe.stopRecordingButton.isHidden && captureProbe.window.sharingType == .readOnly)
+ captureProbe.onStopRecording=nil
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
  print("PASS: capture controls without session picker, exact shortcut matching and duplicate hotkey suppression")

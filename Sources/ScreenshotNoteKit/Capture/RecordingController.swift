@@ -15,7 +15,7 @@ func quartzRect(_ rect:CGRect,primaryHeight:CGFloat=NSScreen.screens.first?.fram
 
 /// Výběr oblasti tažením na kterémkoli displeji (překryv na každém); Escape zruší. Výřez leží na displeji, kde tažení začalo.
 final class RegionSelection {
- fileprivate var windows:[RegionSelector]=[];private var completion:((CGRect?)->Void)?
+ fileprivate var windows:[RegionSelector]=[];private var completion:((CGRect?)->Void)?;private var keeper:CursorKeeper?
  init(screens:[NSScreen],minimum:CGFloat,completion:@escaping (CGRect?)->Void) {
   self.completion=completion
   windows=screens.map{RegionSelector(screen:$0,minimum:minimum,group:self)}
@@ -24,11 +24,14 @@ final class RegionSelection {
   let pointer=windows.first{$0.frame.contains(NSEvent.mouseLocation)} ?? windows.first
   pointer?.makeKeyAndOrderFront(nil)
   NSCursor.crosshair.push()
+  // Systém kurzor neaktivní aplikace občas vrátí na šipku; křížek se proto obnovuje.
+  keeper=CursorKeeper{[weak self] in if self?.windows.contains(where:{$0.frame.contains(NSEvent.mouseLocation)}) == true{NSCursor.crosshair.set()}}
  }
  /// Zrušení zvenku (zkratka během výběru): bez volání completion.
  func cancel(){guard completion != nil else{return};completion=nil;close()}
  fileprivate func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;close();done(result)}
  private func close() {
+  keeper?.stop();keeper=nil
   NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil}
   // Uvolnění až po návratu z mouseUp/keyDown, které zavření vyvolaly.
   let closed=windows;windows=[]
@@ -70,6 +73,17 @@ final class RegionSelector:NSPanel {
   let bounds=CGRect(origin:.zero,size:frame.size),c=CGPoint(x:min(max(b.x,0),bounds.width),y:min(max(b.y,0),bounds.height))
   return CGRect(x:min(a.x,c.x),y:min(a.y,c.y),width:abs(a.x-c.x),height:abs(a.y-c.y))
  }
+}
+
+/// Opakovaně nastavuje kurzor nad překryvem; aplikace není aktivní, takže ho systém může mezi pohyby myši přepsat.
+final class CursorKeeper {
+ private var timer:Timer?
+ init(interval:TimeInterval=0.1,_ apply:@escaping ()->Void) {
+  let timer=Timer(timeInterval:interval,repeats:true){_ in apply()}
+  RunLoop.main.add(timer,forMode:.common);self.timer=timer;apply()
+ }
+ func stop(){timer?.invalidate();timer=nil}
+ deinit{stop()}
 }
 
 /// Nitkový kříž nad celým překryvem; aplikace není aktivní, proto bez cursor rects, jen přes tracking area.

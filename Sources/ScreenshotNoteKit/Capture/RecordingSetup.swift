@@ -27,6 +27,7 @@ final class RecordingSetup {
  private var countdownEnabled:Bool;private var seconds:Int
  private var dims:[RecordingDimPanel]=[];private(set) var bar:RecordingBar!
  private var completion:((Choice?)->Void)?
+ private var keeper:CursorKeeper?
 
  init(screens:[NSScreen]=NSScreen.screens,completion:@escaping (Choice?)->Void) {
   self.completion=completion
@@ -45,6 +46,13 @@ final class RecordingSetup {
   // Klíčový je překryv pod myší: jen klíčové okno dostává pohyb myši pro kurzor.
   (dims.first{$0.frame.contains(NSEvent.mouseLocation)} ?? dims.first)?.makeKey()
   refresh()
+  // Kurzor se obnovuje i bez pohybu myši (systém ho neaktivní aplikaci občas vrátí na šipku).
+  keeper=CursorKeeper{[weak self] in
+   guard let self else{return}
+   let mouse=NSEvent.mouseLocation
+   if self.bar.menuOpen{return}
+   if self.bar.frame.contains(mouse){NSCursor.arrow.set()}else{self.dims.first{$0.frame.contains(mouse)}?.refreshCursor()}
+  }
  }
  /// Zrušení zvenku (Esc, zkratka, menu): bez volání completion.
  func cancel(){guard completion != nil else{return};completion=nil;close()}
@@ -72,6 +80,7 @@ final class RecordingSetup {
  }
  private func finish(_ choice:Choice?){guard let done=completion else{return};completion=nil;close();done(choice)}
  private func close() {
+  keeper?.stop();keeper=nil
   bar.orderOut(nil);bar.setup=nil;for dim in dims{dim.orderOut(nil);dim.setup=nil}
   // Sledování myši vlastní lišta; bez něj nepřijde událost uvolněnému oknu.
   if let back=bar.contentView{for area in back.trackingAreas{back.removeTrackingArea(area)}}
@@ -94,6 +103,7 @@ final class RecordingDimPanel:NSPanel {
   view.panel=self;contentView=view;setFrame(screen.frame,display:false)
  }
  override var canBecomeKey:Bool{true}
+ func refreshCursor(){view.updateCursor()}
  func refreshOverlay(){view.needsDisplay=true;view.hint.isHidden = !(setup?.target == .region && setup?.region == nil && setup?.screen.frame == screenRef.frame);view.updateCursor()}
  override func keyDown(with event:NSEvent){if !recordingSetupKey(event,setup){super.keyDown(with:event)}}
 }
@@ -257,6 +267,8 @@ final class RecordingBarButton:NSButton {
 /// Plovoucí lišta: zavřít | celá obrazovka, výřez | odpočet ▾ (okamžitě, 3/5/10 s) | Nahrát.
 final class RecordingBar:NSPanel {
  fileprivate weak var setup:RecordingSetup?
+ /// Otevřená nabídka odpočtu má vlastní kurzor.
+ private(set) var menuOpen=false
  private var screenButton:RecordingBarButton!,regionButton:RecordingBarButton!,countdownButton:RecordingBarButton!,recordButton:RecordingBarButton!
  init(setup:RecordingSetup) {
   self.setup=setup
@@ -318,6 +330,7 @@ final class RecordingBar:NSPanel {
    item.state=(seconds == 0 ? !setup.usesCountdown:setup.usesCountdown && setup.countdownSeconds == seconds) ? .on:.off;menu.addItem(item)
    if seconds == 0{menu.addItem(.separator())}
   }
+  menuOpen=true;defer{menuOpen=false}
   menu.popUp(positioning:nil,at:NSPoint(x:0,y:countdownButton.bounds.maxY+6),in:countdownButton)
  }
  @objc private func pickCountdown(_ sender:NSMenuItem){setup?.setCountdown(enabled:sender.tag != 0,seconds:sender.tag == 0 ? nil:sender.tag)}

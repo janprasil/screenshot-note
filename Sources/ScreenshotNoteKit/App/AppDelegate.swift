@@ -6,7 +6,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
  var parkedEntry:NSMenuItem?
  let cloudSettings=CloudSettings()
- var item:NSStatusItem!;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
+ var item:NSStatusItem!;var statusMenu:NSMenu?;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
  private var folderTimer:Timer?;private var nextFolderRefresh=Date.distantPast
  let recording=RecordingController();var stopEntry:NSMenuItem?;var recordEntry:NSMenuItem?
  /// Okno prohlížeče v popředí při startu záznamu; kontext se po stopu žádá od něj.
@@ -61,7 +61,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;parked.image=mark;parkedEntry=parked;menu.addItem(parked)
    }
   }
-  updateFolderMenu();item.menu=menu;hotkeys.callback={[weak self] id in
+  updateFolderMenu();item.menu=menu;statusMenu=menu;hotkeys.callback={[weak self] id in
    switch id{case Hotkeys.escapeID:self?.recording.stop();case 3:self?.toggleRecording();default:self?.capture(full:id == 2)}
   }
   recording.onChange={[weak self] in self?.updateRecordingState()}
@@ -126,6 +126,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let active=recording.state != .idle
   // Esc zastaví výběr, odpočet i záznam, i když je v popředí jiná aplikace.
   hotkeys.setEscape(recording.state.stopsOnEscape)
+  composer?.setRecordingState(recording.state)
   stopEntry?.isHidden = !active;recordEntry?.isEnabled = !active
   if recording.state == .recording{let seconds=Int(recording.elapsed);stopEntry?.title=LF("Zastavit záznam (%@)",videoDuration(seconds*1000))}
   else{stopEntry?.title=L("Zastavit záznam")}
@@ -135,6 +136,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    image.isTemplate=false;item.button?.image=image
   } else {item.button?.image=NSImage(systemSymbolName:symbol,accessibilityDescription:"Screenshot Note")}
   item.button?.contentTintColor=nil
+  // Během nastavení, odpočtu a záznamu klik na ikonu rovnou zastaví (bez menu, ze kterého by šlo fotit).
+  if let statusMenu {
+   item.menu=active ? nil:statusMenu
+   item.button?.target=active ? self:nil;item.button?.action=active ? #selector(stopRecording):nil
+   item.button?.toolTip=active ? L("Zastavit záznam"):nil
+  }
  }
  /// Hotový záznam: poster jako obrázek položky, video a snímky vedle něj, kontext prohlížeče za celou dobu.
  func recordingFinished(_ result:Result<RecordingResult,Error>?) {
@@ -372,6 +379,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   view.hasUnsavedWork={[weak view] in view.map{draftSignature($0.draft,root:root) != pristine} ?? false}
   view.onCapture={[weak self] full in self?.capture(full:full,fromComposer:true)}
   view.onRecord={[weak self] in self?.startRecording()}
+  view.onStopRecording={[weak self] in self?.recording.stop()};view.setRecordingState(recording.state)
   view.recordingAvailable={[weak self] in self.map{!$0.capturing && !$0.browsingSavedSessions && $0.recording.state == .idle && !$0.deliveringRecording} ?? false}
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}

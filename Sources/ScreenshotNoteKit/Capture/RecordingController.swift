@@ -28,7 +28,12 @@ final class RegionSelection {
  /// Zrušení zvenku (zkratka během výběru): bez volání completion.
  func cancel(){guard completion != nil else{return};completion=nil;close()}
  fileprivate func finish(_ result:CGRect?){guard let done=completion else{return};completion=nil;close();done(result)}
- private func close(){NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil};windows=[]}
+ private func close() {
+  NSCursor.pop();for window in windows{window.orderOut(nil);window.group=nil}
+  // Uvolnění až po návratu z mouseUp/keyDown, které zavření vyvolaly.
+  let closed=windows;windows=[]
+  DispatchQueue.main.async{withExtendedLifetime(closed){}}
+ }
 }
 final class RegionSelector:NSPanel {
  // Okna drží výběr silně, aby přežil i bez reference volajícího; close() cyklus zruší.
@@ -67,16 +72,16 @@ final class RegionSelector:NSPanel {
  }
 }
 
-/// Nitkový kříž nad celým překryvem; panel nepřebírá aktivaci, proto ho nastavuje i při pohybu myši.
+/// Nitkový kříž nad celým překryvem; aplikace není aktivní, proto bez cursor rects, jen přes tracking area.
 final class CrosshairView:NSView {
- override func resetCursorRects(){addCursorRect(bounds,cursor:.crosshair)}
  override func updateTrackingAreas() {
   super.updateTrackingAreas()
   for area in trackingAreas{removeTrackingArea(area)}
   addTrackingArea(NSTrackingArea(rect:.zero,options:[.activeAlways,.inVisibleRect,.cursorUpdate,.mouseMoved,.mouseEnteredAndExited],owner:self))
  }
  override func cursorUpdate(with event:NSEvent){NSCursor.crosshair.set()}
- override func mouseEntered(with event:NSEvent){NSCursor.crosshair.set()}
+ // Přechod na jiný displej převezme klíčové okno (pohyb myši dostává jen klíčové okno).
+ override func mouseEntered(with event:NSEvent){if window?.isKeyWindow == false{window?.makeKey()};NSCursor.crosshair.set()}
  override func mouseMoved(with event:NSEvent){NSCursor.crosshair.set()}
 }
 
@@ -130,8 +135,10 @@ final class RecordingController {
   var stopsOnEscape:Bool{self == .preparing || self == .counting || self == .recording}
  }
  private(set) var state:State = .idle
- private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var selector:RegionSelection?;private var limit:Timer?;private var ticker:Timer?
+ private var recorder:ScreenRecorder?;private var countdown:CountdownOverlay?;private var setup:RecordingSetup?;private var limit:Timer?;private var ticker:Timer?
  private(set) var startedAt:Date?
+ /// Odpočet posledního záznamu v sekundách (0 = spuštěno hned).
+ private(set) var countdownSeconds=0
  /// Číslo pokusu; zrušený start po await nic nenastaví.
  private var attempt=0
  /// Změna stavu pro menu bar (ikona, položka Zastavit).
@@ -142,25 +149,25 @@ final class RecordingController {
  var onFinish:((Result<RecordingResult,Error>?)->Void)?
  var elapsed:TimeInterval{startedAt.map{Date().timeIntervalSince($0)} ?? 0}
 
- func start(_ target:RecordingTarget,output:URL) {
+ /// Zobrazí nastavení záznamu (cíl a odpočet); po potvrzení odpočítá a začne nahrávat.
+ func start(output:URL) {
   guard state == .idle else{return}
   if !CGPreflightScreenCaptureAccess(){_ = CGRequestScreenCaptureAccess();onFinish?(.failure(NSError(domain:"ScreenshotNote",code:44,userInfo:[NSLocalizedDescriptionKey:L("Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť záznam znovu.")])));return}
-  let screen=NSScreen.screens.first{$0.frame.contains(NSEvent.mouseLocation)} ?? NSScreen.main ?? NSScreen.screens[0]
-  // Okno v popředí se určí hned, než odpočet nebo výběr oblasti změní pořadí oken.
-  let front=target == .window ? frontWindowID():nil
   attempt+=1;let current=attempt
   state = .preparing;onChange?()
-  let proceed={(region:CGRect?) in
-   // Zastavení během výběru oblasti už stav vrátilo.
-   guard self.state == .preparing,self.attempt == current else{return}
-   if target == .region && region == nil{self.reset();self.onFinish?(nil);return}
+  let setup=RecordingSetup{[weak self] choice in
+   // Zastavení během nastavení už stav vrátilo.
+   guard let self,self.state == .preparing,self.attempt == current else{return}
+   self.setup=nil
+   guard let choice else{self.reset();self.onFinish?(nil);return}
+   self.countdownSeconds=choice.countdown
    self.state = .counting;self.onChange?()
+   let begin={Task{@MainActor in await self.begin(choice.target,screen:choice.screen,region:choice.region,window:nil,output:output,attempt:current)}}
+   if choice.countdown == 0{_ = begin();return}
    let overlay=CountdownOverlay();self.countdown=overlay
-   // Oblast se zaznamenává na displeji, kde byla vybraná.
-   let display=region.flatMap{area in NSScreen.screens.first{$0.frame.contains(CGPoint(x:area.midX,y:area.midY))}} ?? screen
-   overlay.run(seconds:recordingCountdown,on:display,escape:self.escapeAvailable()){Task{@MainActor in await self.begin(target,screen:display,region:region,window:front,output:output,attempt:current)}}
+   overlay.run(seconds:choice.countdown,on:choice.screen,escape:self.escapeAvailable()){_ = begin()}
   }
-  if target == .region{selector=RegionSelector.choose{[weak self] region in self?.selector=nil;proceed(region)}}else{proceed(nil)}
+  self.setup=setup;setup.show()
  }
 
  /// Na hlavním vlákně: stav, menu bar i chybové hlášky; await se vrací sem.
@@ -200,7 +207,7 @@ final class RecordingController {
  /// Zastaví záznam nebo zruší odpočet.
  func stop() {
   switch state {
-  case .counting,.preparing:countdown?.close();countdown=nil;selector?.cancel();selector=nil;reset();onFinish?(nil)
+  case .counting,.preparing:countdown?.close();countdown=nil;setup?.cancel();setup=nil;reset();onFinish?(nil)
   case .recording:
    guard let recorder else{reset();return}
    // Další stop během dokončení se ignoruje; nový záznam jde až po doručení výsledku.

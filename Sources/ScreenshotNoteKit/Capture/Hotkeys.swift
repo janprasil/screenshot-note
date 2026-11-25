@@ -20,9 +20,63 @@ struct Shortcut:Codable {
  }
  static func load(_ id:Int)->Shortcut {
   if let d=UserDefaults.standard.data(forKey:"shortcut\(id)"),let s=try? JSONDecoder().decode(Shortcut.self,from:d){return s}
-  // 1 oblast (⌃⌥⇧4), 2 celá obrazovka (⌃⌥⇧3), 3 záznam videa start/stop (⌃⌥⇧5).
-  let key:[Int:(UInt32,String)]=[1:(21,"4"),2:(20,"3"),3:(23,"5")]
-  return Shortcut(key:key[id]?.0 ?? 23,modifiers:UInt32(controlKey|optionKey|shiftKey),name:key[id]?.1 ?? "5")
+  // 1 oblast (⌘F11), 2 celá obrazovka (⌘F12), 3 záznam videa start/stop (⌘F10); na Macu s Fn.
+  let key:[Int:(UInt32,String)]=[1:(103,"F11"),2:(111,"F12"),3:(109,"F10")]
+  return Shortcut(key:key[id]?.0 ?? 109,modifiers:UInt32(cmdKey),name:key[id]?.1 ?? "F10")
+ }
+}
+
+/// Zkratky jako v macOS: ⇧⌘4 výřez, ⇧⌘3 celá obrazovka, ⇧⌘5 záznam videa.
+let macShortcuts:[Shortcut]=[(UInt32(21),"4"),(UInt32(20),"3"),(UInt32(23),"5")].map{Shortcut(key:$0.0,modifiers:UInt32(cmdKey|shiftKey),name:$0.1)}
+func usesMacShortcuts()->Bool{(1...3).allSatisfy{let s=Shortcut.load($0),m=macShortcuts[$0-1];return s.key==m.key && s.modifiers==m.modifiers}}
+let keyboardSettingsURL=URL(string:"x-apple.systempreferences:com.apple.Keyboard-Settings.extension")
+
+/// Systémové zkratky snímků v com.apple.symbolichotkeys: 28 ⇧⌘3, 30 ⇧⌘4, 184 ⇧⌘5.
+enum SystemScreenshotShortcuts {
+ static let domain="com.apple.symbolichotkeys" as CFString,key="AppleSymbolicHotKeys" as CFString
+ // Výchozí parametry: ASCII znak, keycode, ⇧⌘.
+ static let ids:[String:[Int]]=["28":[51,20,1179648],"30":[52,21,1179648],"184":[53,23,1179648]]
+ /// Zapne nebo vypne systémové zkratky a hned je aplikuje; false když se to nepovede.
+ @discardableResult static func set(enabled:Bool)->Bool {
+  var all=(CFPreferencesCopyAppValue(key,domain) as? [String:Any]) ?? [:]
+  for (id,parameters) in ids {
+   var entry=all[id] as? [String:Any] ?? ["value":["parameters":parameters,"type":"standard"]]
+   entry["enabled"]=enabled;all[id]=entry
+  }
+  CFPreferencesSetAppValue(key,all as CFDictionary,domain)
+  guard CFPreferencesAppSynchronize(domain) else{return false}
+  let process=Process();process.executableURL=URL(fileURLWithPath:"/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings");process.arguments=["-u"]
+  do{try process.run();process.waitUntilExit();return process.terminationStatus == 0}catch{return false}
+ }
+}
+
+/// Převezme zkratky macOS a systémové vypne; když to nejde, vrátí předchozí stav a vrátí false.
+@MainActor @discardableResult func applyMacShortcuts(_ hotkeys:Hotkeys)->Bool{
+ let defaults=UserDefaults.standard,previous=(1...3).map{defaults.data(forKey:"shortcut\($0)")}
+ let systemOff=SystemScreenshotShortcuts.set(enabled:false)
+ for id in 1...3{defaults.set(try? JSONEncoder().encode(macShortcuts[id-1]),forKey:"shortcut\(id)")}
+ let errors=hotkeys.register()
+ if !errors.isEmpty{
+  for id in 1...3{if let d=previous[id-1]{defaults.set(d,forKey:"shortcut\(id)")}else{defaults.removeObject(forKey:"shortcut\(id)")}}
+  _ = hotkeys.register();SystemScreenshotShortcuts.set(enabled:true)
+  showError(L("Zkratky ⇧⌘4, ⇧⌘3 a ⇧⌘5 se nepodařilo převzít. Ponechali jsme předchozí zkratky."));return false
+ }
+ // Bez vypnutí systémových zkratek by je macOS dál chytal první; pak je musí vypnout uživatel.
+ if !systemOff{
+  showError(L("Systémové zkratky pro snímky se nepodařilo vypnout. Vypni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je."))
+  if let keyboardSettingsURL{NSWorkspace.shared.open(keyboardSettingsURL)}
+ }
+ return true
+}
+
+/// Vrátí výchozí zkratky aplikace a systému znovu zapne ⇧⌘4/3/5.
+@MainActor func restoreMacShortcuts(_ hotkeys:Hotkeys){
+ for id in 1...3{UserDefaults.standard.removeObject(forKey:"shortcut\(id)")}
+ let errors=hotkeys.register()
+ if !errors.isEmpty{showError(errors.joined(separator:"\n"))}
+ if !SystemScreenshotShortcuts.set(enabled:true){
+  showError(L("Systémové zkratky pro snímky se nepodařilo zapnout. Zapni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je."))
+  if let keyboardSettingsURL{NSWorkspace.shared.open(keyboardSettingsURL)}
  }
 }
 
@@ -36,15 +90,10 @@ struct Shortcut:Codable {
  guard !existing,!(1...3).contains(where:{defaults.data(forKey:"shortcut\($0)") != nil}) else{return}
  NSApp.activate(ignoringOtherApps:true)
  let alert=NSAlert();alert.messageText=L("Nahradit systémové zkratky pro snímky?")
- alert.informativeText=L("Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.")
+ alert.informativeText=L("Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pro snímky přitom vypneme; vrátit je můžeš v Nastavení → Klávesové zkratky.")
  alert.addButton(withTitle:L("Nahradit"));alert.addButton(withTitle:L("Ponechat výchozí"))
  if alert.runModal() == .alertFirstButtonReturn {
-  let mods=UInt32(cmdKey|shiftKey)
-  for (id,key,name) in [(1,UInt32(21),"4"),(2,UInt32(20),"3"),(3,UInt32(23),"5")]{defaults.set(try? JSONEncoder().encode(Shortcut(key:key,modifiers:mods,name:name)),forKey:"shortcut\(id)")}
-  // Když systém zkratky nepustí, vrátí se výchozí, aby snímání dál fungovalo.
-  let errors=hotkeys.register()
-  if !errors.isEmpty{for id in 1...3{defaults.removeObject(forKey:"shortcut\(id)")};_ = hotkeys.register();showError(L("Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky."))}
-  if let url=URL(string:"x-apple.systempreferences:com.apple.Keyboard-Settings.extension"){NSWorkspace.shared.open(url)}
+  applyMacShortcuts(hotkeys)
  } else {
   let info=NSAlert();info.messageText=L("Výchozí zkratky Screenshot Note")
   info.informativeText=LF("%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky.",Shortcut.load(1).display,Shortcut.load(2).display,Shortcut.load(3).display)

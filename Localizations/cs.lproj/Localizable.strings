@@ -566,14 +566,11 @@
 "Celá obrazovka" = "Celá obrazovka";
 "Nahrát video" = "Nahrát video";
 "Obrazovku se nepodařilo najít." = "Obrazovku se nepodařilo najít.";
-"Odpočet %d s" = "Odpočet %d s";
-"Okno v popředí" = "Okno v popředí";
 "Okno v popředí se nepodařilo najít." = "Okno v popředí se nepodařilo najít.";
 "Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť záznam znovu." = "Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť záznam znovu.";
 "Tato kombinace už patří jiné zkratce." = "Tato kombinace už patří jiné zkratce.";
 "Video %@ – přehrát" = "Video %@ – přehrát";
 "Video položky %ld se do cloudu nenahrálo: %@" = "Video položky %ld se do cloudu nenahrálo: %@";
-"Vybraná oblast…" = "Vybraná oblast…";
 "Zastavit záznam" = "Zastavit záznam";
 "Zastavit záznam (%@)" = "Zastavit záznam (%@)";
 "Záznam neobsahuje žádný snímek." = "Záznam neobsahuje žádný snímek.";
@@ -652,11 +649,11 @@
 "Ponechat výchozí" = "Ponechat výchozí";
 "Předchozí snímky" = "Předchozí snímky";
 "Rozumím" = "Rozumím";
-"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.";
+"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pro snímky přitom vypneme; vrátit je můžeš v Nastavení → Klávesové zkratky." = "Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pro snímky přitom vypneme; vrátit je můžeš v Nastavení → Klávesové zkratky.";
 "Text pod snímkem, Markdown." = "Text pod snímkem, Markdown.";
 "Výchozí název a šablony" = "Výchozí název a šablony";
 "Výchozí zkratky Screenshot Note" = "Výchozí zkratky Screenshot Note";
-"Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky.";
+"Zkratky ⇧⌘4, ⇧⌘3 a ⇧⌘5 se nepodařilo převzít. Ponechali jsme předchozí zkratky." = "Zkratky ⇧⌘4, ⇧⌘3 a ⇧⌘5 se nepodařilo převzít. Ponechali jsme předchozí zkratky.";
 "Nenastaveno, u nové cloudové složky se zeptám." = "Nenastaveno, u nové cloudové složky se zeptám.";
 "Nové cloudové složky dostanou podsložku tady." = "Nové cloudové složky dostanou podsložku tady.";
 "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo";
@@ -676,3 +673,25 @@
 "Popis elementu" = "Popis elementu";
 "Uložit komentář (⌘Enter)" = "Uložit komentář (⌘Enter)";
 "Text obsahuje Markdown · kliknutím otevřít Markdown editor" = "Text obsahuje Markdown · kliknutím otevřít Markdown editor";
+
+/* Zkratky macOS v nastavení */
+"Zkratky macOS" = "Zkratky macOS";
+"Vrátit zkratky macOS" = "Vrátit zkratky macOS";
+"Nahradit zkratky macOS" = "Nahradit zkratky macOS";
+"⇧⌘4, ⇧⌘3 a ⇧⌘5 teď patří Screenshot Note. Vrácením se zapnou systémové zkratky a aplikace použije výchozí." = "⇧⌘4, ⇧⌘3 a ⇧⌘5 teď patří Screenshot Note. Vrácením se zapnou systémové zkratky a aplikace použije výchozí.";
+"Screenshot Note převezme ⇧⌘4, ⇧⌘3 a ⇧⌘5 a systémové zkratky pro snímky vypne." = "Screenshot Note převezme ⇧⌘4, ⇧⌘3 a ⇧⌘5 a systémové zkratky pro snímky vypne.";
+"Systémové zkratky pro snímky se nepodařilo vypnout. Vypni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Systémové zkratky pro snímky se nepodařilo vypnout. Vypni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.";
+"Systémové zkratky pro snímky se nepodařilo zapnout. Zapni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Systémové zkratky pro snímky se nepodařilo zapnout. Zapni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je.";
+
+/* Nastavení záznamu videa */
+"%d s" = "%d s";
+"Délka odpočtu" = "Délka odpočtu";
+"Nahrát" = "Nahrát";
+"Nahrát celou obrazovku" = "Nahrát celou obrazovku";
+"Nahrát video…" = "Nahrát video…";
+"Nahrát vybranou oblast" = "Nahrát vybranou oblast";
+"Nejdřív tažením vyber oblast." = "Nejdřív tažením vyber oblast.";
+"S odpočtem %d s" = "S odpočtem %d s";
+"Tažením vyber oblast záznamu" = "Tažením vyber oblast záznamu";
+"Zrušit záznam" = "Zrušit záznam";
+"Okamžitě" = "Okamžitě";

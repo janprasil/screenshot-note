@@ -566,14 +566,11 @@
 "Celá obrazovka" = "Entire screen";
 "Nahrát video" = "Record video";
 "Obrazovku se nepodařilo najít." = "The display could not be found.";
-"Odpočet %d s" = "Countdown %d s";
-"Okno v popředí" = "Front window";
 "Okno v popředí se nepodařilo najít." = "The front window could not be found.";
 "Povol Screenshot Note v Nastavení systému → Soukromí a zabezpečení → Záznam obrazovky a spusť záznam znovu." = "Allow Screenshot Note in System Settings → Privacy & Security → Screen Recording and start the recording again.";
 "Tato kombinace už patří jiné zkratce." = "This combination is already assigned to another shortcut.";
 "Video %@ – přehrát" = "Video %@ – play";
 "Video položky %ld se do cloudu nenahrálo: %@" = "The video of item %ld was not uploaded to the cloud: %@";
-"Vybraná oblast…" = "Selected area…";
 "Zastavit záznam" = "Stop recording";
 "Zastavit záznam (%@)" = "Stop recording (%@)";
 "Záznam neobsahuje žádný snímek." = "The recording contains no frames.";
@@ -652,11 +649,11 @@
 "Ponechat výchozí" = "Keep defaults";
 "Předchozí snímky" = "Previous screenshots";
 "Rozumím" = "Got it";
-"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pak vypni v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Screenshot Note can use ⇧⌘4 for a selection, ⇧⌘3 for the full screen and ⇧⌘5 for video recording. Then turn off the system shortcuts in System Settings → Keyboard → Keyboard Shortcuts → Screenshots; we open it for you.";
+"Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pro snímky přitom vypneme; vrátit je můžeš v Nastavení → Klávesové zkratky." = "Screenshot Note can use ⇧⌘4 for a selection, ⇧⌘3 for the full screen and ⇧⌘5 for video recording. We turn off the system screenshot shortcuts; you can bring them back in Settings → Keyboard shortcuts.";
 "Text pod snímkem, Markdown." = "Text below the screenshot, Markdown.";
 "Výchozí název a šablony" = "Default title and templates";
 "Výchozí zkratky Screenshot Note" = "Screenshot Note default shortcuts";
-"Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "The system shortcuts are taken. We kept the defaults; set them in Settings → Keyboard shortcuts after turning off the system shortcuts.";
+"Zkratky ⇧⌘4, ⇧⌘3 a ⇧⌘5 se nepodařilo převzít. Ponechali jsme předchozí zkratky." = "Could not take over ⇧⌘4, ⇧⌘3 and ⇧⌘5. We kept the previous shortcuts.";
 "Nenastaveno, u nové cloudové složky se zeptám." = "Not set; I ask for each new cloud folder.";
 "Nové cloudové složky dostanou podsložku tady." = "New cloud folders get a subfolder here.";
 "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Select · drag to move, double-click to edit text; add comments in the panel on the right";
@@ -676,3 +673,25 @@
 "Popis elementu" = "Element description";
 "Uložit komentář (⌘Enter)" = "Save comment (⌘Enter)";
 "Text obsahuje Markdown · kliknutím otevřít Markdown editor" = "The text contains Markdown · click to open the Markdown editor";
+
+/* Zkratky macOS v nastavení */
+"Zkratky macOS" = "macOS shortcuts";
+"Vrátit zkratky macOS" = "Give back macOS shortcuts";
+"Nahradit zkratky macOS" = "Use macOS shortcuts";
+"⇧⌘4, ⇧⌘3 a ⇧⌘5 teď patří Screenshot Note. Vrácením se zapnou systémové zkratky a aplikace použije výchozí." = "⇧⌘4, ⇧⌘3 and ⇧⌘5 now belong to Screenshot Note. Giving them back turns the system shortcuts on and the app uses its defaults.";
+"Screenshot Note převezme ⇧⌘4, ⇧⌘3 a ⇧⌘5 a systémové zkratky pro snímky vypne." = "Screenshot Note takes over ⇧⌘4, ⇧⌘3 and ⇧⌘5 and turns off the system screenshot shortcuts.";
+"Systémové zkratky pro snímky se nepodařilo vypnout. Vypni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Could not turn off the system screenshot shortcuts. Turn them off in System Settings → Keyboard → Keyboard Shortcuts → Screenshots; we open it for you.";
+"Systémové zkratky pro snímky se nepodařilo zapnout. Zapni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je." = "Could not turn the system screenshot shortcuts back on. Turn them on in System Settings → Keyboard → Keyboard Shortcuts → Screenshots; we open it for you.";
+
+/* Nastavení záznamu videa */
+"%d s" = "%d s";
+"Délka odpočtu" = "Countdown length";
+"Nahrát" = "Record";
+"Nahrát celou obrazovku" = "Record the entire screen";
+"Nahrát video…" = "Record video…";
+"Nahrát vybranou oblast" = "Record a selected area";
+"Nejdřív tažením vyber oblast." = "Drag to select an area first.";
+"S odpočtem %d s" = "With %d s countdown";
+"Tažením vyber oblast záznamu" = "Drag to select the area to record";
+"Zrušit záznam" = "Cancel recording";
+"Okamžitě" = "Immediately";

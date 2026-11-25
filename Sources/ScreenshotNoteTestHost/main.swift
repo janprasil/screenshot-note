@@ -326,13 +326,13 @@ if CommandLine.arguments.contains("--self-test") {
  captureProbe.window.contentView!.addSubview(captureProbe.sessionLink);captureProbe.layoutContextRow()
  assert(!captureProbe.copyLinkButton.frame.intersects(captureProbe.sessionLink.frame) && !captureProbe.copyLinkButton.frame.intersects(captureProbe.captureGroup.frame))
  captureProbe.sessionLink.removeFromSuperview()
- // Menu pod Přidat výřez: celá obrazovka a Nahrát video s cíli; bez obsluhy záznamu je položka vypnutá.
+ // Menu pod Přidat výřez: celá obrazovka a Nahrát video (bez podmenu, otevře nastavení záznamu); bez obsluhy je vypnutá.
  let options=captureProbe.captureOptionsMenu()
- assert(options.items.count==2 && options.items[1].submenu?.items.count==3 && !options.items[1].isEnabled)
- var recorded:[RecordingTarget]=[];captureProbe.onRecord={recorded.append($0)}
- let targets=captureProbe.captureOptionsMenu().items[1]
- assert(targets.isEnabled);for item in targets.submenu!.items{captureProbe.recordVideo(item)}
- assert(recorded==[.screen,.window,.region])
+ assert(options.items.count==2 && options.items[1].submenu == nil && !options.items[1].isEnabled)
+ var recorded=0;captureProbe.onRecord={recorded+=1}
+ let recordItem=captureProbe.captureOptionsMenu().items[1]
+ assert(recordItem.isEnabled && recordItem.action == #selector(Composer.recordVideo));captureProbe.recordVideo()
+ assert(recorded==1)
  captureProbe.onRecord=nil
  assert(captureProbe.addShotButton.isEnabled && !captureProbe.saveButton.isEnabled)
  captureProbe.window.close()
@@ -368,6 +368,38 @@ if CommandLine.arguments.contains("--self-test") {
  assert(Shortcut(key:103,modifiers:UInt32(256),name:"\u{F70E}").display == "⌘F11")
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")
  print("PASS: topic persistence/routing, combined append preserving existing content, separate sessions, image removal and F-key labels")
+ // Přepínač zkratek macOS pozná jen úplnou sadu ⇧⌘4/3/5.
+ let savedShortcuts=(1...3).map{UserDefaults.standard.data(forKey:"shortcut\($0)")}
+ for id in 1...3{UserDefaults.standard.removeObject(forKey:"shortcut\(id)")};assert(!usesMacShortcuts())
+ assert((1...3).map{Shortcut.load($0).display} == ["⌘F11","⌘F12","⌘F10"])
+ for id in 1...3{UserDefaults.standard.set(try! JSONEncoder().encode(macShortcuts[id-1]),forKey:"shortcut\(id)")};assert(usesMacShortcuts())
+ assert(macShortcuts.map(\.display) == ["⇧⌘4","⇧⌘3","⇧⌘5"])
+ UserDefaults.standard.removeObject(forKey:"shortcut3");assert(!usesMacShortcuts())
+ for id in 1...3{if let d=savedShortcuts[id-1]{UserDefaults.standard.set(d,forKey:"shortcut\(id)")}else{UserDefaults.standard.removeObject(forKey:"shortcut\(id)")}}
+ print("PASS: macOS shortcut set detection")
+ // Nastavení záznamu: výchozí celá obrazovka s odpočtem 3 s, okno v popředí se mapuje na celou obrazovku, výřez bez oblasti nejde spustit.
+ let keys=["recordingTarget","recordingCountdownEnabled","recordingCountdown","recordingRegion"]
+ let savedSetup=keys.map{UserDefaults.standard.object(forKey:$0)}
+ for key in keys{UserDefaults.standard.removeObject(forKey:key)}
+ assert(RecordingPreferences.target == .screen && RecordingPreferences.countdownEnabled && RecordingPreferences.countdown==3 && RecordingPreferences.region==nil)
+ UserDefaults.standard.set("window",forKey:"recordingTarget");assert(RecordingPreferences.target == .screen)
+ var choices:[RecordingSetup.Choice?]=[]
+ let setup=RecordingSetup{choices.append($0)}
+ assert(setup.target == .screen && setup.canStart && setup.usesCountdown && setup.countdownSeconds==3)
+ setup.choose(.region);assert(!setup.canStart);setup.confirm();assert(choices.isEmpty)
+ if let display=NSScreen.screens.first {
+  let area=CGRect(x:display.frame.minX+100,y:display.frame.minY+100,width:320,height:200)
+  setup.setRegion(area,on:display);assert(setup.canStart)
+  setup.setCountdown(enabled:true,seconds:10);setup.setCountdown(enabled:true,seconds:7);assert(setup.countdownSeconds==10)
+  setup.setCountdown(enabled:false);setup.confirm()
+  assert(choices.count==1 && choices[0]?.target == .region && choices[0]?.region==area && choices[0]?.countdown==0)
+  // Volby se uloží pro příští záznam.
+  assert(RecordingPreferences.target == .region && !RecordingPreferences.countdownEnabled && recordingCountdown==10 && RecordingPreferences.region==area)
+  setup.confirm();assert(choices.count==1)
+ }
+ let cancelled=RecordingSetup{choices.append($0)};cancelled.dismiss();assert(choices.last! == nil)
+ for (key,value) in zip(keys,savedSetup){if let value{UserDefaults.standard.set(value,forKey:key)}else{UserDefaults.standard.removeObject(forKey:key)}}
+ print("PASS: recording setup defaults, region requirement, countdown choice and saved preferences")
  let panel=ScreenshotPanel(contentRect:NSRect(x:50,y:50,width:740,height:450),styleMask:[.titled,.nonactivatingPanel],backing:.buffered,defer:false)
  prepareScreenshotPanel(panel)
  assert(panel.collectionBehavior.contains(.canJoinAllSpaces) && panel.collectionBehavior.contains(.fullScreenAuxiliary))

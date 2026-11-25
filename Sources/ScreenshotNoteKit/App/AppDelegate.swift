@@ -104,33 +104,23 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }
  }
  @objc func area(){capture(full:false)};@objc func full(){capture(full:true)}
- /// Menu bar: Zastavit záznam (jen během záznamu) a podmenu Nahrát video s cílem a odpočtem.
+ /// Menu bar: Zastavit záznam (jen během záznamu) a Nahrát video, které otevře nastavení záznamu.
  func addRecordingItems(to menu:NSMenu) {
   func icon(_ symbol:String)->NSImage?{let image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular));image?.size=NSSize(width:18,height:18);image?.isTemplate=true;return image}
   let stop=NSMenuItem(title:L("Zastavit záznam"),action:#selector(stopRecording),keyEquivalent:"");stop.target=self;stop.image=icon("stop.circle");stop.isHidden=true
   menu.insertItem(stop,at:0);stopEntry=stop
-  let entry=NSMenuItem(title:L("Nahrát video"),action:nil,keyEquivalent:"");entry.image=icon("record.circle")
-  let sub=NSMenu()
-  for (title,target) in [(L("Celá obrazovka"),RecordingTarget.screen),(L("Okno v popředí"),.window),(L("Vybraná oblast…"),.region)] {
-   let item=NSMenuItem(title:title,action:#selector(recordFromMenu(_:)),keyEquivalent:"");item.target=self;item.representedObject=target.rawValue;sub.addItem(item)
-  }
-  sub.addItem(.separator())
-  for seconds in RecordingLimits.countdowns {
-   let item=NSMenuItem(title:LF("Odpočet %d s",seconds),action:#selector(chooseCountdown(_:)),keyEquivalent:"");item.target=self;item.tag=seconds;sub.addItem(item)
-  }
-  entry.submenu=sub;menu.addItem(entry);recordEntry=entry
+  let entry=NSMenuItem(title:L("Nahrát video…"),action:#selector(recordFromMenu),keyEquivalent:"");entry.target=self;entry.image=icon("record.circle")
+  menu.addItem(entry);recordEntry=entry
  }
- @objc func recordFromMenu(_ sender:NSMenuItem){startRecording(RecordingTarget(rawValue:sender.representedObject as? String ?? "") ?? .screen)}
- @objc func chooseCountdown(_ sender:NSMenuItem){recordingCountdown=sender.tag}
+ @objc func recordFromMenu(){startRecording()}
  @objc func stopRecording(){recording.stop()}
- /// Zkratka záznamu: spustí naposledy použitý cíl, během záznamu nebo odpočtu ho zastaví.
- func toggleRecording(){if recording.state != .idle{recording.stop()}else{startRecording(RecordingTarget(rawValue:UserDefaults.standard.string(forKey:"recordingTarget") ?? "") ?? .screen)}}
- func startRecording(_ target:RecordingTarget) {
+ /// Zkratka záznamu: otevře nastavení záznamu; během nastavení, odpočtu nebo záznamu ho zastaví.
+ func toggleRecording(){if recording.state != .idle{recording.stop()}else{startRecording()}}
+ func startRecording() {
   guard !capturing,!browsingSavedSessions,recording.state == .idle,!deliveringRecording else{return}
-  UserDefaults.standard.set(target.rawValue,forKey:"recordingTarget")
   composer?.collapseCompact()
   recordingBrowser=browserCaptureTarget()
-  recording.start(target,output:fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-\(UUID().uuidString).mp4"))
+  recording.start(output:fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-\(UUID().uuidString).mp4"))
  }
  func updateRecordingState() {
   let active=recording.state != .idle
@@ -140,8 +130,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   if recording.state == .recording{let seconds=Int(recording.elapsed);stopEntry?.title=LF("Zastavit záznam (%@)",videoDuration(seconds*1000))}
   else{stopEntry?.title=L("Zastavit záznam")}
   let symbol=recording.state == .recording ? "record.circle.fill":active ? "timer":"camera.viewfinder"
-  item.button?.image=NSImage(systemSymbolName:symbol,accessibilityDescription:"Screenshot Note")
-  item.button?.contentTintColor=recording.state == .recording ? .systemRed:nil
+  // Během záznamu barevná ikona (červený kruh, bílá tečka): tint šablony menu bar na tmavém pozadí ignoruje.
+  if recording.state == .recording,let image=NSImage(systemSymbolName:symbol,accessibilityDescription:L("Zastavit záznam"))?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:15,weight:.regular).applying(NSImage.SymbolConfiguration(paletteColors:[.white,.systemRed]))) {
+   image.isTemplate=false;item.button?.image=image
+  } else {item.button?.image=NSImage(systemSymbolName:symbol,accessibilityDescription:"Screenshot Note")}
+  item.button?.contentTintColor=nil
  }
  /// Hotový záznam: poster jako obrázek položky, video a snímky vedle něj, kontext prohlížeče za celou dobu.
  func recordingFinished(_ result:Result<RecordingResult,Error>?) {
@@ -155,7 +148,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   catch{try? fm.removeItem(at:recorded.video);try? fm.removeItem(at:holding);composer?.expandCompact();showError(error.localizedDescription);return}
   let topic=composer?.draft.topic ?? (try? readDraft(draftRoot))?.topic
   let folder=topic.flatMap{saved in Topics.all.first{$0.id==saved.id}}
-  let window=recorded.durationMs+(recordingCountdown+5)*1000
+  let window=recorded.durationMs+(recording.countdownSeconds+5)*1000
   let browser=recordingBrowser;recordingBrowser=nil
   let context=PendingCaptureContext.start(topic:folder,windowMs:window,target:{browser})
   deliveringRecording=true
@@ -378,7 +371,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   let pristine=draftSignature(baseline ?? draft,root:root)
   view.hasUnsavedWork={[weak view] in view.map{draftSignature($0.draft,root:root) != pristine} ?? false}
   view.onCapture={[weak self] full in self?.capture(full:full,fromComposer:true)}
-  view.onRecord={[weak self] target in self?.startRecording(target)}
+  view.onRecord={[weak self] in self?.startRecording()}
   view.recordingAvailable={[weak self] in self.map{!$0.capturing && !$0.browsingSavedSessions && $0.recording.state == .idle && !$0.deliveringRecording} ?? false}
   view.complete={[weak self, weak view] result,draft in
    guard let self,let view else{return}

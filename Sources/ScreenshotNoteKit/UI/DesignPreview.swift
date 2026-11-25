@@ -67,6 +67,8 @@ func exportDesignPreviews(to directory:URL)throws{
   let fileTab=MarkdownEditor();_ = fileTab.run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),defaultMarkdownTemplate,sessionTemplateHint),(L("Šablona souboru"),defaultCombinedTemplate,fileTemplateHint)],apply:L("Použít šablonu"),present:false)
   presentScreenshotPanel(fileTab.window);fileTab.select(1);exportDesignWindow(fileTab.window,name:"template-file-tab");fileTab.window.orderOut(nil)
   let shortcuts=ShortcutSettings(hotkeys:hotkeys);shortcuts.show()
+  // Lišta nastavení záznamu bez překryvů displejů.
+  let recordingSetup=RecordingSetup{_ in};recordingSetup.refresh();exportDesignWindow(recordingSetup.bar,name:"recording-bar")
   AboutController.shared.window=nil;AboutController.shared.show();exportDesignWindow(AboutController.shared.window!,name:"about")
   let markdown=MarkdownEditor();_ = markdown.run(language=="en" ? "# Checkout notes\n\nToday’s review highlighted **two important changes**.\n\n- Highlight the selected payment method\n- Shorten the confirmation step\n\n## What to keep\n\nClear pricing and delivery information.\n\n> Make the last step easier to understand.":"# Poznámky k objednávce\n\nZ dnešního průchodu vyplývají **dvě důležité úpravy**.\n\n- Zvýraznit vybranou platební metodu\n- Zkrátit potvrzovací krok\n\n## Co zachovat\n\nPřehlednou cenu a jasné informace o doručení.\n\n> Cílem je méně rozhodování v posledním kroku.")
   let editor=AnnotationEditor();_ = editor.run(url:root.appendingPathComponent("sample-\(language)-0.png"))

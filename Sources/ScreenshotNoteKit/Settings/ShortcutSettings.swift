@@ -22,29 +22,47 @@ final class ShortcutButton:AppButton {
 
 final class ShortcutSettings:NSObject,NSWindowDelegate {
  var window:NSWindow!;let hotkeys:Hotkeys
+ private var shortcutButtons:[ShortcutButton]=[];private var macButton:AppButton!;private var macHint:NSTextField!
  init(hotkeys:Hotkeys){self.hotkeys=hotkeys}
  func show(){
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:620,height:412),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Klávesové zkratky");window.delegate=self
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:620,height:500),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Klávesové zkratky");window.delegate=self
   let view=installDesignRoot(window,showClose:false)
-  view.addSubview(designLabel(L("Klávesové zkratky"),NSRect(x:28,y:348,width:560,height:34),size:24,weight:.semibold))
-  view.addSubview(designLabel(L("Klikněte na kombinaci a stiskněte novou."),NSRect(x:28,y:320,width:560,height:22),size:12,color:AppPalette.secondary))
+  view.addSubview(designLabel(L("Klávesové zkratky"),NSRect(x:28,y:436,width:560,height:34),size:24,weight:.semibold))
+  view.addSubview(designLabel(L("Klikněte na kombinaci a stiskněte novou."),NSRect(x:28,y:408,width:560,height:22),size:12,color:AppPalette.secondary))
+  shortcutButtons=[]
   for id in 1...3 {
-   let y=CGFloat(246-(id-1)*72)
+   let y=CGFloat(334-(id-1)*72)
    view.addSubview(designLabel([L("Vybraná oblast"),L("Celá hlavní obrazovka"),L("Záznam videa (start/stop)")][id-1],NSRect(x:28,y:y+12,width:290,height:23),size:14,weight:.medium))
    let button=ShortcutButton(frame:NSRect(x:342,y:y+4,width:250,height:38));button.shortcut=Shortcut.load(id);button.title=button.shortcut.display;button.toolTip=L("Fn může na Macu vyvolat F-klávesu; například Fn + ⌘ + F11 se zobrazí jako ⌘F11.")
    button.onChange={[weak self] candidate in
     let others=(1...3).filter{$0 != id}.map(Shortcut.load)
     guard !others.contains(where:{candidate.key == $0.key && candidate.modifiers == $0.modifiers}) else {showError(L("Tato kombinace už patří jiné zkratce."));return false}
     let old=Shortcut.load(id);UserDefaults.standard.set(try? JSONEncoder().encode(candidate),forKey:"shortcut\(id)")
-    if let errors=self?.hotkeys.register(),!errors.isEmpty {UserDefaults.standard.set(try? JSONEncoder().encode(old),forKey:"shortcut\(id)");_ = self?.hotkeys.register();showError(errors.joined(separator:"\n"));return false};return true
-   };view.addSubview(button)
-   if id<3{view.addSubview(DesignDivider(NSRect(x:28,y:y-16,width:564,height:1)))}
+    if let errors=self?.hotkeys.register(),!errors.isEmpty {UserDefaults.standard.set(try? JSONEncoder().encode(old),forKey:"shortcut\(id)");_ = self?.hotkeys.register();showError(errors.joined(separator:"\n"));return false}
+    DispatchQueue.main.async{self?.refresh()};return true
+   };view.addSubview(button);shortcutButtons.append(button)
+   view.addSubview(DesignDivider(NSRect(x:28,y:y-16,width:564,height:1)))
   }
+  // Přepínač mezi zkratkami macOS (⇧⌘4/3/5) a výchozími zkratkami aplikace.
+  view.addSubview(designLabel(L("Zkratky macOS"),NSRect(x:28,y:118,width:290,height:23),size:14,weight:.medium))
+  macHint=designLabel("",NSRect(x:28,y:72,width:300,height:44),size:11,color:AppPalette.secondary);macHint.usesSingleLineMode=false;macHint.lineBreakMode = .byWordWrapping;macHint.maximumNumberOfLines=3;view.addSubview(macHint)
+  macButton=styledButton("",role:.secondary,frame:NSRect(x:342,y:94,width:250,height:38),target:self,action:#selector(toggleMacShortcuts));view.addSubview(macButton)
+  refresh()
   view.addSubview(designLabel(L("Escape zruší zadávání nové kombinace."),NSRect(x:28,y:28,width:390,height:22),size:11,color:AppPalette.secondary))
   let done=styledButton(L("Hotovo"),role:.primary,frame:NSRect(x:482,y:22,width:110,height:34),target:self,action:#selector(close));done.keyEquivalent="\r";view.addSubview(done)
   presentScreenshotPanel(window)
   if isExportingDesign{exportDesignWindow(window,name:"shortcuts");return}
   NSApp.runModal(for:window);window.orderOut(nil)
+ }
+ private func refresh(){
+  for (i,button) in shortcutButtons.enumerated() where !button.recording{button.shortcut=Shortcut.load(i+1);button.title=button.shortcut.display}
+  let mac=macShortcutsTakenOver()
+  macButton.title=mac ? L("Vrátit zkratky macOS") : L("Nahradit zkratky macOS")
+  macHint.stringValue=mac ? L("⇧⌘4, ⇧⌘3 a ⇧⌘5 teď patří Screenshot Note. Vrácením se zapnou systémové zkratky a aplikace použije výchozí.") : L("Screenshot Note převezme ⇧⌘4, ⇧⌘3 a ⇧⌘5 a systémové zkratky pro snímky vypne.")
+ }
+ @MainActor @objc func toggleMacShortcuts(){
+  if macShortcutsTakenOver(){restoreMacShortcuts(hotkeys)}else{applyMacShortcuts(hotkeys)}
+  refresh();window.makeKeyAndOrderFront(nil)
  }
  @objc func close(){NSApp.stopModal()}
  func windowShouldClose(_ sender:NSWindow)->Bool{close();return false}

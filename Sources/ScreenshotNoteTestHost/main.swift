@@ -387,6 +387,11 @@ if CommandLine.arguments.contains("--self-test") {
  for id in 1...3{UserDefaults.standard.set(try! JSONEncoder().encode(macShortcuts[id-1]),forKey:"shortcut\(id)")};assert(usesMacShortcuts())
  assert(macShortcuts.map(\.display) == ["⇧⌘4","⇧⌘3","⇧⌘5"])
  UserDefaults.standard.removeObject(forKey:"shortcut3");assert(!usesMacShortcuts())
+ // Záloha systémových zkratek drží nabídku vrácení i po změně jedné zkratky aplikace.
+ let savedBackup=UserDefaults.standard.object(forKey:SystemScreenshotShortcuts.backupKey)
+ UserDefaults.standard.removeObject(forKey:SystemScreenshotShortcuts.backupKey);assert(!macShortcutsTakenOver())
+ UserDefaults.standard.set(["30":["enabled":false]],forKey:SystemScreenshotShortcuts.backupKey);assert(macShortcutsTakenOver() && SystemScreenshotShortcuts.backup?["30"] != nil)
+ if let savedBackup{UserDefaults.standard.set(savedBackup,forKey:SystemScreenshotShortcuts.backupKey)}else{UserDefaults.standard.removeObject(forKey:SystemScreenshotShortcuts.backupKey)}
  for id in 1...3{if let d=savedShortcuts[id-1]{UserDefaults.standard.set(d,forKey:"shortcut\(id)")}else{UserDefaults.standard.removeObject(forKey:"shortcut\(id)")}}
  print("PASS: macOS shortcut set detection")
  // Nastavení záznamu: výchozí celá obrazovka s odpočtem 3 s, okno v popředí se mapuje na celou obrazovku, výřez bez oblasti nejde spustit.

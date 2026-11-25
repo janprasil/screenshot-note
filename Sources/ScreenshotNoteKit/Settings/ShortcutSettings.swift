@@ -56,12 +56,12 @@ final class ShortcutSettings:NSObject,NSWindowDelegate {
  }
  private func refresh(){
   for (i,button) in shortcutButtons.enumerated() where !button.recording{button.shortcut=Shortcut.load(i+1);button.title=button.shortcut.display}
-  let mac=usesMacShortcuts()
+  let mac=macShortcutsTakenOver()
   macButton.title=mac ? L("Vrátit zkratky macOS") : L("Nahradit zkratky macOS")
   macHint.stringValue=mac ? L("⇧⌘4, ⇧⌘3 a ⇧⌘5 teď patří Screenshot Note. Vrácením se zapnou systémové zkratky a aplikace použije výchozí.") : L("Screenshot Note převezme ⇧⌘4, ⇧⌘3 a ⇧⌘5 a systémové zkratky pro snímky vypne.")
  }
  @MainActor @objc func toggleMacShortcuts(){
-  if usesMacShortcuts(){restoreMacShortcuts(hotkeys)}else{applyMacShortcuts(hotkeys)}
+  if macShortcutsTakenOver(){restoreMacShortcuts(hotkeys)}else{applyMacShortcuts(hotkeys)}
   refresh();window.makeKeyAndOrderFront(nil)
  }
  @objc func close(){NSApp.stopModal()}

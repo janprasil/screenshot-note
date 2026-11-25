@@ -36,13 +36,31 @@ enum SystemScreenshotShortcuts {
  static let domain="com.apple.symbolichotkeys" as CFString,key="AppleSymbolicHotKeys" as CFString
  // Výchozí parametry: ASCII znak, keycode, ⇧⌘.
  static let ids:[String:[Int]]=["28":[51,20,1179648],"30":[52,21,1179648],"184":[53,23,1179648]]
+ /// Záloha původních záznamů z doby převzetí; její existence znamená, že systémové zkratky drží aplikace.
+ static let backupKey="systemScreenshotShortcutsBackup"
+ static var backup:[String:Any]?{UserDefaults.standard.dictionary(forKey:backupKey)}
+ static var takenOver:Bool{backup != nil}
+ /// Současné záznamy tří zkratek; chybějící záznam znamená výchozí stav (zapnuto).
+ static func snapshot()->[String:Any] {
+  let all=(CFPreferencesCopyAppValue(key,domain) as? [String:Any]) ?? [:]
+  return all.filter{ids[$0.key] != nil}
+ }
  /// Zapne nebo vypne systémové zkratky a hned je aplikuje; false když se to nepovede.
  @discardableResult static func set(enabled:Bool)->Bool {
-  var all=(CFPreferencesCopyAppValue(key,domain) as? [String:Any]) ?? [:]
-  for (id,parameters) in ids {
-   var entry=all[id] as? [String:Any] ?? ["value":["parameters":parameters,"type":"standard"]]
-   entry["enabled"]=enabled;all[id]=entry
+  write{all in
+   for (id,parameters) in ids {
+    var entry=all[id] as? [String:Any] ?? ["value":["parameters":parameters,"type":"standard"]]
+    entry["enabled"]=enabled;all[id]=entry
+   }
   }
+ }
+ /// Vrátí záznamy přesně podle zálohy (chybějící se smažou, systém použije výchozí).
+ @discardableResult static func restore(_ saved:[String:Any])->Bool {
+  write{all in for id in ids.keys{all[id]=saved[id]}}
+ }
+ private static func write(_ change:(inout [String:Any])->Void)->Bool {
+  var all=(CFPreferencesCopyAppValue(key,domain) as? [String:Any]) ?? [:]
+  change(&all)
   CFPreferencesSetAppValue(key,all as CFDictionary,domain)
   guard CFPreferencesAppSynchronize(domain) else{return false}
   let process=Process();process.executableURL=URL(fileURLWithPath:"/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings");process.arguments=["-u"]
@@ -50,15 +68,23 @@ enum SystemScreenshotShortcuts {
  }
 }
 
+/// Zda nastavení nabízí vrácení: aplikace drží ⇧⌘4/3/5, nebo má systémové zkratky vypnuté.
+func macShortcutsTakenOver()->Bool{usesMacShortcuts() || SystemScreenshotShortcuts.takenOver}
+
 /// Převezme zkratky macOS a systémové vypne; když to nejde, vrátí předchozí stav a vrátí false.
 @MainActor @discardableResult func applyMacShortcuts(_ hotkeys:Hotkeys)->Bool{
  let defaults=UserDefaults.standard,previous=(1...3).map{defaults.data(forKey:"shortcut\($0)")}
+ // Záloha jen při prvním převzetí, aby vrácení obnovilo původní nastavení uživatele.
+ let original=SystemScreenshotShortcuts.backup,saved=original ?? SystemScreenshotShortcuts.snapshot()
  let systemOff=SystemScreenshotShortcuts.set(enabled:false)
+ if systemOff,original == nil{defaults.set(saved,forKey:SystemScreenshotShortcuts.backupKey)}
  for id in 1...3{defaults.set(try? JSONEncoder().encode(macShortcuts[id-1]),forKey:"shortcut\(id)")}
  let errors=hotkeys.register()
  if !errors.isEmpty{
   for id in 1...3{if let d=previous[id-1]{defaults.set(d,forKey:"shortcut\(id)")}else{defaults.removeObject(forKey:"shortcut\(id)")}}
-  _ = hotkeys.register();SystemScreenshotShortcuts.set(enabled:true)
+  _ = hotkeys.register()
+  // Systém zpět do stavu před tímto pokusem; dřívější převzetí zůstává.
+  if original == nil{SystemScreenshotShortcuts.restore(saved);defaults.removeObject(forKey:SystemScreenshotShortcuts.backupKey)}
   showError(L("Zkratky ⇧⌘4, ⇧⌘3 a ⇧⌘5 se nepodařilo převzít. Ponechali jsme předchozí zkratky."));return false
  }
  // Bez vypnutí systémových zkratek by je macOS dál chytal první; pak je musí vypnout uživatel.
@@ -69,12 +95,14 @@ enum SystemScreenshotShortcuts {
  return true
 }
 
-/// Vrátí výchozí zkratky aplikace a systému znovu zapne ⇧⌘4/3/5.
+/// Vrátí výchozí zkratky aplikace a systémové zkratky podle zálohy z převzetí (bez zálohy je zapne).
 @MainActor func restoreMacShortcuts(_ hotkeys:Hotkeys){
  for id in 1...3{UserDefaults.standard.removeObject(forKey:"shortcut\(id)")}
  let errors=hotkeys.register()
  if !errors.isEmpty{showError(errors.joined(separator:"\n"))}
- if !SystemScreenshotShortcuts.set(enabled:true){
+ let restored=SystemScreenshotShortcuts.backup.map{SystemScreenshotShortcuts.restore($0)} ?? SystemScreenshotShortcuts.set(enabled:true)
+ if restored{UserDefaults.standard.removeObject(forKey:SystemScreenshotShortcuts.backupKey)}
+ else {
   showError(L("Systémové zkratky pro snímky se nepodařilo zapnout. Zapni je v Nastavení systému → Klávesnice → Klávesové zkratky → Snímky obrazovky; otevřeme ti je."))
   if let keyboardSettingsURL{NSWorkspace.shared.open(keyboardSettingsURL)}
  }

@@ -108,9 +108,10 @@ jobs:
           ln -s /Applications staging-app/Applications
           ditto "$APP" "$app"
           python3 scripts/configure-build.py "$app/Contents/Info.plist"
-          codesign --force --options runtime --sign - "$app/Contents/MacOS/screenshot-note-bridge"
-          codesign --force --options runtime --sign - "$app"
-          codesign --verify --strict "$app"
+          # Bez hardened runtime: ad-hoc appka by jinak odmítla ad-hoc Sparkle.framework.
+          codesign --force --sign - "$app"
+          codesign --verify --strict --deep "$app"
+          "$app/Contents/MacOS/ScreenshotNote" --language-check
           hdiutil create -volname "Screenshot Note (staging)" -srcfolder staging-app -ov -format UDZO staging/Screenshot-Note-staging.dmg
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: actions/upload-artifact@v7

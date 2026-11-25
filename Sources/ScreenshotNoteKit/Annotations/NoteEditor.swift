@@ -5,6 +5,10 @@ import AppKit
 /// Text view rozbaleného komentáře: ⌘Enter potvrdí, Esc zruší, Enter vloží řádek.
 final class NoteTextView:NSTextView {
  var onConfirm:(()->Void)?;var onCancel:(()->Void)?
+ /// Klik do zamčeného pole (text s Markdownem) otevře Markdown editor.
+ var onLockedClick:(()->Void)?
+ override func mouseDown(with event:NSEvent){if !isEditable,let onLockedClick{onLockedClick();return};super.mouseDown(with:event)}
+ override func resetCursorRects(){if !isEditable && onLockedClick != nil{addCursorRect(visibleRect,cursor:.pointingHand)}else{super.resetCursorRects()}}
  override func keyDown(with event:NSEvent){
   if (event.keyCode==36 || event.keyCode==76),event.modifierFlags.contains(.command){onConfirm?();return}
   if event.keyCode==53{onCancel?();return}
@@ -24,7 +28,13 @@ final class NoteEditorBox:NSView {
  private(set) var expanded=false
  /// V panelu editoru: jen víceřádkové pole přes celou plochu, ovládání dává panel.
  private(set) var embedded=false
- func embed(){setExpanded(true);embedded=true;textView.font = .systemFont(ofSize:13);layer?.shadowOpacity=0;shadow=nil;for view in [icon,field,expandButton,doneButton] as [NSView]{view.isHidden=true};layoutParts()}
+ /// Pole v panelu: stejné jako poznámka ke snímku (4 řádky, ≡ otevře Markdown editor).
+ private(set) var area:MarkdownTextArea?
+ func embed(){
+  let text=value;setExpanded(true);embedded=true;layer?.shadowOpacity=0;shadow=nil;layer?.borderWidth=0;layer?.backgroundColor=NSColor.clear.cgColor
+  for view in [icon,field,expandButton,doneButton,scroll] as [NSView]{view.isHidden=true}
+  scroll.documentView=nil;let area=MarkdownTextArea(frame:bounds,textView:textView);area.autoresizingMask=[.width,.height];addSubview(area);self.area=area;area.string=text;markdown=text
+ }
  var onConfirm:(()->Void)?{didSet{textView.onConfirm=onConfirm}}
  var onCancel:(()->Void)?{didSet{textView.onCancel=onCancel}}
  var onResize:(()->Void)?
@@ -47,19 +57,19 @@ final class NoteEditorBox:NSView {
  }
  required init?(coder:NSCoder){nil}
  // Klik do plochy pole (mimo prvky) nesmí propadnout do plátna, to by komentář zavřelo.
- override func mouseDown(with event:NSEvent){window?.makeFirstResponder(editor)}
+ override func mouseDown(with event:NSEvent){if embedded{return};window?.makeFirstResponder(editor)}
  override func viewDidChangeEffectiveAppearance(){super.viewDidChangeEffectiveAppearance();updateColors()}
- private func updateColors(){effectiveAppearance.performAsCurrentDrawingAppearance{self.layer?.backgroundColor=AppPalette.paper.cgColor;self.layer?.borderColor=AppPalette.accent.withAlphaComponent(0.55).cgColor}}
+ private func updateColors(){if embedded{return};effectiveAppearance.performAsCurrentDrawingAppearance{self.layer?.backgroundColor=AppPalette.paper.cgColor;self.layer?.borderColor=AppPalette.accent.withAlphaComponent(0.55).cgColor}}
  /// Text rozbaleného editoru; mimo okno se drží stranou (NSTextView bez okna sahá na vstupní metody).
  private var detachedText=""
  /// Sbalené pole ukazuje víceřádkový text na jednom řádku; beze změny v poli se ukládá původní text s řádky.
  private var fullText="",collapsedDisplay=""
  static func oneLine(_ text:String)->String{text.components(separatedBy:.newlines).filter{!$0.isEmpty}.joined(separator:" ")}
  var markdown:String{
-  get{window == nil ? detachedText:textView.string}
-  set{detachedText=newValue;if window != nil{textView.string=newValue}}
+  get{area?.string ?? (window == nil ? detachedText:textView.string)}
+  set{detachedText=newValue;if let area{area.string=newValue}else if window != nil{textView.string=newValue}}
  }
- override func viewDidMoveToWindow(){super.viewDidMoveToWindow();if window != nil,expanded,textView.string != detachedText{textView.string=detachedText}}
+ override func viewDidMoveToWindow(){super.viewDidMoveToWindow();if window != nil,area == nil,expanded,textView.string != detachedText{textView.string=detachedText}}
  /// Aktuální text: z rozbaleného editoru, jinak z jednořádkového pole.
  var value:String{expanded ? markdown:(field.stringValue==collapsedDisplay ? fullText:field.stringValue)}
  var editor:NSView{expanded ? textView:field}
@@ -77,7 +87,7 @@ final class NoteEditorBox:NSView {
  override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);layoutParts()}
  private func layoutParts(){
   let h=bounds.height,w=bounds.width,top=h-Self.collapsedHeight
-  if embedded{scroll.frame=bounds.insetBy(dx:8,dy:8);return}
+  if embedded{return}
   icon.frame=NSRect(x:9,y:top+8,width:18,height:18)
   doneButton.frame=NSRect(x:w-30,y:top+6,width:22,height:22)
   expandButton.frame=NSRect(x:w-54,y:top+6,width:22,height:22)

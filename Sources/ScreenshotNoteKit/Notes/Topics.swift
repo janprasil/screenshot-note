@@ -122,6 +122,8 @@ final class StarButton:AppButton {
  }
 }
 final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NSTextFieldDelegate,NSWindowDelegate {
+ /// O kolik je okno vyšší než původních 620 px; horní část formuláře se posouvá o stejnou hodnotu.
+ static let lift:CGFloat=32
  var window:NSWindow!;var list=Topics.all;var editingID:String?;let table=NSTableView()
  private let connection:()->CloudConnection?
  var signedIn:Bool{connection()?.ownerID != nil}
@@ -161,9 +163,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func show(present:Bool=true,reload:Bool=true){
   if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
   if !isExportingDesign && reload{list=Topics.all}
-  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:900,height:620),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Konfigurace");window.isReleasedWhenClosed=false;window.delegate=self
+  window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:900,height:620+Self.lift),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Konfigurace");window.isReleasedWhenClosed=false;window.delegate=self
   let view=installDesignRoot(window,headerHeight:108)
-  let sidebar=DesignSurface(frame:NSRect(x:0,y:0,width:240,height:620),fill:AppPalette.raised);view.addSubview(sidebar)
+  let sidebar=DesignSurface(frame:NSRect(x:0,y:0,width:240,height:620+Self.lift),fill:AppPalette.raised);view.addSubview(sidebar)
   sidebar.addSubview(designLabel(L("Složky"),NSRect(x:20,y:562,width:200,height:30),size:19,weight:.semibold))
   let column=NSTableColumn(identifier:NSUserInterfaceItemIdentifier("topic"));column.width=208;table.addTableColumn(column);table.headerView=nil;table.rowHeight=58;table.intercellSpacing=NSSize(width:0,height:3);table.delegate=self;table.dataSource=self;table.style = .plain;table.backgroundColor=AppPalette.raised;table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
   let scroll=NSScrollView(frame:NSRect(x:12,y:68,width:216,height:478));scroll.drawsBackground=false;scroll.hasVerticalScroller=true;scroll.autohidesScrollers=true;table.frame=NSRect(x:0,y:0,width:216,height:470);scroll.documentView=table;table.frame.size.width=scroll.contentSize.width;table.autoresizingMask=[.width];sidebar.addSubview(scroll)
@@ -171,8 +173,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   scroll.scrollerStyle = .overlay;scroll.verticalScroller?.controlSize = .small
   sidebar.addSubview(DesignDivider(NSRect(x:16,y:64,width:208,height:1)))
   // Dole jen Nová složka; výchozí název a šablony jsou v menu „⋯“.
-  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:22,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
-  let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:22,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
+  addButton=styledButton(L("Nová složka"),symbol:"plus",frame:NSRect(x:16,y:16,width:160,height:34),target:self,action:#selector(addTopic));sidebar.addSubview(addButton)
+  let more=styledButton("",symbol:"ellipsis",role:.quiet,frame:NSRect(x:184,y:16,width:40,height:34),target:self,action:#selector(showDefaultsMenu(_:)))
   more.toolTip=L("Výchozí název a šablony");more.setAccessibilityLabel(L("Výchozí název a šablony"));sidebar.addSubview(more)
   // Název je nadpis; tužka nebo klik ho přepne do úprav.
   nameShell.isHidden=true;view.addSubview(nameShell)
@@ -201,11 +203,16 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
   aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:122,width:380,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
   defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:662,y:122,width:210,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
-  view.addSubview(DesignDivider(NSRect(x:272,y:62,width:600,height:1)))
-  deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:22,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
-  saveStatus.frame=NSRect(x:272,y:28,width:244,height:22);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
-  saveButton=styledButton(L("Uložit složku"),symbol:"checkmark",role:.primary,frame:NSRect(x:700,y:22,width:172,height:34),target:self,action:#selector(saveTopic));view.addSubview(saveButton)
+  // Linka ve stejné výšce jako v postranním panelu, tlačítka s odstupem pod ní.
+  view.addSubview(DesignDivider(NSRect(x:272,y:64,width:600,height:1)))
+  deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:16,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
+  // Hláška svisle na středu tlačítek.
+  saveStatus.frame=NSRect(x:272,y:25,width:244,height:16);saveStatus.font = .systemFont(ofSize:11);saveStatus.textColor=AppPalette.secondary;saveStatus.lineBreakMode = .byTruncatingTail;view.addSubview(saveStatus)
+  saveButton=styledButton(L("Uložit složku"),symbol:"checkmark",role:.primary,frame:NSRect(x:700,y:16,width:172,height:34),target:self,action:#selector(saveTopic));view.addSubview(saveButton)
   NotificationCenter.default.addObserver(self,selector:#selector(foldersChanged),name:.cloudFoldersChanged,object:nil)
+  // Horní část formuláře jde o lift výš; kontext a výchozí název dole tak mají místo nad linkou.
+  for child in view.subviews+sidebar.subviews where child !== sidebar && child.frame.minY>=150 && child.autoresizingMask.isEmpty {child.frame.origin.y+=Self.lift}
+  scroll.frame.size.height+=Self.lift
   reloadFolders();if present{presentScreenshotPanel(window)}
  }
  @objc func foldersChanged(){
@@ -293,9 +300,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func layoutHeading(){
   let editing=name.isEditable,text=name.stringValue.isEmpty ? (name.placeholderString ?? ""):name.stringValue
   let width=editing ? 440:min(440,ceil((text as NSString).size(withAttributes:[.font:name.font!]).width)+6)
-  name.frame=NSRect(x:editing ? 282:272,y:558,width:width,height:34);nameShell.frame=NSRect(x:272,y:556,width:width+20,height:38);nameShell.isHidden = !editing;nameClick.isEnabled = !editing
-  pencil?.frame=NSRect(x:name.frame.maxX+(editing ? 16:6),y:561,width:28,height:28);pencil?.isHidden=editing || !editingManaged
-  star.frame=NSRect(x:(editing ? nameShell.frame.maxX:pencil.frame.maxX)+4,y:561,width:30,height:28)
+  name.frame=NSRect(x:editing ? 282:272,y:558+Self.lift,width:width,height:34);nameShell.frame=NSRect(x:272,y:556+Self.lift,width:width+20,height:38);nameShell.isHidden = !editing;nameClick.isEnabled = !editing
+  pencil?.frame=NSRect(x:name.frame.maxX+(editing ? 16:6),y:561+Self.lift,width:28,height:28);pencil?.isHidden=editing || !editingManaged
+  star.frame=NSRect(x:(editing ? nameShell.frame.maxX:pencil.frame.maxX)+4,y:561+Self.lift,width:30,height:28)
   let isDefault=pendingDefault || (editingID != nil && editingID==defaultID);star.isOn=isDefault
   star.toolTip=isDefault ? L("Výchozí složka pro nové relace"):L("Nastavit jako výchozí složku");star.setAccessibilityLabel(star.toolTip)
  }
@@ -405,7 +412,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard let contextButton else{return}
   let cloud=editingCloud
   // Bez společného souboru je řádek hned pod režimem ukládání.
-  let top:CGFloat=mode.indexOfSelectedItem==1 ? 126:178
+  let top:CGFloat=mode.indexOfSelectedItem==1 ? 150:178+Self.lift
   contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-30;contextButton.frame.origin.y=top-6;askBeforeDelete.frame.origin.y=top-84
   contextToggle.state=contextPolicy.enabled ? .on:.off;contextToggle.isEnabled=editingManaged || cloud
   contextButton.isEnabled=contextPolicy.enabled && (editingManaged || cloud)
@@ -419,7 +426,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   aiTitleToggle.state=(pending ?? (current?.aiTitle==true)) ? .on:.off;aiTitleToggle.isEnabled=editingManaged && pending==nil && (planned || current?.aiTitle==true)
   if cloud,let current,current.aiTitle==nil,!aiTitleRequested.contains(current.id),!isExportingDesign{aiTitleRequested.insert(current.id);Task{@MainActor in _ = try? await CloudFolders.shared.aiTitle(current);self.list=Topics.all;self.updateContext()}}
   if let defaultTitleButton {
-   defaultTitleButton.frame.origin.y=top-62;defaultTitleButton.isEnabled = !cloud || editingManaged
+   // Pod tlačítkem kontextu s odstupem 8 px, aby nepřerostlo linku nad tlačítky.
+   defaultTitleButton.frame.origin.y=top-48;defaultTitleButton.isEnabled = !cloud || editingManaged
    defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
    defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
   }

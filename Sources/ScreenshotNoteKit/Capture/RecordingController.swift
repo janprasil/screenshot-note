@@ -23,6 +23,7 @@ final class RegionSelection {
   for window in windows{window.orderFrontRegardless()}
   let pointer=windows.first{$0.frame.contains(NSEvent.mouseLocation)} ?? windows.first
   pointer?.makeKeyAndOrderFront(nil)
+  allowBackgroundCursor()
   NSCursor.crosshair.push()
   // Systém kurzor neaktivní aplikace občas vrátí na šipku; křížek se proto obnovuje.
   keeper=CursorKeeper{[weak self] in if self?.windows.contains(where:{$0.frame.contains(NSEvent.mouseLocation)}) == true{NSCursor.crosshair.set()}}
@@ -73,6 +74,17 @@ final class RegionSelector:NSPanel {
   let bounds=CGRect(origin:.zero,size:frame.size),c=CGPoint(x:min(max(b.x,0),bounds.width),y:min(max(b.y,0),bounds.height))
   return CGRect(x:min(a.x,c.x),y:min(a.y,c.y),width:abs(a.x-c.x),height:abs(a.y-c.y))
  }
+}
+
+/// Neaktivní appka smí měnit kurzor; bez toho systém při prvním výběru vrací šipku.
+// Volá se jen z hlavního vlákna (výběr oblasti).
+nonisolated(unsafe) private var backgroundCursorAllowed=false
+func allowBackgroundCursor() {
+ guard !backgroundCursorAllowed,let handle=dlopen(nil,RTLD_NOW),let connection=dlsym(handle,"_CGSDefaultConnection"),let setter=dlsym(handle,"CGSSetConnectionProperty") else{return}
+ typealias Connection=@convention(c)()->Int32
+ typealias SetProperty=@convention(c)(Int32,Int32,CFString,CFTypeRef)->Int32
+ let id=unsafeBitCast(connection,to:Connection.self)()
+ backgroundCursorAllowed=unsafeBitCast(setter,to:SetProperty.self)(id,id,"SetsCursorInBackground" as CFString,kCFBooleanTrue)==0
 }
 
 /// Opakovaně nastavuje kurzor nad překryvem; aplikace není aktivní, takže ho systém může mezi pohyby myši přepsat.

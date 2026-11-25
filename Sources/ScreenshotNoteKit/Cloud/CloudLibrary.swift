@@ -72,7 +72,7 @@ func cloudAttachmentAllowed(_ directory:URL,index:Int,folder:UUID?)->Bool {
 }
 /// Příloha položky v cloudu: kontext (`.context.json`, `.har`), video (`.mp4`) nebo klíčový snímek (`.frame-N.png`), soubor `<index>.<přípona>` ve složce jobu.
 struct CloudAttachment: Codable, Equatable {
- static let limit=16*1024*1024,videoLimit=8*1024*1024,frameLimit=4*1024*1024
+ static let limit=16*1024*1024,videoLimit=16*1024*1024,frameLimit=4*1024*1024
  let index: Int; let kind: String; let bytes: Int; let sha256: String
  /// Snímek: čas ve videu a sha256 videa, ke kterému patří.
  var timestampMs: Int? = nil; var video: String? = nil
@@ -190,6 +190,8 @@ final class CloudLibrary {
   try vault.save(saved); connection = saved; lastError = nil
   // Aktivní připojení se ověřuje jen občas, aby se odvolání projevilo bez zátěže serveru.
   if current.ownerID != nil { nextPoll = now().addingTimeInterval(900) }
+  // Nově potvrzené párování: složky a nabídka synchronizace hned, ne až za minutu.
+  else { NotificationCenter.default.post(name: .cloudConnectionActivated, object: nil) }
  }
  @MainActor func cancelPairing() async throws {
   guard !connecting, !syncing, let c = connection, c.ownerID == nil, let endpoint = CloudEndpoint(c.endpoint) else { return }
@@ -283,7 +285,7 @@ final class CloudLibrary {
    let video = videoSidecars(root.appendingPathComponent(filename))
    // Video nad limit cloudu nezahodíme potichu: uložení selže a koncept zůstane.
    if index >= (base?.count ?? 0), readVideoInfo(video[1]) != nil, let size = try? video[0].resourceValues(forKeys:[.fileSizeKey]).fileSize, size > CloudAttachment.videoLimit {
-    throw CloudFailure(LF("Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.", index + 1))
+    throw CloudFailure(LF("Video položky %ld je větší než 16 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam.", index + 1))
    }
    // Nečitelné video se taky nezahodí potichu.
    if index >= (base?.count ?? 0), fm.fileExists(atPath: video[0].path), readVideoInfo(video[1]) == nil || (try? boundedData(video[0], max: CloudAttachment.videoLimit)) == nil {

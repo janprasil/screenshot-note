@@ -237,16 +237,12 @@ enum FolderDialogs {
   let declined=Set(UserDefaults.standard.stringArray(forKey:key) ?? [])
   let candidates=folders.repairCandidates.filter{!declined.contains($0.id)}
   guard !candidates.isEmpty else{return}
-  NSApp.activate(ignoringOtherApps:true)
-  let alert=NSAlert();alert.messageText=L("Znovu propojit složky s cloudem?")
-  alert.informativeText=L("Tyto lokální složky dřív patřily do cloudu tohoto účtu. Místní relace se nahrají, cloudové se stáhnou a rozdílné verze se uloží vedle jako _cloud.md.")
-  let boxes=candidates.map{topic->NSButton in let box=NSButton(checkboxWithTitle:topic.displayName,target:nil,action:nil);box.state = .on;return box}
-  let stack=NSStackView(views:boxes);stack.orientation = .vertical;stack.alignment = .leading;stack.frame=NSRect(x:0,y:0,width:330,height:CGFloat(boxes.count)*24);alert.accessoryView=stack
-  alert.addButton(withTitle:L("Propojit"));alert.addButton(withTitle:L("Teď ne"))
-  let accepted=alert.runModal() == .alertFirstButtonReturn
+  let answer=FolderListDialog().run(title:L("Znovu propojit složky s cloudem?"),message:L("Tyto lokální složky dřív patřily do cloudu tohoto účtu. Místní relace se nahrají, cloudové se stáhnou a rozdílné verze se uloží vedle jako _cloud.md."),
+   folders:candidates.map(\.displayName),checkboxes:true,buttons:[L("Propojit"),L("Teď ne")])
+  let accepted=answer.choice == 0
   var rejected=declined
-  for (topic,box) in zip(candidates,boxes) {
-   guard accepted,box.state == .on else{rejected.insert(topic.id);continue}
+  for (topic,checked) in zip(candidates,answer.checked) {
+   guard accepted,checked else{rejected.insert(topic.id);continue}
    do{if !(try await folders.repair(topic)){showError(L("Přesun čeká na potvrzené nahrání všech poznámek. Místní složka zůstává dostupná a přesun se zkusí znovu."))}}catch{showError(error.localizedDescription)}
   }
   UserDefaults.standard.set(Array(rejected),forKey:key)
@@ -285,18 +281,16 @@ enum FolderDialogs {
    catch{showError(error.localizedDescription)}
   }
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
-  NSApp.activate(ignoringOtherApps:true)
-  let alert=NSAlert();alert.messageText=L("Cloudové složky potřebují místní adresář")
-  alert.informativeText=L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:")+"\n\n"+unmapped.prefix(12).map{"• "+$0.displayName}.joined(separator:"\n")+(unmapped.count>12 ? "\n…":"")
-  alert.addButton(withTitle:L("Jedna nadřazená složka…"));alert.addButton(withTitle:L("Vybrat pro každou zvlášť…"));alert.addButton(withTitle:L("Později"))
+  let answer=FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),
+   folders:unmapped.map(\.displayName),checkboxes:false,buttons:[L("Jedna nadřazená složka…"),L("Každou zvlášť…"),L("Později")])
   var mapped=false
-  switch alert.runModal() {
-  case .alertFirstButtonReturn:
+  switch answer.choice {
+  case 0:
    let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
    panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯.")
    guard panel.runModal() == .OK,let root=panel.url else{break}
    do{try assign(unmapped,root:root,folders:folders);mapped=true;cloudRoot=root}catch{showError(error.localizedDescription)}
-  case .alertSecondButtonReturn:
+  case 1:
    for topic in unmapped {
     let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
     panel.message=LF("Vyber místní adresář pro cloudovou složku „%@“.",topic.displayName)

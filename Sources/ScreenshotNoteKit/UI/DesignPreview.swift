@@ -55,6 +55,9 @@ func exportDesignPreviews(to directory:URL)throws{
   // Připojený stav: ikona stavu v okraji, text a poznámka na stejné hraně.
   let connectedVault=CloudMemoryVault();var connected=cloudVault.value!;connected.ownerID=UUID();connected.email="ukazka@example.com";connectedVault.value=connected
   let linked=CloudSettings(library:CloudLibrary(queue:root.appendingPathComponent("preview-cloud-connected"),vault:connectedVault,endpoint:CloudEndpoint("https://screenshotnote.com")!));linked.show();exportDesignWindow(linked.window!,name:"cloud-connected")
+  // Dialogy synchronizace složek: stejná šířka pro zaškrtávání i výpis.
+  MainActor.assumeIsolated{_ = FolderListDialog().run(title:L("Synchronizovat lokální složky s cloudem?"),message:L("Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované."),folders:[demo.name,second.name],checkboxes:true,buttons:[L("Synchronizovat"),L("Teď ne")])}
+  MainActor.assumeIsolated{_ = FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),folders:[L("Výzkum uživatelů"),L("Sdílené podklady")],checkboxes:false,buttons:[L("Jedna nadřazená složka…"),L("Každou zvlášť…"),L("Později")])}
   let hotkeys=Hotkeys();let settings=SettingsController(hotkeys:hotkeys);settings.show();exportDesignWindow(settings.window,name:"settings")
   var signed=cloudVault.value!;signed.ownerID=UUID()
   var cloudTopic=demo;cloudTopic.cloudFolderID=UUID();cloudTopic.cloudOwnerID=signed.ownerID;cloudTopic.cloudOrigin="https://screenshotnote.com";cloudTopic.id="preview-cloud";cloudTopic.name=L("Výzkum uživatelů");cloudTopic.detail=L("Rozhovory a testování s uživateli");cloudTopic.folder="/Users/example/Pictures/Cloud Notes";cloudTopic.combined=true;cloudTopic.combinedFile=language=="en" ? "Research.md":"Vyzkum.md"

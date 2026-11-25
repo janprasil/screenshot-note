@@ -151,4 +151,4 @@ func renderCombinedTemplate(_ template:String,folderName:String,folderDescriptio
 
 extension JSONEncoder{static var sorted:JSONEncoder{let value=JSONEncoder();value.outputFormatting = .sortedKeys;return value}}
 
-extension Notification.Name{static let cloudFoldersChanged=Notification.Name("ScreenshotNoteCloudFoldersChanged")}
+extension Notification.Name{static let cloudFoldersChanged=Notification.Name("ScreenshotNoteCloudFoldersChanged");static let cloudConnectionActivated=Notification.Name("ScreenshotNoteCloudConnectionActivated")}

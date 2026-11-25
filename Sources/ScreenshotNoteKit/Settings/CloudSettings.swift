@@ -11,6 +11,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  private let codeBox = DesignSurface(frame: .zero, fill: AppPalette.raised, radius: 10)
  private let code = NSTextField(labelWithString: "")
  private let statusIcon = NSImageView()
+ private let spinner = NSProgressIndicator()
  private let status = NSTextField(wrappingLabelWithString: "")
  private var footnote: NSTextField!
  private let warningIcon = NSImageView()
@@ -30,23 +31,25 @@ final class CloudSettings: NSObject, NSWindowDelegate {
 
  func show() {
   if let window { refresh(); startPolling(); presentScreenshotPanel(window); return }
-  let panel = ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:360),styleMask:[.nonactivatingPanel],backing:.buffered,defer:false)
+  let panel = ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:380),styleMask:[.nonactivatingPanel],backing:.buffered,defer:false)
   panel.isReleasedWhenClosed=false;panel.delegate=self;window=panel
   let view=installDesignRoot(panel,headerHeight:92)
-  view.addSubview(designLabel(L("Cloudová knihovna"),NSRect(x:26,y:302,width:510,height:32),size:23,weight:.semibold))
-  subtitle=designLabel("",NSRect(x:26,y:272,width:528,height:24),size:12,color:AppPalette.secondary);view.addSubview(subtitle)
-  hero.frame=NSRect(x:26,y:196,width:44,height:44);hero.imageScaling = .scaleProportionallyUpOrDown;hero.wantsLayer=true;view.addSubview(hero)
-  heroTitle=designLabel("",NSRect(x:84,y:218,width:470,height:24),size:17,weight:.semibold);view.addSubview(heroTitle)
-  heroDetail=designLabel("",NSRect(x:84,y:196,width:470,height:20),size:13,color:AppPalette.secondary);view.addSubview(heroDetail)
-  codeBox.frame=NSRect(x:26,y:126,width:528,height:54);view.addSubview(codeBox)
+  view.addSubview(designLabel(L("Cloudová knihovna"),NSRect(x:26,y:322,width:510,height:32),size:23,weight:.semibold))
+  subtitle=designLabel("",NSRect(x:26,y:292,width:528,height:24),size:12,color:AppPalette.secondary);view.addSubview(subtitle)
+  // Texty hero, poznámka i stav sdílejí sloupec x84; ikona hero je v okraji.
+  hero.frame=NSRect(x:26,y:214,width:44,height:44);hero.imageScaling = .scaleProportionallyUpOrDown;hero.wantsLayer=true;view.addSubview(hero)
+  heroTitle=designLabel("",NSRect(x:84,y:236,width:470,height:24),size:17,weight:.semibold);view.addSubview(heroTitle)
+  heroDetail=designLabel("",NSRect(x:84,y:214,width:470,height:20),size:13,color:AppPalette.secondary);view.addSubview(heroDetail)
+  footnote=designLabel("",NSRect(x:84,y:192,width:470,height:16),size:11,color:.tertiaryLabelColor);view.addSubview(footnote)
+  codeBox.frame=NSRect(x:26,y:140,width:528,height:54);view.addSubview(codeBox)
   code.frame=NSRect(x:0,y:12,width:528,height:30);code.alignment = .center;code.isSelectable=true
   code.font = .monospacedSystemFont(ofSize:24,weight:.semibold);codeBox.addSubview(code)
-  statusIcon.frame=NSRect(x:26,y:122,width:15,height:15);view.addSubview(statusIcon)
-  status.frame=NSRect(x:50,y:82,width:504,height:56);status.font = .systemFont(ofSize:12);view.addSubview(status)
-  warningIcon.frame=NSRect(x:26,y:99,width:16,height:16);view.addSubview(warningIcon)
-  warning=designLabel(L("Potvrzuj jen párování, které jsi právě spustil na tomto Macu."),NSRect(x:50,y:97,width:504,height:20),size:13,weight:.medium,color:.systemOrange);view.addSubview(warning)
-  // Ikona visí v levém okraji, text stavu i poznámka začínají na x50.
-  footnote=designLabel("",NSRect(x:50,y:58,width:504,height:16),size:11,color:.tertiaryLabelColor);view.addSubview(footnote)
+  view.addSubview(statusIcon)
+  spinner.style = .spinning;spinner.controlSize = .small;spinner.isDisplayedWhenStopped=false;view.addSubview(spinner)
+  status.font = .systemFont(ofSize:12);view.addSubview(status)
+  warningIcon.frame=NSRect(x:26,y:110,width:16,height:16);view.addSubview(warningIcon)
+  warning=designLabel(L("Potvrzuj jen párování, které jsi právě spustil na tomto Macu."),NSRect(x:50,y:108,width:504,height:20),size:13,weight:.medium,color:.systemOrange);view.addSubview(warning)
+  view.addSubview(DesignDivider(NSRect(x:26,y:68,width:528,height:1)))
   connectButton=styledButton(L("Připojit Mac"),role:.primary,frame:.zero,target:self,action:#selector(connect))
   forget=styledButton(L("Odpojit Mac"),role:.quiet,frame:.zero,target:self,action:#selector(disconnect))
   retry=styledButton(L("Nahrát teď"),role:.primary,frame:.zero,target:self,action:#selector(sync))
@@ -60,7 +63,8 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  }
  private func startPolling() {
   timer?.invalidate()
-  timer=Timer.scheduledTimer(withTimeInterval:5,repeats:true) { [weak self] _ in
+  // Sekundový takt: potvrzení z prohlížeče se projeví hned, server interval hlídá refreshConnection.
+  timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in
    Task { @MainActor in
     guard let self,self.window?.isVisible == true else { return }
     if self.library.connection?.ownerID == nil {
@@ -110,15 +114,18 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   code.stringValue=raw.count == 8 ? raw.prefix(4) + "–" + raw.suffix(4) : raw
   warning.isHidden=phase != .pending;warningIcon.isHidden=phase != .pending
   warningIcon.image=symbol("exclamationmark.triangle.fill",.systemOrange,13)
-  // Při párování je místo pod kódem vyhrazené varování, stav jde níž.
+  // Při párování je pod kódem varování a stav na stejné hraně; jinak stav ve sloupci textů.
   // Ikona je svisle na středu prvního řádku stavu.
-  statusIcon.frame=phase == .pending ? NSRect(x:26,y:64,width:15,height:15) : NSRect(x:26,y:122,width:15,height:15)
-  status.frame=phase == .pending ? NSRect(x:50,y:56,width:504,height:24) : NSRect(x:50,y:82,width:504,height:56)
+  statusIcon.frame=phase == .pending ? NSRect(x:26,y:83,width:15,height:15) : NSRect(x:84,y:144,width:15,height:15)
+  spinner.frame=statusIcon.frame.insetBy(dx:-0.5,dy:-0.5)
+  status.frame=phase == .pending ? NSRect(x:50,y:78,width:504,height:20) : NSRect(x:106,y:84,width:448,height:76)
 
-  var text:String, icon:String, tint:NSColor
+  var text:String, icon:String, tint:NSColor, working=false
   if let error=library.lastError { text=error;icon="exclamationmark.triangle.fill";tint = .systemOrange }
-  else if library.connecting { text=L("Ověřuji připojení…");icon="arrow.triangle.2.circlepath";tint=AppPalette.accent }
-  else if phase == .connected && library.syncing { text=L("Nahrávám poznámky…");icon="arrow.up.circle";tint=AppPalette.accent }
+  else if phase == .pending { text=L("Čekám na potvrzení v prohlížeči…");icon="";tint=AppPalette.secondary;working=true }
+  else if library.connecting { text=L("Ověřuji připojení…");icon="";tint=AppPalette.secondary;working=true }
+  else if phase == .connected && library.syncing { text=L("Nahrávám poznámky…");icon="";tint=AppPalette.secondary;working=true }
+  else if phase == .connected && (CloudFolders.shared.syncing || FolderTransfers.shared.busy) { text=L("Synchronizuji složky…");icon="";tint=AppPalette.secondary;working=true }
   else if (phase == .connected || phase == .expired) && library.pendingCount > 0 { text=LF("Čeká na nahrání: %ld",library.pendingCount);icon="clock";tint=AppPalette.secondary }
   else if phase == .connected { text=L("Vše je nahrané v cloudu.");icon="checkmark.icloud";tint = .systemGreen }
   else { text="";icon="";tint=AppPalette.secondary }
@@ -128,9 +135,10 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   if let error=CloudFolders.shared.lastError { text += (text.isEmpty ? "" : "\n") + error }
   for notice in CloudFolders.shared.notices { text += (text.isEmpty ? "" : "\n") + notice }
   status.stringValue=text;status.textColor=tint == .systemGreen || tint == AppPalette.secondary ? AppPalette.secondary : tint == .systemOrange ? .systemOrange : AppPalette.text
-  statusIcon.image=icon.isEmpty ? nil : symbol(icon,tint,13);statusIcon.isHidden=text.isEmpty
+  statusIcon.image=icon.isEmpty ? nil : symbol(icon,tint,13);statusIcon.isHidden=text.isEmpty || working
+  if working && !text.isEmpty { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
-  let right=NSRect(x:364,y:20,width:190,height:32), middle=NSRect(x:184,y:20,width:170,height:32), left=NSRect(x:26,y:20,width:140,height:32)
+  let right=NSRect(x:364,y:20,width:190,height:32), middle=NSRect(x:164,y:20,width:190,height:32), left=NSRect(x:26,y:20,width:128,height:32)
   connectButton.isHidden=phase != .disconnected && phase != .expired;connectButton.frame=right
   connectButton.title=phase == .expired ? L("Připojit znovu") : L("Připojit Mac")
   connectButton.isEnabled = !busy && (phase == .expired || Date() >= library.retryAt)
@@ -208,5 +216,5 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  @objc private func resolveParked() { Task { @MainActor in FolderDialogs.resolveParked(library:library);refresh() } }
  @objc private func resolveHeld() {Task { @MainActor in await FolderDialogs.resolveHeld(manual:true);refresh() }}
  @objc private func sync() { Task { @MainActor in await library.sync() } }
- func windowWillClose(_ notification:Notification) { timer?.invalidate();timer=nil }
+ func windowWillClose(_ notification:Notification) { timer?.invalidate();timer=nil;spinner.stopAnimation(nil) }
 }

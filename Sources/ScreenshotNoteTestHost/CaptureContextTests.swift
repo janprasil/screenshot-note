@@ -24,6 +24,8 @@ import AppKit
  try check(captureTarget(windows:full,pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser targets the content strip Chrome reports as its window")
  // Displej s výřezem: pruhy začínají pod menu barem (y 39), Chrome hlásí stejný pruh s obsahem.
  try check(captureTarget(windows:Array(full.dropFirst()),pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser below the menu bar targets the content strip")
+ // Běžné okno na celou šířku před maximalizovaným oknem téhož prohlížeče zůstává cílem.
+ try check(captureTarget(windows:[window(7,0,CGRect(x:0,y:39,width:1800,height:600)),window(7,0,CGRect(x:0,y:39,width:1800,height:1130))],pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":39,"width":1800,"height":600],"front window is not swapped for a maximized window behind it")
  try check(captureTarget(windows:windows,pid:7,screens:[CGRect(x:0,y:0,width:1920,height:1080)])?["windowBounds"] as? [String:CGFloat]==["x":10,"y":20,"width":1200,"height":800],"windowed browser keeps its window bounds")
  try check(["com.google.Chrome","com.microsoft.edgemac","company.thebrowser.Browser","org.chromium.Chromium"].allSatisfy(chromiumBundleIDs.contains) && !chromiumBundleIDs.contains("com.apple.Safari"),"Chromium bundle IDs")
 

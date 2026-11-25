@@ -253,7 +253,8 @@ final class CloudLibrary {
     // Původní snímky se posílají bajtově shodné se serverem, bez nového kódování.
     var raw = try boundedData(root.appendingPathComponent(filename), max: 52428800)
     // Převzatá místní kopie může mít originál; serverové bajty z něj vzniknou převodem.
-    if sessionFingerprint(raw) != base[index], let normalized = try? cloudImage(root.appendingPathComponent(filename)), sessionFingerprint(normalized) == base[index] { raw = normalized }
+    // Relace nahrané před zachováním DPI mají na serveru bajty bez pHYs.
+    if sessionFingerprint(raw) != base[index], let normalized = [true, false].lazy.compactMap({ try? cloudImage(root.appendingPathComponent(filename), density: $0) }).first(where: { sessionFingerprint($0) == base[index] }) { raw = normalized }
     data = raw
     guard sessionFingerprint(data) == base[index] else { throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit.")) }
    } else { data = try cloudImage(root.appendingPathComponent(filename)) }
@@ -394,7 +395,7 @@ final class CloudLibrary {
   guard draft.images.count==shas.count else{throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit."))}
   for (index,filename) in draft.images.enumerated() {
    let url=root.appendingPathComponent(filename),raw=try boundedData(url,max:52428800)
-   guard sessionFingerprint(raw)==shas[index] || (try? cloudImage(url)).map(sessionFingerprint)==shas[index] else{throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit."))}
+   guard sessionFingerprint(raw)==shas[index] || [true,false].contains(where:{(try? cloudImage(url,density:$0)).map(sessionFingerprint)==shas[index]}) else{throw CloudFailure(L("U cloudové relace lze jen přidávat nové snímky. Původní snímky nelze upravit, odebrat ani přeřadit."))}
   }
   let fields=Self.editFields(draft)
   func valid(_ s:String,_ points:Int,_ bytes:Int)->Bool{!s.contains("\0") && s.unicodeScalars.count<=points && s.utf8.count<=bytes}

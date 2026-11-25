@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 enum Tool:Int,Codable {case pen,arrow,ellipse,rectangle,text,select,crop,element}
 struct Mark:Codable {
@@ -38,6 +39,8 @@ final class AnnotationTextView:NSTextView {
 final class DrawingView:NSView,NSTextViewDelegate {
  let image:NSImage
  var marks:[Mark]=[];var pending:Mark?;var selected:Int?;var viewport:NSRect
+ /// Měřítko podkladu (2 = Retina); uložené PNG ho nese v DPI.
+ var density:CGFloat=1
  var tool:Tool = .select{didSet{updateNoteButton();if tool != .element{hoverElement=nil;activeElement=nil};window?.invalidateCursorRects(for:self);needsDisplay=true}};var color:NSColor = .systemRed;var thickness:CGFloat=4
  var bold=false;var italic=false;var underline=false;var fontSize:CGFloat=28
  var changed:(()->Void)?;var dragStart:NSPoint?;var dragOriginal:[NSPoint]?;var cropStart:NSPoint?;var cropPreview:NSRect?
@@ -163,7 +166,7 @@ final class DrawingView:NSView,NSTextViewDelegate {
   NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState()
   return rep.cgImage
  }
- func png()->Data?{let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(viewport.width),pixelsHigh:Int(viewport.height),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!;NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);let t=NSAffineTransform();t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState();return rep.representation(using:.png,properties:[:])}
+ func png()->Data?{let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(viewport.width),pixelsHigh:Int(viewport.height),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!;NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current=NSGraphicsContext(bitmapImageRep:rep);let t=NSAffineTransform();t.translateX(by:-viewport.minX,yBy:-viewport.minY);t.concat();image.draw(in:NSRect(origin:.zero,size:image.size));for mark in marks{paint(mark)};NSGraphicsContext.restoreGraphicsState();rep.size=NSSize(width:viewport.width/density,height:viewport.height/density);return rep.representation(using:.png,properties:[:])}
 }
 
 // Explicit modal support is required by the editor's modal event loop.
@@ -249,7 +252,7 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   size=icon("textformat.size",L("Velikost textu"),#selector(sizeMenu),NSRect(x:460+shift,y:h-48,width:36,height:34));textControls.append(size)
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
-  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-122));canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-122));canvas.density=annotationDensity(baseData);canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
   if note{addNotePanel(frame:NSRect(x:w-16-notePanel,y:65,width:notePanel,height:h-122),text:caption)}
   if let info {
    // Přehrávač ukazuje původní záznam, jinak by se dřívější anotace zobrazily dvakrát.
@@ -411,4 +414,10 @@ final class AnnotationCloseDialog:NSObject,NSWindowDelegate {
  @objc func discard(){choice = .discard;NSApp.stopModal()}
  @objc func cancel(){choice = .cancel;NSApp.stopModal()}
  func windowShouldClose(_ sender:NSWindow)->Bool{cancel();return false}
+}
+
+/// Měřítko z DPI podkladu; bez údaje 1 (72 dpi jako dřív).
+func annotationDensity(_ data:Data)->CGFloat {
+ guard let source=CGImageSourceCreateWithData(data as CFData,nil),let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],let dpi=cloudDensity(props) else{return 1}
+ return CGFloat(dpi/72)
 }

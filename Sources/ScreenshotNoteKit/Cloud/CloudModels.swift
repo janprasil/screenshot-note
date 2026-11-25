@@ -37,7 +37,8 @@ extension CloudManifest {
  }
 }
 
-func cloudImage(_ file: URL) throws -> Data {
+// density=false dává bajty bez pHYs jako starší verze appky; staré cloudové relace se s nimi porovnávají.
+func cloudImage(_ file: URL, density: Bool = true) throws -> Data {
  guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
        CGImageSourceGetCount(source) == 1,
        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -52,7 +53,10 @@ func cloudImage(_ file: URL) throws -> Data {
  context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
  let output = NSMutableData()
  guard let converted = context.makeImage(), let encoder = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil) else { throw CloudFailure.invalid }
- CGImageDestinationAddImage(encoder, converted, [kCGImagePropertyPNGDictionary: [kCGImagePropertyPNGInterlaceType: 0]] as CFDictionary)
+ // DPI (144 = Retina 2×) nese měřítko snímku, web podle něj zobrazí skutečnou velikost.
+ var options: [CFString: Any] = [kCGImagePropertyPNGDictionary: [kCGImagePropertyPNGInterlaceType: 0]]
+ if density, let dpi = cloudDensity(props) { options[kCGImagePropertyDPIWidth] = dpi; options[kCGImagePropertyDPIHeight] = dpi }
+ CGImageDestinationAddImage(encoder, converted, options as CFDictionary)
  guard CGImageDestinationFinalize(encoder) else { throw CloudFailure.invalid }
  // The server accepts a narrow RGB profile; retain only the encoded critical PNG chunks.
  let data = output as Data; var clean = Data(data.prefix(8)), offset = 8
@@ -60,11 +64,18 @@ func cloudImage(_ file: URL) throws -> Data {
   let length = data[offset..<offset + 4].reduce(0) { ($0 << 8) | Int($1) }
   guard length <= data.count - offset - 12 else { throw CloudFailure.invalid }
   let type = String(bytes: data[offset + 4..<offset + 8], encoding: .ascii)
-  if ["IHDR", "IDAT", "IEND"].contains(type) { clean.append(data[offset..<offset + length + 12]) }
+  if ["IHDR", "IDAT", "IEND"].contains(type) || density && type == "pHYs" { clean.append(data[offset..<offset + length + 12]) }
   else if data[offset + 4] & 32 == 0 { throw CloudFailure.invalid }
   if type == "IHDR" { guard length == 13, data[offset + 16] == 8, [2,6].contains(data[offset + 17]), data[offset + 20] == 0 else { throw CloudFailure.invalid } }
   offset += length + 12
  }
  guard offset == data.count else { throw CloudFailure.invalid }
  guard clean.count <= 52428800 else { throw CloudFailure(L("Snímek je po převodu větší než 50 MB, což je cloudový limit. Lokálně zůstává uložený.")) }; return clean
+}
+
+/// Celé měřítko 1×–4× ze shodného DPI v obou osách; jiné hodnoty se do cloudu neposílají.
+func cloudDensity(_ props: [CFString: Any]) -> Double? {
+ guard let x = (props[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue, let y = (props[kCGImagePropertyDPIHeight] as? NSNumber)?.doubleValue,
+       abs(x - y) < 0.5, (1...4).contains((x / 72).rounded()), abs(x / 72 - (x / 72).rounded()) < 0.05 else { return nil }
+ return (x / 72).rounded() * 72
 }

@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 @testable import ScreenshotNoteKit
 import CryptoKit
 
@@ -21,6 +22,13 @@ func cloudUnitTests() throws {
  try cloudFixturePNG().write(to:root.appendingPathComponent("shot.png"))
  let normalized=try cloudImage(root.appendingPathComponent("shot.png"))
  assert(normalized[24] == 8 && [2,6].contains(normalized[25]) && normalized[28] == 0)
+ // Retina DPI přežije převod pro cloud jako pHYs; varianta bez DPI odpovídá starším uploadům.
+ let retina=root.appendingPathComponent("retina.png")
+ if let source=CGImageSourceCreateWithData(cloudFixturePNG() as CFData,nil),let picture=CGImageSourceCreateImageAtIndex(source,0,nil),let out=CGImageDestinationCreateWithURL(retina as CFURL,"public.png" as CFString,1,nil){CGImageDestinationAddImage(out,picture,[kCGImagePropertyDPIWidth:144,kCGImagePropertyDPIHeight:144] as CFDictionary);assert(CGImageDestinationFinalize(out))}
+ func dpi(_ data:Data)->Double?{CGImageSourceCreateWithData(data as CFData,nil).flatMap{CGImageSourceCopyPropertiesAtIndex($0,0,nil) as? [CFString:Any]}.flatMap{$0[kCGImagePropertyDPIWidth] as? Double}}
+ let dense=try cloudImage(retina),undense=try cloudImage(retina,density:false),retinaData=try Data(contentsOf:retina)
+ assert(dpi(dense).map{abs($0-144)<0.5}==true && dense.range(of:Data("pHYs".utf8)) != nil && undense.range(of:Data("pHYs".utf8)) == nil)
+ assert(annotationDensity(retinaData)==2 && annotationDensity(cloudFixturePNG())==1)
  let lib=CloudLibrary(queue:root.appendingPathComponent("queue"),vault:vault,endpoint:CloudEndpoint("https://fixture.invalid")!)
  // Nová cloudová relace bez cloudové složky se do fronty nedostane.
  do{try lib.enqueue(Draft(images:["shot.png"],comment:"",title:"Bez složky"),root:root);assertionFailure("Folderless upload queued")}catch let failure as CloudFailure{assert(failure.code=="folder_required" && lib.pendingCount==0)}

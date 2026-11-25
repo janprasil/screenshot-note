@@ -216,10 +216,11 @@ final class AnnotationToolButton:NSButton {
   drawAdaptiveSymbol(image,in:glyph,color:color)
  }
 }
+// 131 = spodní lišta 65 + hlavička 62 + mezera 4; obraz nesmí zasahovat do hlavičky.
 func annotationWindowSize(image:NSSize,available:NSSize)->NSSize {
  let maxW=max(400,available.width-60),maxH=max(300,available.height-85)
- let factor=min(1,(maxW-32)/image.width,(maxH-122)/image.height)
- return NSSize(width:min(maxW,max(740,image.width*factor+32)),height:min(maxH,max(340,image.height*factor+122)))
+ let factor=min(1,(maxW-32)/image.width,(maxH-131)/image.height)
+ return NSSize(width:min(maxW,max(740,image.width*factor+32)),height:min(maxH,max(340,image.height*factor+131)))
 }
 
 final class AnnotationEditor:NSObject,NSWindowDelegate {
@@ -275,8 +276,8 @@ var baseData=Data();var workingURL:URL?;var initialMarks:Data?;var initialCrop:N
   for(i,pair) in [("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("underline",L("Podtržení"))].enumerated(){let b=icon(pair.0,pair.1,#selector(changeText(_:)),NSRect(x:504+shift+CGFloat(i)*44,y:h-48,width:36,height:34));b.setButtonType(.toggle);b.tag=i;styleButtons.append(b);textControls.append(b)}
   layoutToolbar()
   let close=icon("xmark",L("Zavřít okno"),#selector(cancel),NSRect(x:w-56,y:h-48,width:36,height:34));close.autoresizingMask=[.minXMargin,.minYMargin]
-  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-122));canvas.density=annotationDensity(baseData);canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
-  if note{addNotePanel(frame:NSRect(x:w-16-notePanel,y:65,width:notePanel,height:h-122),text:caption)}
+  canvas=DrawingView(image:image,frame:NSRect(x:16,y:65,width:w-32-(note ? notePanel+12:0),height:h-131));canvas.density=annotationDensity(baseData);canvas.autoresizingMask=[.width,.height];canvas.elementMap=elements;canvas.firstElementNumber=highestElementNumber(in:caption)+1;if let doc=document{canvas.marks=doc.marks;canvas.viewport=doc.crop};canvas.changed={[weak self] in self?.sync()};window.contentView!.addSubview(canvas)
+  if note{addNotePanel(frame:NSRect(x:w-16-notePanel,y:65,width:notePanel,height:h-131),text:caption)}
   if let info {
    // Přehrávač ukazuje původní záznam, jinak by se dřívější anotace zobrazily dvakrát.
    let original=videoOriginals(url).appendingPathComponent("video.mp4"),source=fm.fileExists(atPath:original.path) ? original:video[0]

@@ -388,7 +388,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    let cloudOnly = upload && (cloudFolder || (draft.topic?.savesLocally == false && draft.previous == nil))
    do {
     if upload { try CloudLibrary.shared.requireAccount() }
-    if result != 0 {
+    // Zahodit maže i odložený koncept, jinak by ho další snímek znovu otevřel.
+    if result == 3 { discardParkedDraft() }
+    else if result != 0 {
      try self.persist(draft,root:root)
      // Uložený koncept je novější než záloha; ta by ho po pádu přepsala.
      try? fm.removeItem(at:recoveryRoot)
@@ -434,6 +436,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    }
    try? fm.removeItem(at:root);try? fm.removeItem(at:recoveryRoot);self.session=nil;self.composer=nil
   };view.show()
+ }
+ func discardParkedDraft(at storage:URL=draftRoot){
+  if let parked=try? readDraft(storage){clearDraft(parked,root:storage)}else{try? fm.removeItem(at:storage.appendingPathComponent("draft.json"))}
  }
  func previewTest(){
   do {let root=fm.temporaryDirectory.appendingPathComponent("ScreenshotNote-Preview-"+UUID().uuidString);try fm.createDirectory(at:root,withIntermediateDirectories:true);session=root

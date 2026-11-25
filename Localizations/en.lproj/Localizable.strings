@@ -577,7 +577,7 @@
 "Záznam videa (start/stop)" = "Video recording (start/stop)";
 "Záznam videa se nepodařilo připravit." = "The video recording could not be prepared.";
 "Záznam začne za %d s" = "Recording starts in %d s";
-"Video položky %ld je větší než 8 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "The video of item %ld is larger than 8 MB and cannot be uploaded to the cloud. Save it to a local folder or record a shorter clip.";
+"Video položky %ld je větší než 16 MB a do cloudu ho nelze nahrát. Ulož ho do místní složky nebo nahraj kratší záznam." = "The video of item %ld is larger than 16 MB and cannot be uploaded to the cloud. Save it to a local folder or record a shorter clip.";
 "Video položky %ld se nepodařilo připravit k nahrání. Ulož ho do místní složky." = "The video of item %ld could not be prepared for upload. Save it to a local folder.";
 "Navrhovat názvy relací pomocí AI" = "Suggest session titles with AI";
 "U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele." = "Suggests a title with AI for new sessions without one. A title you type always wins. The limit is 1,000 titles per user per month.";

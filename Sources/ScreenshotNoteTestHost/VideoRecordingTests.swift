@@ -1,4 +1,5 @@
 import AppKit
+import VideoToolbox
 import AVFoundation
 @testable import ScreenshotNoteKit
 
@@ -23,9 +24,12 @@ import AVFoundation
  // Oblast v souřadnicích displeje (počátek vlevo nahoře).
  assert(displaySourceRect(CGRect(x:100,y:200,width:300,height:400),screen:CGRect(x:0,y:0,width:1440,height:900))==CGRect(x:100,y:300,width:300,height:400))
  assert(displaySourceRect(CGRect(x:1540,y:100,width:200,height:100),screen:CGRect(x:1440,y:0,width:1920,height:1080))==CGRect(x:100,y:880,width:200,height:100))
- // Nastavení enkodéru (strop datového toku) AVAssetWriter přijme.
+ // Enkodér dostane strop toku; posouvaný obsah (scroll) ve 1920×1200 se vejde do stropu.
+ let settings=recordingVideoSettings(width:1920,height:1200)["AVVideoCompressionPropertiesKey"] as! [String:Any]
+ assert((settings[kVTCompressionPropertyKey_DataRateLimits as String] as? [Int])==[RecordingLimits.peakBytesPerSecond,1] && (settings[AVVideoMaxKeyFrameIntervalKey] as? Int)==60)
  let probe=fm.temporaryDirectory.appendingPathComponent("recorder-\(UUID().uuidString).mp4");defer{try? fm.removeItem(at:probe)}
  _ = try ScreenRecorder(output:probe,width:1920,height:1200)
+ let motion=try encodedMotionBytes(seconds:3);assert(motion <= RecordingLimits.peakBytesPerSecond*3)
  print("PASS: recording size, duration format, limits, countdown setting and region coordinates")
  
  // Esc: jen během výběru, odpočtu a záznamu; zapnutí je idempotentní a vypnutí uvolní zkratku.
@@ -232,4 +236,24 @@ import AVFoundation
  assert(fm.fileExists(atPath:videoOriginals(copy).path))
  removeAnnotatedImage(copy);assert(!fm.fileExists(atPath:videoOriginals(copy).path))
  print("PASS: annotations burn into the MP4 and key frames at the right place; the original recording is kept for re-editing and restored without marks")
+}
+
+/// Zakóduje posouvaný vzor (jako scroll stránky) s nastavením záznamu a vrátí velikost MP4.
+func encodedMotionBytes(seconds:Int,width:Int=1920,height:Int=1200)throws->Int {
+ let url=fm.temporaryDirectory.appendingPathComponent("noise-\(UUID().uuidString).mp4");defer{try? fm.removeItem(at:url)}
+ let writer=try AVAssetWriter(outputURL:url,fileType:.mp4)
+ let input=AVAssetWriterInput(mediaType:.video,outputSettings:recordingVideoSettings(width:width,height:height))
+ let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,kCVPixelBufferWidthKey as String:width,kCVPixelBufferHeightKey as String:height])
+ writer.add(input);guard writer.startWriting() else{throw writer.error ?? CloudFailure.invalid};writer.startSession(atSourceTime:.zero)
+ for frame in 0..<(seconds*Int(RecordingLimits.fps)) {
+  while !input.isReadyForMoreMediaData{Thread.sleep(forTimeInterval:0.005)}
+  var buffer:CVPixelBuffer?;CVPixelBufferPoolCreatePixelBuffer(nil,adaptor.pixelBufferPool!,&buffer);guard let buffer else{throw CloudFailure.invalid}
+  CVPixelBufferLockBaseAddress(buffer,[]);let base=CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to:UInt64.self)
+  for i in 0..<(CVPixelBufferGetBytesPerRow(buffer)*height/8){base[i]=UInt64(truncatingIfNeeded:i/64+frame*997)&*0x0101010101010101}
+  CVPixelBufferUnlockBaseAddress(buffer,[])
+  adaptor.append(buffer,withPresentationTime:CMTime(value:CMTimeValue(frame),timescale:RecordingLimits.fps))
+ }
+ input.markAsFinished();let done=DispatchSemaphore(value:0);writer.finishWriting{done.signal()};done.wait()
+ guard writer.status == .completed else{throw writer.error ?? CloudFailure.invalid}
+ return try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
 }

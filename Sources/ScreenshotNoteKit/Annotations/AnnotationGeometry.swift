@@ -8,6 +8,8 @@ extension Mark {
  /// Řídicí bod kvadratické křivky, která prochází `arrowMid` v polovině.
  var arrowControl:NSPoint{let a=arrowStart,b=arrowEnd,m=arrowMid;return NSPoint(x:2*m.x-(a.x+b.x)/2,y:2*m.y-(a.y+b.y)/2)}
  func arrowPoint(_ t:CGFloat)->NSPoint{let a=arrowStart,b=arrowEnd,c=arrowControl,u=1-t;return NSPoint(x:u*u*a.x+2*u*t*c.x+t*t*b.x,y:u*u*a.y+2*u*t*c.y+t*t*b.y)}
+ /// Otočení zapečené do bodů; změna středu oblouku pak neposune pivot ani konce.
+ var unrotatedArrow:Mark{guard rotation != 0 else{return self};var result=self;result.points=points.map{rotatedPoint($0)};result.rotation=0;return result}
  /// Nový střed oblouku; blízko rovné čáry se šipka narovná.
  func bendingArrow(to mid:NSPoint,tolerance:CGFloat)->Mark{
   var result=self;let a=arrowStart,b=arrowEnd
@@ -158,7 +160,7 @@ extension DrawingView {
    let factor=max(0.05,min(20,1+((p.x-drag.start.x)*dx+(p.y-drag.start.y)*dy)/max(1,dx*dx+dy*dy)))
    marks[drag.index]=original.resized(by:factor,fixedCorner:fixed)
   case .bend:
-   marks[drag.index]=original.bendingArrow(to:original.unrotatedPoint(p),tolerance:4/scale)
+   marks[drag.index]=original.unrotatedArrow.bendingArrow(to:p,tolerance:4/scale)
   case .rotate:
    let r=original.bounds;var angle=original.rotation+atan2(p.y-r.midY,p.x-r.midX)-atan2(drag.start.y-r.midY,drag.start.x-r.midX)
    if event.modifierFlags.contains(.shift){angle=(angle / (.pi/12)).rounded()*(.pi/12)}

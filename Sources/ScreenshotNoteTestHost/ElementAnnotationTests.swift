@@ -149,6 +149,10 @@ import AppKit
  try check(bent.bendingArrow(to:NSPoint(x:51,y:1),tolerance:2).points.count==2,"near the chord the arrow straightens")
  let decoded=try JSONDecoder().decode(Mark.self,from:JSONEncoder().encode(bent))
  try check(decoded.points.count==3 && decoded.arrowMid==NSPoint(x:50,y:40),"bend survives encoding")
+ var rotated=straight;rotated.rotation = .pi/2
+ let ends=[rotated.rotatedPoint(rotated.arrowStart),rotated.rotatedPoint(rotated.arrowEnd)]
+ let rebent=rotated.unrotatedArrow.bendingArrow(to:NSPoint(x:70,y:20),tolerance:2)
+ try check(rebent.rotation==0 && hypot(rebent.arrowStart.x-ends[0].x,rebent.arrowStart.y-ends[0].y)<0.001 && hypot(rebent.arrowEnd.x-ends[1].x,rebent.arrowEnd.y-ends[1].y)<0.001,"bending a rotated arrow keeps its ends")
  let canvas=DrawingView(image:NSImage(size:NSSize(width:200,height:100)),frame:NSRect(x:0,y:0,width:200,height:100))
  canvas.marks=[bent]
  try check(canvas.hit(NSPoint(x:50,y:40))==0 && canvas.hit(NSPoint(x:50,y:2))==nil,"hit test follows the curve")

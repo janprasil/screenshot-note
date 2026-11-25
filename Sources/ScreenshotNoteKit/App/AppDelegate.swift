@@ -93,12 +93,18 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    if self.composer==nil,NSApp.modalWindow==nil{FolderDialogs.resolveDeleted()}
    if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.offerRepair()}
    if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.mapUnmapped()}
-   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil,let c=CloudLibrary.shared.connection,let owner=c.ownerID,!Topics.local.isEmpty {
-    let key="folder-transfer-offer:"+sessionFingerprint(Data((c.endpoint+owner.uuidString).utf8))
+   // Po každém připojení Macu nabídne nahrání lokálních složek; bez tarifu počká, až bude aktivní.
+   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil,!FolderTransfers.shared.busy,CloudFolders.shared.canMoveToCloud,let c=CloudLibrary.shared.connection,let owner=c.ownerID,!Topics.local.isEmpty {
+    let key="folder-transfer-offer:"+sessionFingerprint(Data((c.endpoint+owner.uuidString+c.id.uuidString).utf8))
     if !UserDefaults.standard.bool(forKey:key) {
-     let alert=NSAlert();alert.messageText=L("Přesunout lokální složky do cloudu?");alert.informativeText=L("Můžeš přesunout všechny lokální složky tohoto Macu. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované.");alert.addButton(withTitle:L("Přesunout všechny"));alert.addButton(withTitle:L("Teď ne"))
+     let local=Topics.local
+     let alert=NSAlert();alert.messageText=L("Synchronizovat lokální složky s cloudem?");alert.informativeText=L("Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované.")
+     let boxes=local.map{topic->NSButton in let box=NSButton(checkboxWithTitle:topic.displayName,target:nil,action:nil);box.state = .on;return box}
+     let stack=NSStackView(views:boxes);stack.orientation = .vertical;stack.alignment = .leading;stack.frame=NSRect(x:0,y:0,width:330,height:CGFloat(boxes.count)*24);alert.accessoryView=stack
+     alert.addButton(withTitle:L("Synchronizovat"));alert.addButton(withTitle:L("Teď ne"))
      let choice=alert.runModal();UserDefaults.standard.set(true,forKey:key)
-     if choice == .alertFirstButtonReturn{await FolderDialogs.move(Topics.local)}
+     let chosen=zip(local,boxes).filter{$0.1.state == .on}.map(\.0)
+     if choice == .alertFirstButtonReturn,!chosen.isEmpty{await FolderDialogs.move(chosen,confirm:false)}
     }
    }
   }
@@ -228,8 +234,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }else{
    let submenu=NSMenu(title:L("Konfigurace"));submenu.autoenablesItems=false
    for configuration in configurations{
-    let child=NSMenuItem(title:configuration.displayName,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.folder
-    child.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil);child.image?.isTemplate=true
+    // Týmová složka má tým v názvu; podtitul říká, kde se ukládá.
+    let child=NSMenuItem(title:configuration.cloudTeam==true ? configuration.name:configuration.displayName,action:#selector(openConfigurationFolder(_:)),keyEquivalent:"");child.target=self;child.representedObject=configuration.folder;child.toolTip=configuration.storageKind+"\n"+configuration.folder
+    if #available(macOS 14.4,*){child.subtitle=configuration.storageKind}
+    child.image=NSImage(systemSymbolName:configuration.storageSymbol,accessibilityDescription:configuration.storageKind);child.image?.isTemplate=true
     submenu.addItem(child)
    }
    entry.action=nil;entry.representedObject=nil;entry.submenu=submenu

@@ -518,6 +518,12 @@ final class CloudFolders {
    if cloud?.status==401{onUnauthorized?(c.token)}
   }
  }
+ // Poslední stav tarifu a spravovaných týmů z /me pro aktivní účet.
+ private var access:(owner:UUID,cloud:CloudAccess?,teams:[CloudLibraryRef])?
+ /// Nahrávat do osobního cloudu jde s tarifem nebo trialem; neznámý stav nic neblokuje.
+ var personalCloudAllowed:Bool{guard let access,access.owner==currentConnection()?.ownerID,let cloud=access.cloud else{return true};return cloud.upload_allowed}
+ /// Přesun do cloudu má smysl s osobním tarifem nebo spravovaným týmem.
+ var canMoveToCloud:Bool{personalCloudAllowed || (access.map{$0.owner==currentConnection()?.ownerID && !$0.teams.isEmpty} ?? false)}
  /// Týmy z /me, ve kterých smí uživatel zakládat složky (owner/admin).
  @MainActor func manageableTeams()async throws->[CloudLibraryRef] {
   guard let c=currentConnection(),let account=c.ownerID,let endpoint=CloudEndpoint(c.endpoint) else{return []}
@@ -527,6 +533,7 @@ final class CloudFolders {
  @MainActor private func libraries(endpoint:CloudEndpoint,token:String,owner:UUID)async throws->[CloudLibraryRef]? {
   let me=try JSONDecoder().decode(FolderEnvelope<CloudOwner>.self,from:await request(endpoint,"/api/v1/me",token,524288)).data
   guard currentConnection()?.token==token,me.id==owner else{throw CloudFailure.invalid}
+  access=(owner,me.cloud,me.libraries?.filter{$0.isTeam && LibraryRole.manages($0.role)} ?? [])
   guard let list=me.libraries else{return nil}
   guard list.count<=100,Set(list.map(\.id)).count==list.count,list.allSatisfy({LibraryKind(rawValue:$0.kind) != nil && ($0.isTeam || $0.id==owner) && ($0.name?.unicodeScalars.count ?? 0)<=100}) else{throw CloudFailure.invalid}
   return list

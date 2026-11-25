@@ -353,12 +353,12 @@ final class Composer:NSObject,NSWindowDelegate {
   draft.images.append(filename);if context{draft.contexts=(draft.contexts ?? [:]).merging([filename:filename+".context.json"]){$1}};reloadThumbnails();thumbnails.scroll(NSPoint(x:max(0,thumbnails.bounds.width-thumbnailScroll.contentSize.width),y:0));return true
  }
  @objc func removeImage(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};let name=draft.images.remove(at:sender.tag);draft.previous?.imported.removeValue(forKey:name);draft.imageNotes?.removeValue(forKey:name);draft.contexts?.removeValue(forKey:name);contextSummaries[name]=nil;removeAnnotatedImage(root.appendingPathComponent(name));reloadThumbnails()}
- /// Odznak kontextu z prohlížeče: počet chyb a selhaných requestů, kliknutím nabídka s odebráním.
+ /// Odznak kontextu z prohlížeče: jen „Kontext“, počty chyb v tooltipu, kliknutím nabídka s odebráním.
  @objc func playVideo(_ sender:NSButton){guard draft.images.indices.contains(sender.tag) else{return};NSWorkspace.shared.open(videoSidecars(root.appendingPathComponent(draft.images[sender.tag]))[0])}
  private func contextBadge(_ image:String,index:Int,maxWidth:CGFloat=188)->AppButton {
   if contextSummaries[image]==nil{contextSummaries[image]=(try? boundedData(root.appendingPathComponent(image).appendingPathExtension("context.json"),max:maxContextBytes)).flatMap(ContextSummary.init)}
   let summary=contextSummaries[image] ?? nil
-  let title=summary.map(contextBadgeTitle) ?? L("Kontext")
+  let title=L("Kontext")
   let width=min(maxWidth,(title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium)]).width+39)
   let badge=styledButton(title,symbol:"ladybug",frame:NSRect(x:CGFloat(index)*238+4,y:198,width:width,height:24),target:self,action:#selector(showContextMenu(_:)));badge.tag=index
   badge.toolTip=L("Kontext z prohlížeče")+(summary.map{": "+$0.counts} ?? "");badge.setAccessibilityLabel(badge.toolTip)

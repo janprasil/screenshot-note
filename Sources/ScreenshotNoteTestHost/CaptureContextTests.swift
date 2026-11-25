@@ -202,7 +202,6 @@ import AppKit
  try Data([8]).write(to:work.appendingPathComponent("h.png"));try files!.write(besides:work.appendingPathComponent("h.png"))
  let fresh=Composer(draft:Draft(images:["h.png"],comment:"",contexts:["h.png":"h.png.context.json"]),root:work);fresh.dropImageContext("h.png")
  try check(fresh.draft.images==["h.png"] && fresh.draft.contexts==nil && fm.fileExists(atPath:work.appendingPathComponent("h.png").path) && !contextSidecars(work.appendingPathComponent("h.png")).contains{fm.fileExists(atPath:$0.path)},"remove context from a new image")
- try check(contextBadgeTitle(ContextSummary(files!.context)!)=="2 chyby · 2 selhané","context badge title")
 
  // Draft ze starší verze bez pole contexts; neplatné mapování se zahodí.
  let old=root.appendingPathComponent("old");try fm.createDirectory(at:old,withIntermediateDirectories:true)

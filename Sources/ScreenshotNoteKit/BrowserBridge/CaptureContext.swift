@@ -244,11 +244,6 @@ struct ContextSummary {
   return parts.isEmpty ? L("bez chyb"):parts.joined(separator:", ")
  }
 }
-/// Krátký titulek odznaku v komposeru.
-func contextBadgeTitle(_ summary:ContextSummary)->String {
- let parts=[summary.errors>0 ? LP(summary.errors,"%ld chyba","%ld chyby","%ld chyb",summary.errors):nil,summary.failedCount>0 ? LP(summary.failedCount,"%ld selhaný","%ld selhané","%ld selhaných",summary.failedCount):nil].compactMap{$0}
- return parts.isEmpty ? L("Kontext"):parts.joined(separator:" · ")
-}
 /// Odkazy na exportované soubory kontextu.
 func contextLinks(_ base:String,har:Bool)->String{((har ? ["[HAR](<assets/\(base).har>)"]:[])+["["+L("konzole")+"](<assets/\(base).context.json>)"]).joined(separator:" · ")}
 /// Sbalitelný callout pod obrázkem podle PROTOCOL.md.

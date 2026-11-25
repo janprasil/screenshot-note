@@ -404,10 +404,11 @@ final class Composer:NSObject,NSWindowDelegate {
  var hasUnsavedWork:(()->Bool)?
  enum CancelChoice{case keep,later,discard}
  /// Zrušit s neuloženou prací se nejdřív zeptá; nil znamená pokračovat v úpravách.
+ /// 0 zavře bez změn a odložený koncept nechá, 3 ho výslovně zahodí.
  func requestedCancel(confirm:()->CancelChoice)->Int? {
   snapshotFields()
   guard hasUnsavedWork?() ?? false else{return 0}
-  switch confirm(){case .discard:return 0;case .later:return 1;case .keep:return nil}
+  switch confirm(){case .discard:return 3;case .later:return 1;case .keep:return nil}
  }
  static func confirmDiscard()->CancelChoice {
   let alert=NSAlert();alert.messageText=L("Zahodit rozpracovanou poznámku?");alert.informativeText=L("Neuložené snímky a text se ztratí. Můžeš je odložit a později otevřít z menu.")

@@ -343,7 +343,7 @@ if CommandLine.arguments.contains("--self-test") {
  let cancelProbe=Composer(draft:unsaved,root:cancelRoot);cancelProbe.show(present:false)
  let pristine=draftSignature(Draft(images:[],comment:"",topic:topic),root:cancelRoot)
  cancelProbe.hasUnsavedWork={draftSignature(cancelProbe.draft,root:cancelRoot) != pristine}
- assert(cancelProbe.requestedCancel(confirm:{.keep})==nil && cancelProbe.requestedCancel(confirm:{.later})==1 && cancelProbe.requestedCancel(confirm:{.discard})==0)
+ assert(cancelProbe.requestedCancel(confirm:{.keep})==nil && cancelProbe.requestedCancel(confirm:{.later})==1 && cancelProbe.requestedCancel(confirm:{.discard})==3)
  let openedSignature=draftSignature(unsaved,root:cancelRoot);cancelProbe.hasUnsavedWork={draftSignature(cancelProbe.draft,root:cancelRoot) != openedSignature}
  assert(cancelProbe.requestedCancel(confirm:{assertionFailure("Unchanged draft asked");return .keep})==0)
  try Data([10]).write(to:cancelRoot.appendingPathComponent("c.png"));assert(cancelProbe.requestedCancel(confirm:{.keep})==nil)
@@ -361,6 +361,9 @@ if CommandLine.arguments.contains("--self-test") {
  try recoveryProbe.persist(unsaved,root:cancelRoot,to:recovered)
  try fm.setAttributes([.modificationDate:Date(timeIntervalSinceNow:-120)],ofItemAtPath:storage.appendingPathComponent("draft.json").path)
  let fresher=try recoveryProbe.restoreRecoveredDraft(from:recovered,to:storage);assert(fresher && (try! readDraft(storage)).title=="Neuloženo")
+ // Zahodit smaže odložený koncept i jeho snímky, další snímek ho už neotevře.
+ let parkedImages=(try readDraft(storage)).images;recoveryProbe.discardParkedDraft(at:storage)
+ assert((try! readDraft(storage)).images.isEmpty && parkedImages.allSatisfy{!fm.fileExists(atPath:storage.appendingPathComponent($0).path)})
  print("PASS: cancel/close with unsaved work asks (keep/later/discard), unchanged drafts close directly, autosaved draft is recovered on next launch")
  assert(Shortcut(key:103,modifiers:UInt32(256),name:"\u{F70E}").display == "⌘F11")
  assert(Shortcut.keyName(122,fallback:"?")=="F1" && Shortcut.keyName(111,fallback:"?")=="F12")

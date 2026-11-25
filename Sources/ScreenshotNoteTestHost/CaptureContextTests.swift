@@ -22,6 +22,8 @@ import AppKit
  let screen=CGRect(x:0,y:0,width:1800,height:1169)
  let full=[window(7,0,CGRect(x:0,y:0,width:1800,height:39)),window(7,0,CGRect(x:0,y:39,width:1800,height:158)),window(7,0,CGRect(x:99,y:65,width:1112,height:458)),window(7,0,CGRect(x:0,y:161,width:1800,height:1008))]
  try check(captureTarget(windows:full,pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser targets the content strip Chrome reports as its window")
+ // Displej s výřezem: pruhy začínají pod menu barem (y 39), Chrome hlásí stejný pruh s obsahem.
+ try check(captureTarget(windows:Array(full.dropFirst()),pid:7,screens:[screen])?["windowBounds"] as? [String:CGFloat]==["x":0,"y":161,"width":1800,"height":1008],"fullscreen browser below the menu bar targets the content strip")
  try check(captureTarget(windows:windows,pid:7,screens:[CGRect(x:0,y:0,width:1920,height:1080)])?["windowBounds"] as? [String:CGFloat]==["x":10,"y":20,"width":1200,"height":800],"windowed browser keeps its window bounds")
  try check(["com.google.Chrome","com.microsoft.edgemac","company.thebrowser.Browser","org.chromium.Chromium"].allSatisfy(chromiumBundleIDs.contains) && !chromiumBundleIDs.contains("com.apple.Safari"),"Chromium bundle IDs")
 

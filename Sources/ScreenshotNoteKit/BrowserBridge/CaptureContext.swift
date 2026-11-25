@@ -1,5 +1,9 @@
 import AppKit
 import CoreGraphics
+import os
+
+// Diagnostika kontextu: jen geometrie a důvody, žádné adresy ani titulky (NSLog by obsah skryl jako <private>).
+let contextLog=Logger(subsystem:"cz.janprasil.screenshotnote",category:"context")
 
 // Kontext z prohlížeče ke snímku: cíl okna, souběžná žádost, soubory vedle obrázku a souhrn do Markdownu.
 let chromiumBundleIDs:Set<String>=["com.google.Chrome","com.google.Chrome.beta","com.google.Chrome.canary","com.microsoft.edgemac","com.brave.Browser","company.thebrowser.Browser","org.chromium.Chromium"]
@@ -24,11 +28,12 @@ func browserCaptureWindow()->BrowserWindow? {
  var app=NSWorkspace.shared.frontmostApplication
  // Při otevřeném komposeru je v popředí appka sama; rozhoduje nejvyšší cizí okno.
  if app?.processIdentifier==own,let pid=windows.lazy.filter({windowNumber($0,kCGWindowLayer)==0}).compactMap({windowNumber($0,kCGWindowOwnerPID)}).first(where:{$0 != Int(own)}){app=NSRunningApplication(processIdentifier:pid_t(pid))}
- guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{NSLog("Capture context: front app %@ is not a supported browser",app?.bundleIdentifier ?? "none");return nil}
+ guard let app,let id=app.bundleIdentifier,chromiumBundleIDs.contains(id) else{contextLog.notice("front app \(app?.bundleIdentifier ?? "none", privacy: .public) is not a supported browser");return nil}
  let target=captureTarget(windows:windows,pid:app.processIdentifier)
  // Diagnostika kontextu (fullscreen): jen geometrie, žádné adresy ani titulky.
- if let b=target?["windowBounds"] as? [String:CGFloat]{NSLog("Capture context: browser window %.0f,%.0f %.0fx%.0f, displays %@",b["x"] ?? 0,b["y"] ?? 0,b["width"] ?? 0,b["height"] ?? 0,displayBounds().map{"\(Int($0.width))x\(Int($0.height))@\(Int($0.minX)),\(Int($0.minY))"}.joined(separator:" "))}
- else{NSLog("Capture context: no browser window found for %@",id)}
+ let screens=displayBounds().map{"\(Int($0.width))x\(Int($0.height))@\(Int($0.minX)),\(Int($0.minY))"}.joined(separator:" ")
+ if let b=target?["windowBounds"] as? [String:CGFloat]{contextLog.notice("browser window \(Int(b["x"] ?? 0), privacy: .public),\(Int(b["y"] ?? 0), privacy: .public) \(Int(b["width"] ?? 0), privacy: .public)x\(Int(b["height"] ?? 0), privacy: .public), displays \(screens, privacy: .public)")}
+ else{contextLog.notice("no browser window found for \(id, privacy: .public), displays \(screens, privacy: .public)")}
  return target.map{BrowserWindow(pid:app.processIdentifier,target:$0)}
 }
 private func windowNumber(_ window:[String:Any],_ key:CFString)->Int?{(window[key as String] as? NSNumber)?.intValue}
@@ -44,11 +49,11 @@ func captureTarget(windows:[[String:Any]],pid:pid_t,screens:[CGRect]=displayBoun
  func bounds(_ window:[String:Any])->CGRect?{(window[kCGWindowBounds as String] as? NSDictionary).flatMap{CGRect(dictionaryRepresentation:$0 as CFDictionary)}}
  for window in own {
   guard var rect=bounds(window),rect.width>=100,rect.height>=100 else{continue}
-  // Celá obrazovka: Chrome okno rozdělí na pruhy, které dohromady pokryjí displej; jeho okno (chrome.windows, window.screenY) je největší pruh s obsahem.
+  // Celá obrazovka: Chrome okno rozdělí na pruhy, které pokryjí displej (nahoře může chybět pruh pod výřezem kamery); jeho okno (chrome.windows, window.screenY) je největší pruh s obsahem.
   if let screen=screens.first(where:{$0.contains(CGPoint(x:rect.midX,y:rect.midY))}) {
    let parts=own.compactMap(bounds).filter{screen.insetBy(dx:-1,dy:-1).contains($0)}
    let union=parts.reduce(CGRect.null){$0.union($1)}
-   if rect.width>=screen.width-1,parts.count>1,abs(union.minY-screen.minY)<=1,abs(union.maxY-screen.maxY)<=1,abs(union.width-screen.width)<=1,let content=parts.max(by:{$0.width*$0.height<$1.width*$1.height}){rect=content}
+   if rect.width>=screen.width-1,parts.count>1,union.minY-screen.minY<=64,union.minY>=screen.minY-1,abs(union.maxY-screen.maxY)<=1,abs(union.width-screen.width)<=1,let content=parts.max(by:{$0.width*$0.height<$1.width*$1.height}){rect=content}
   }
   var target:[String:Any]=["windowBounds":["x":rect.minX,"y":rect.minY,"width":rect.width,"height":rect.height]]
   if let title=window[kCGWindowName as String] as? String,!title.isEmpty{target["windowTitle"]=title}
@@ -67,7 +72,7 @@ func bundleMatches(_ data:Data,bounds:[String:CGFloat]?)->Bool {
  let scale=width/outerWidth
  guard (0.2...5).contains(scale) else{return false}
  let ok=abs(left*scale-x)<=8 && abs(top*scale-y)<=8 && abs(outerHeight*scale-height)<=8
- if !ok{NSLog("Capture context: bundle geometry %.0f,%.0f %.0fx%.0f does not match window %.0f,%.0f %.0fx%.0f",left,top,outerWidth,outerHeight,x,y,width,height)}
+ if !ok{contextLog.notice("bundle geometry \(Int(left), privacy: .public),\(Int(top), privacy: .public) \(Int(outerWidth), privacy: .public)x\(Int(outerHeight), privacy: .public) does not match window \(Int(x), privacy: .public),\(Int(y), privacy: .public) \(Int(width), privacy: .public)x\(Int(height), privacy: .public)")}
  return ok
 }
 /// Bundle rozdělený na kontext bez HAR a samotný HAR.
@@ -166,7 +171,9 @@ final class PendingCaptureContext:@unchecked Sendable {
  /// Složka s vypnutým kontextem request vůbec nepošle.
  /// `windowMs` u videa pokryje celou dobu záznamu; mapa elementů k videu nepatří.
  static func start(topic:Topic?,bridge:BrowserBridge = .shared,windowMs:Int?=nil,target:()->[String:Any]? = browserCaptureTarget)->PendingCaptureContext?{
-  guard let policy=topic?.effectiveContextPolicy,bridge.isRunning,!bridge.clients.isEmpty,let target=target() else{return nil}
+  guard let policy=topic?.effectiveContextPolicy else{contextLog.notice("skipped: \(topic == nil ? "no folder" : "context off in folder", privacy: .public)");return nil}
+  guard bridge.isRunning,!bridge.clients.isEmpty else{contextLog.notice("skipped: no browser extension connected");return nil}
+  guard let target=target() else{return nil}
   var json=policy.protocolJSON
   if let windowMs{json["windowMs"]=windowMs;json["includeElements"]=false}
   return PendingCaptureContext(bridge:bridge,target:target,policy:json,timeout:windowMs == nil ? 30:5)
@@ -175,7 +182,7 @@ final class PendingCaptureContext:@unchecked Sendable {
  init(bridge:BrowserBridge,target:[String:Any]?,policy:[String:Any]?=nil,timeout:TimeInterval=30){
   // Víc prohlížečů odpovídá souběžně; platí jen bundle z cílového okna.
   let bounds=target?["windowBounds"] as? [String:CGFloat]
-  Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout,accept:{bundleMatches($0,bounds:bounds)});self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
+  Task.detached{let data=await bridge.request(policy:policy,target:target,timeout:timeout,accept:{bundleMatches($0,bounds:bounds)});if data==nil{contextLog.notice("no matching bundle from the extension")};self.finish(data.flatMap(CaptureContextFiles.init(bundle:)))}
  }
  private func finish(_ result:CaptureContextFiles?){
   lock.lock();guard !done else{lock.unlock();return}

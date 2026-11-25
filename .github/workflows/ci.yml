@@ -33,6 +33,7 @@ jobs:
           exit 1
       - run: python3 tests/build-config.py
       - run: python3 tests/release.py
+      - run: python3 tests/appcast.py
       # Loopback REST kontrakt proti testovacímu hostu z build.sh.
       - run: |
           python3 tests/cloud-rest.py "$(sed -n 's/^Testy: //p' build.log)"

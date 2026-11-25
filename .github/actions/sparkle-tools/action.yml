@@ -1,0 +1,17 @@
+name: Sparkle tools
+description: Download the pinned Sparkle command line tools, verify the checksum and add them to PATH.
+runs:
+  using: composite
+  steps:
+    # Verze odpovídá Sparkle v Package.swift; při jejím zvednutí změň i checksum.
+    - shell: bash
+      env:
+        VERSION: 2.10.1
+        SHA256: 1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
+      run: |
+        archive="$RUNNER_TEMP/sparkle.tar.xz"
+        curl -fsSL --retry 3 -o "$archive" "https://github.com/sparkle-project/Sparkle/releases/download/$VERSION/Sparkle-$VERSION.tar.xz"
+        echo "$SHA256  $archive" | shasum -a 256 -c -
+        mkdir -p "$RUNNER_TEMP/sparkle"
+        tar -xJf "$archive" -C "$RUNNER_TEMP/sparkle"
+        echo "$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_PATH"

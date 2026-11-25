@@ -657,11 +657,8 @@
 "Výchozí název a šablony" = "Výchozí název a šablony";
 "Výchozí zkratky Screenshot Note" = "Výchozí zkratky Screenshot Note";
 "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky.";
-"Nadřazená složka cloudu" = "Nadřazená složka cloudu";
 "Nenastaveno, u nové cloudové složky se zeptám." = "Nenastaveno, u nové cloudové složky se zeptám.";
 "Nové cloudové složky dostanou podsložku tady." = "Nové cloudové složky dostanou podsložku tady.";
-"Ptát se" = "Ptát se";
-"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení.";
 "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo";
 "Komentáře k anotacím" = "Komentáře k anotacím";
 "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář." = "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář.";
@@ -676,3 +673,6 @@
 "Snímek %ld · anotace a poznámka" = "Snímek %ld · anotace a poznámka";
 "Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash)." = "Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash).";
 "Relaci „%@“ nelze obnovit: cloudová kopie byla smazána po konci předplatného. Místní soubory zůstávají." = "Relaci „%@“ nelze obnovit: cloudová kopie byla smazána po konci předplatného. Místní soubory zůstávají.";
+"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯." = "V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯.";
+"Nadřazená složka cloudu…" = "Nadřazená složka cloudu…";
+"Ptát se na složku u nové cloudové složky" = "Ptát se na složku u nové cloudové složky";

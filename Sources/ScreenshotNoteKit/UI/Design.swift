@@ -86,11 +86,9 @@ func installDesignRoot(_ window:NSWindow,headerHeight:CGFloat=106,showClose:Bool
 }
 func animateDesign(_ block:()->Void){NSAnimationContext.runAnimationGroup{context in context.duration=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0:0.16;context.allowsImplicitAnimation=true;block()}}
 final class DesignTopicRow:NSTableRowView {
- // Tenký rozdělovač mezi složkami.
- override func drawBackground(in dirtyRect:NSRect){
-  super.drawBackground(in:dirtyRect)
-  AppPalette.stroke.withAlphaComponent(0.7).setFill();NSRect(x:14,y:isFlipped ? bounds.maxY-1:0,width:bounds.width-28,height:1).fill()
- }
+ // Vybraný řádek má světlé pozadí; text a ikony zůstávají v běžných barvách.
+ override var isEmphasized:Bool{get{false}set{}}
+ override var interiorBackgroundStyle:NSView.BackgroundStyle{.normal}
  override func drawSelection(in dirtyRect:NSRect){if isSelected{AppPalette.accent.withAlphaComponent(0.14).setFill();NSBezierPath(roundedRect:bounds.insetBy(dx:4,dy:2),xRadius:8,yRadius:8).fill()}}
 }
 

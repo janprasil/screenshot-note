@@ -657,11 +657,8 @@
 "Výchozí název a šablony" = "Default title and templates";
 "Výchozí zkratky Screenshot Note" = "Screenshot Note default shortcuts";
 "Systémové zkratky jsou obsazené. Ponechali jsme výchozí; po vypnutí systémových zkratek je nastav v Nastavení → Klávesové zkratky." = "The system shortcuts are taken. We kept the defaults; set them in Settings → Keyboard shortcuts after turning off the system shortcuts.";
-"Nadřazená složka cloudu" = "Cloud parent folder";
 "Nenastaveno, u nové cloudové složky se zeptám." = "Not set; I ask for each new cloud folder.";
 "Nové cloudové složky dostanou podsložku tady." = "New cloud folders get a subfolder here.";
-"Ptát se" = "Ask each time";
-"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení." = "Subfolders named after your cloud folders are created here. New cloud folders are stored here automatically; change it in Settings.";
 "Výběr · tažením přesunout, dvojklikem upravit text; komentář přidáš v panelu vpravo" = "Select · drag to move, double-click to edit text; add comments in the panel on the right";
 "Komentáře k anotacím" = "Annotation comments";
 "Zatím žádné komentáře. Vyber tvar nástrojem Výběr a v panelu přidej komentář." = "No comments yet. Select a shape with the Select tool and add a comment in this panel.";
@@ -676,3 +673,6 @@
 "Snímek %ld · anotace a poznámka" = "Screenshot %ld · annotations and note";
 "Cloudová kopie byla smazána po konci předplatného, místní soubory jsou v koši složky %@ (.trash)." = "The cloud copy was deleted after the subscription ended; the local files are in the trash of folder %@ (.trash).";
 "Relaci „%@“ nelze obnovit: cloudová kopie byla smazána po konci předplatného. Místní soubory zůstávají." = "The session “%@” can’t be restored: the cloud copy was deleted after the subscription ended. The local files stay.";
+"V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯." = "Subfolders named after your cloud folders are created here. New cloud folders are stored here automatically; change it in Folders under the ⋯ menu.";
+"Nadřazená složka cloudu…" = "Cloud parent folder…";
+"Ptát se na složku u nové cloudové složky" = "Ask for a folder for each new cloud folder";

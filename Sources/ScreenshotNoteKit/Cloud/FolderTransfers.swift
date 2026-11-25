@@ -271,7 +271,7 @@ enum FolderDialogs {
   switch alert.runModal() {
   case .alertFirstButtonReturn:
    let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
-   panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to v Nastavení.")
+   panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek. Nové cloudové složky se sem uloží samy; změníš to ve Složkách v menu ⋯.")
    guard panel.runModal() == .OK,let root=panel.url else{break}
    do{try assign(unmapped,root:root,folders:folders);mapped=true;cloudRoot=root}catch{showError(error.localizedDescription)}
   case .alertSecondButtonReturn:

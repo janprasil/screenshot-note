@@ -1,7 +1,7 @@
 import Foundation
 
 // Šablony komentáře a obrázku; stejná pravidla má web (lib/item-templates.ts), výstup se musí shodovat bajt po bajtu.
-let defaultCommentTemplate="{text}\n`{name}` - `{date}`"
+let defaultCommentTemplate="{text}\n\n`{name}` - `{date}`"
 let defaultImageTemplate="{image}\n\n{description}\n\n{context}\n\n{comments}"
 let commentPlaceholders=["date","name","text"]
 let imagePlaceholders=["image","description","comments","number","context","elements"]

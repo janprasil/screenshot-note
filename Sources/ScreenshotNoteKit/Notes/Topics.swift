@@ -348,7 +348,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   saveStatus.stringValue="";saveStatus.textColor=AppPalette.secondary;editingID=topic.id;pendingDefault=false
   template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
-  detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode();markLoaded()
+  detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;showCombinedChoice(topic.combined);layoutHeading();updateMode();markLoaded()
   updateSubfolders(topic)
   if let other=Topics.overlapping(topic,among:list){showStatus(Topics.nestedError(other).message,warning:true)}
  }
@@ -424,8 +424,10 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  @objc func addTopic(){
   guard confirmLeave() else{return}
   saveStatus.stringValue="";editingID=nil;pendingDefault=false;(template,fileTemplate)=defaults.newFolderTemplates;commentTemplate=defaults.comment;imageTemplate=defaults.image;contextPolicy=ContextPolicy();defaultTitleValue=nil;table.deselectAll(nil);detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton.isEnabled=true;saveButton.isEnabled=true
-  name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);updateMode();markLoaded();beginNameEdit()
+  name.stringValue="";detail.stringValue="";folder.stringValue="";file.stringValue=defaultCombinedFile;mode.selectItem(at:0);showCombinedChoice(false);updateMode();markLoaded();beginNameEdit()
  }
+ /// Jeden společný Markdown je zatím schovaný; složka, která ho už má, ho vidí a může přepnout zpět.
+ private func showCombinedChoice(_ visible:Bool){mode.superview?.isHidden = !visible}
  @objc func syncSelected(){
   guard let topic=list.first(where:{$0.id==editingID}) else{return}
   if topic.cloudFolderID != nil{Task{@MainActor in await CloudLibrary.shared.sync();await CloudFolders.shared.refresh(CloudLibrary.shared.connection)};return}
@@ -458,10 +460,12 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  /// Výchozí šablony pro nové složky; s účtem se ukládají na server.
  @objc func editDefaults(){
   var values=[defaults.effectiveSession,defaults.effectiveFile,defaults.comment ?? defaultCommentTemplate,defaults.image ?? defaultImageTemplate];var selected=0
-  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:[(L("Šablona relace"),values[0],sessionTemplateHint),(L("Šablona souboru"),values[1],fileTemplateHint),(L("Komentář"),values[2],commentTemplateHint),(L("Obrázek"),values[3],imageTemplateHint)],selected:selected,apply:L("Uložit")){
-   values=edited
-   guard TemplateDefaults.valid(session:values[0],file:values[1]) else{selected=["{title}","{screenshots}","{text}"].allSatisfy{values[0].contains($0)} ? 1:0;showError(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."));continue}
-   if let problem=itemTemplateProblem(values[2],values[3]){selected=problem.0;showError(problem.1);continue}
+  // Šablona souboru (společný Markdown) je zatím schovaná; její hodnota se ukládá beze změny.
+  let shown=[0,2,3],titles=[(L("Šablona relace"),sessionTemplateHint),(L("Šablona souboru"),fileTemplateHint),(L("Komentář"),commentTemplateHint),(L("Obrázek"),imageTemplateHint)]
+  while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:shown.map{(titles[$0].0,values[$0],titles[$0].1)},selected:selected,apply:L("Uložit")){
+   for (position,index) in shown.enumerated(){values[index]=edited[position]}
+   guard TemplateDefaults.valid(session:values[0],file:values[1]) else{selected=0;showError(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."));continue}
+   if let problem=itemTemplateProblem(values[2],values[3]){selected=shown.firstIndex(of:problem.0) ?? 0;showError(problem.1);continue}
    let chosen=values
    Task{@MainActor in do{try await self.defaults.save(session:chosen[0],file:chosen[1],comment:chosen[2],image:chosen[3]);self.showStatus(L("Výchozí šablony byly uloženy."))}catch{showError(error.localizedDescription)}}
    break

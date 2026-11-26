@@ -41,7 +41,9 @@ var destination: URL { URL(fileURLWithPath: UserDefaults.standard.string(forKey:
 let legacyDestination = fm.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshot Note", isDirectory:true)
 /// Stávající instalace bez uložené cesty a složek zůstane u staré výchozí složky, pokud na disku existuje.
 func pinLegacyDestination(_ defaults:UserDefaults = .standard, legacy:URL = legacyDestination) {
- guard defaults.object(forKey:"destination") == nil, defaults.data(forKey:"topics") == nil, fm.fileExists(atPath:legacy.path) else { return }
+ // Prázdný seznam složek (vše přesunuté do cloudu) je jako žádný; výchozí složka pak dál vychází z destination.
+ let topics=defaults.data(forKey:"topics").flatMap{try? JSONDecoder().decode([Topic].self,from:$0)}
+ guard defaults.object(forKey:"destination") == nil, defaults.data(forKey:"topics") == nil || topics?.isEmpty == true, fm.fileExists(atPath:legacy.path) else { return }
  defaults.set(legacy.path, forKey:"destination")
 }
 func readDraft(_ root: URL) throws -> Draft {

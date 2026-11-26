@@ -31,9 +31,11 @@ func presentScreenshotPanel(_ window:NSWindow) {
  if !isExportingDesign{let fresh = !window.isVisible;if fresh && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion{window.alphaValue=0};window.makeKeyAndOrderFront(nil);if fresh{animateDesign{window.animator().alphaValue=1}}}
 }
 
+/// Otevřená relace (poznámka nebo snímání); nastaví AppDelegate podle skutečného stavu, ne podle úrovně oken.
+var sessionIsOpen:()->Bool={false}
 /// Okna appky (nastavení, cloud, průvodce, dialogy složek) jsou běžná okna; plavou jen nad otevřenou relací, aby pod ní nezmizela.
 func presentAppWindow(_ window:NSWindow) {
- let sessionOpen=NSApp.windows.contains{$0 !== window && $0.isVisible && $0.level == .floating}
+ let sessionOpen=sessionIsOpen()
  if sessionOpen{presentScreenshotPanel(window);return}
  window.collectionBehavior = [.moveToActiveSpace,.fullScreenAuxiliary]
  window.level = .normal

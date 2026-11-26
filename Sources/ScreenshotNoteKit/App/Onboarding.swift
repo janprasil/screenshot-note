@@ -5,16 +5,17 @@ import UserNotifications
 
 /// Průvodce prvním spuštěním: oprávnění, zkratky, cloud, výchozí složka a spuštění po přihlášení.
 final class Onboarding:NSObject,NSWindowDelegate {
- static let doneKey="onboardingDone",stepKey="onboardingStep"
+ static let doneKey="onboardingDone",stepKey="onboardingStep",defaultsKey="onboardingDefaultsApplied"
  enum Step:Int,CaseIterable{case welcome,permissions,shortcuts,cloud,folder,finish}
  private static let width:CGFloat=680,height:CGFloat=560,header:CGFloat=116
 
  /// Nová instalace nebo nedokončený průvodce; stávající instalace se jen označí jako hotová.
  static func pending(_ defaults:UserDefaults = .standard)->Bool {
-  if defaults.bool(forKey:doneKey){return false}
+  // Hotový průvodce už doporučené výchozí nezapíná; otevření z Nastavení nepřepne vypnuté přepínače.
+  if defaults.bool(forKey:doneKey){defaults.set(true,forKey:defaultsKey);return false}
   if defaults.object(forKey:stepKey) != nil{return true}
   let existing=["topics","destination","defaultTopic","lastTopic","shortcutOnboardingDone"].contains{defaults.object(forKey:$0) != nil} || (1...3).contains{defaults.data(forKey:"shortcut\($0)") != nil}
-  if existing{defaults.set(true,forKey:doneKey);return false}
+  if existing{defaults.set(true,forKey:doneKey);defaults.set(true,forKey:defaultsKey);return false}
   return true
  }
 
@@ -244,7 +245,7 @@ final class Onboarding:NSObject,NSWindowDelegate {
 
  /// Propojení s prohlížečem a spuštění po přihlášení zapne jednou za instalaci; pozdější vypnutí uživatelem zůstane.
  private func applyRecommendedDefaults() {
-  let key="onboardingDefaultsApplied",defaults=UserDefaults.standard
+  let key=Self.defaultsKey,defaults=UserDefaults.standard
   guard !isExportingDesign,!defaults.bool(forKey:key) else{return}
   defaults.set(true,forKey:key)
   if !NativeHostRegistration.isEnabled{do{_ = try NativeHostRegistration.setEnabled(true)}catch{NSLog("Browser bridge default failed: %@",error.localizedDescription)}}

@@ -20,7 +20,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   // Průvodce se rozhoduje před zafixováním staré složky, ta by jinak vypadala jako stávající instalace.
   let automated=CommandLine.arguments.dropFirst().contains(where:{$0.hasPrefix("--")})
   let showGuide=CommandLine.arguments.contains("--onboarding") || (!automated && !isExportingDesign && Onboarding.pending())
-  if !automated{pinLegacyDestination()}
+  // Stará složka se fixuje i při spuštění z automatizace (--capture), jinak by první snímek odešel do nové výchozí.
+  if !isExportingDesign && !CommandLine.arguments.contains(where:{$0.hasSuffix("-test")}){pinLegacyDestination()}
+  sessionIsOpen={[weak self] in self.map{$0.composer != nil || $0.capturing} ?? false}
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   CloudLibrary.shared.onEditConflict={id,fields in CloudFolders.shared.keepLocalEdit(id,fields)}
@@ -43,7 +45,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   }
   refreshCloudFolders()
   // Starší místní poznámky jednou přijdou o skryté značky.
-  for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
+  // Nová instalace žádné starší značky nemá; čtení výchozí složky v ~/Documents by hned spustilo dotaz na přístup.
+  if !showGuide{for topic in Topics.local where topic.savesLocally{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}}
   NativeHostRegistration.applyStoredSetting()
   Updates.shared.start()
   settings=SettingsController(hotkeys:hotkeys)

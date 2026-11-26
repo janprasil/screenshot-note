@@ -278,8 +278,12 @@ enum FolderDialogs {
   guard !unmapped.isEmpty else{return}
   // Nastavená nadřazená složka: podsložky bez dotazu; chybí-li adresář, zeptá se jako dřív.
   if let root=cloudRoot,fm.fileExists(atPath:root.path){
-   do{try assign(unmapped,root:root,folders:folders);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil);await folders.refresh(CloudLibrary.shared.connection);return}
-   catch{showError(error.localizedDescription)}
+   // Starší nadřazená složka uvnitř jiné složky se zruší a appka se zeptá jako dřív.
+   if (try? Topics.validateParent(root,among:folders.allTopics.filter{!$0.folder.isEmpty}+Topics.local)) == nil{cloudRoot=nil}
+   else {
+    do{try assign(unmapped,root:root,folders:folders);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil);await folders.refresh(CloudLibrary.shared.connection);return}
+    catch{showError(error.localizedDescription)}
+   }
   }
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
   let answer=FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),

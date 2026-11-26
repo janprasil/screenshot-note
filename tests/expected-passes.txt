@@ -101,7 +101,7 @@ PASS: retention: error in the middle of the check loop still notifies about sess
 PASS: retention: combined folder blocks saved to .trash as notes with their images
 PASS: updater starts only in production builds with an HTTPS feed and public key, never in tests; release candidates are opt-in
 PASS: deleted cloud folder directory: notice, no server calls, no held or askDelete; recreated or same-identity root downloads again
-PASS: missing directory actions: download again refills, another directory downloads there and forgets the old index, disconnect on this Mac stops syncing until remapped
+PASS: missing directory actions: download again refills, another directory downloads there (a moved directory keeps its index), disconnect stops syncing and keeps the index for remapping
 PASS: local folder counts as missing only when the app saved sessions there before
 PASS: folder directories may not overlap: same, ancestor, descendant, symlink, case and Unicode folding, .trash/assets, cloud parent root
 PASS: cloud mapping rejects nesting in setFolder and parent assignment; legacy nested mapping keeps the catalog and other folders saving

@@ -734,3 +734,4 @@
 "Vnořená složka · změň adresář" = "Nested folder · change directory";
 "Archiv" = "Archive";
 "Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář." = "The disk with this folder is not connected. Connect it or choose another directory.";
+"Disk se složkou %@ není připojený." = "The disk with folder %@ is not connected.";

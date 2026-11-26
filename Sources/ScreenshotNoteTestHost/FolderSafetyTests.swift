@@ -50,11 +50,24 @@ import AppKit
  try e.store.detach(e.store.missingRoots[0])
  assert(e.store.topics[0].folder.isEmpty && e.store.isDetached(e.store.topics[0]) && e.store.notices.isEmpty)
  await e.scan(after:20);await e.scan(after:20)
- assert(e.posts.isEmpty && !fm.fileExists(atPath:e.target.path) && e.store.records[0].detached==true && SessionIndex.shared.all.filter{$0.folder==e.folderID.uuidString.lowercased()}.isEmpty)
+ assert(e.posts.isEmpty && !fm.fileExists(atPath:e.target.path) && e.store.records[0].detached==true && SessionIndex.shared.all.filter{$0.folder==e.folderID.uuidString.lowercased()}.count==2)
  // Nové namapování odpojení zruší.
- try e.store.setFolder(e.store.topics[0],path:e.target.path);assert(!e.store.isDetached(e.store.topics[0]))
+ try fm.createDirectory(at:e.target,withIntermediateDirectories:true);try e.store.setFolder(e.store.topics[0],path:e.target.path);assert(!e.store.isDetached(e.store.topics[0]))
  await e.scan(after:20);assert(e.markdowns()==2 && e.posts.isEmpty)
- print("PASS: missing directory actions: download again refills, another directory downloads there and forgets the old index, disconnect on this Mac stops syncing until remapped")
+ // Přesunutý adresář vybraný jako „jiný“ si index ponechá: žádné duplikáty.
+ let m=try DeletionFixture(root.appendingPathComponent("moved"),count:3,combined:false);try await m.start();await m.scan(after:20)
+ let movedTo=m.root.appendingPathComponent("Přesunuto");try fm.moveItem(at:m.target,to:movedTo);await m.scan(after:20)
+ try m.store.relocate(m.store.missingRoots[0],path:movedTo.path);await m.scan(after:20);await m.scan(after:20)
+ let movedFiles=((try? fm.contentsOfDirectory(atPath:movedTo.path)) ?? []).filter{$0.hasSuffix(".md")}
+ let movedBase=try Topics.checkedDestination(movedTo.path)
+ assert(m.posts.isEmpty && movedFiles.count==3 && SessionIndex.shared.cloudRecords(base:movedBase,folder:m.folderID).count==3)
+ // Odpojení index nezahodí: nové namapování na vrácený adresář nestáhne duplikáty.
+ let n=try DeletionFixture(root.appendingPathComponent("detach-keep"),count:2,combined:false);try await n.start();await n.scan(after:20)
+ let parked=n.root.appendingPathComponent("parked");try fm.moveItem(at:n.target,to:parked);await n.scan(after:20)
+ try n.store.detach(n.store.missingRoots[0]);try fm.moveItem(at:parked,to:n.target)
+ try n.store.setFolder(n.store.topics[0],path:n.target.path);await n.scan(after:20);await n.scan(after:20)
+ assert(n.posts.isEmpty && n.markdowns()==2 && n.store.heldFolders.isEmpty)
+ print("PASS: missing directory actions: download again refills, another directory downloads there (a moved directory keeps its index), disconnect stops syncing and keeps the index for remapping")
  // Lokální složka: chybí jen ta, do které aplikace dřív ukládala.
  let used=root.appendingPathComponent("local-used"),fresh=root.appendingPathComponent("local-fresh")
  let usedTopic=Topic(id:"used",name:"Použitá",detail:"",folder:used.path,combined:false,combinedFile:"Notes.md"),freshTopic=Topic(id:"fresh",name:"Nová",detail:"",folder:fresh.path,combined:false,combinedFile:"Notes.md")

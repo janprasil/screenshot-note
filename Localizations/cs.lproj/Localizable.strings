@@ -734,3 +734,4 @@
 "Vnořená složka · změň adresář" = "Vnořená složka · změň adresář";
 "Archiv" = "Archiv";
 "Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář." = "Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář.";
+"Disk se složkou %@ není připojený." = "Disk se složkou %@ není připojený.";

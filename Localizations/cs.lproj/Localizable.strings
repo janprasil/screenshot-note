@@ -721,3 +721,16 @@
 "Elipsa" = "Elipsa";
 "Oříznout" = "Oříznout";
 "Element" = "Element";
+"Adresář leží uvnitř složky „%@“ (nebo ji obsahuje). Vyber adresář mimo ni." = "Adresář leží uvnitř složky „%@“ (nebo ji obsahuje). Vyber adresář mimo ni.";
+"Místní adresář složky %@ chybí." = "Místní adresář složky %@ chybí.";
+"Relace zůstávají v cloudu, nic se nesmazalo. Stáhni je znovu, vyber jiný adresář, nebo složku na tomto Macu odpoj." = "Relace zůstávají v cloudu, nic se nesmazalo. Stáhni je znovu, vyber jiný adresář, nebo složku na tomto Macu odpoj.";
+"Adresář se smazal nebo přesunul. Vytvoř ho znovu, nebo vyber jiný adresář." = "Adresář se smazal nebo přesunul. Vytvoř ho znovu, nebo vyber jiný adresář.";
+"Stáhnout znovu" = "Stáhnout znovu";
+"Vytvořit znovu" = "Vytvořit znovu";
+"Vybrat jiný adresář…" = "Vybrat jiný adresář…";
+"Odpojit na tomto Macu" = "Odpojit na tomto Macu";
+"Vyber místní adresář pro složku „%@“." = "Vyber místní adresář pro složku „%@“.";
+"Chybí adresář složky…" = "Chybí adresář složky…";
+"Vnořená složka · změň adresář" = "Vnořená složka · změň adresář";
+"Archiv" = "Archiv";
+"Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář." = "Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář.";

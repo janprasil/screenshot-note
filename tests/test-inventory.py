@@ -2,8 +2,8 @@
 """Fails when tests disappear from the test host or test code reaches the app sources."""
 import glob, re, sys
 
-# Stav po přidání testů aktualizací (feat/sparkle-updater): 33 testovacích funkcí, 981 kontrol, 25 PASS řádků hlavního self-testu.
-FLOOR = {'functions': 33, 'checks': 981, 'passes': 25}
+# Stav po přidání testů bezpečnosti složek (fix/folder-safety): 37 testovacích funkcí, 1027 kontrol, 25 PASS řádků hlavního self-testu.
+FLOOR = {'functions': 37, 'checks': 1027, 'passes': 25}
 
 def read(pattern):
     return {p: open(p, encoding='utf-8').read() for p in sorted(glob.glob(pattern, recursive=True))}

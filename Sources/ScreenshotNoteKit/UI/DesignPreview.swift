@@ -66,6 +66,11 @@ func exportDesignPreviews(to directory:URL)throws{
   topics.editingID=cloudTopic.id;topics.reloadFolders();exportDesignWindow(topics.window,name:"cloud-folders")
   topics.editingID=second.id;topics.reloadFolders();topics.beginNameEdit();exportDesignWindow(topics.window,name:"folder-rename")
   topics.addTopic();exportDesignWindow(topics.window,name:"folder-new")
+  // Starší vnořená složka: varování v seznamu i pod formulářem.
+  var nested=second;nested.id="preview-nested";nested.name=L("Archiv");nested.folder=demo.folder+"/Archiv"
+  topics.list=[demo,second,nested,cloudTopic];topics.editingID=nested.id;topics.reloadFolders();exportDesignWindow(topics.window,name:"folder-nested")
+  // Chybějící adresář složky: cloudová a lokální varianta dotazu.
+  for (topic,name) in [(cloudTopic,"missing-cloud-folder"),(demo,"missing-local-folder")]{let alert=FolderDialogs.missingAlert(topic,capture:false);alert.window.appearance=NSAppearance(named:appearance);alert.layout();alert.window.orderFront(nil);alert.window.displayIfNeeded();exportDesignWindow(alert.window,name:name);alert.window.orderOut(nil)}
   _ = MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),defaultMarkdownTemplate,sessionTemplateHint),(L("Šablona souboru"),defaultCombinedTemplate,fileTemplateHint)],apply:L("Použít šablonu"))
   let fileTab=MarkdownEditor();_ = fileTab.run(title:L("Šablona Markdownu"),tabs:[(L("Šablona relace"),defaultMarkdownTemplate,sessionTemplateHint),(L("Šablona souboru"),defaultCombinedTemplate,fileTemplateHint)],apply:L("Použít šablonu"),present:false)
   presentScreenshotPanel(fileTab.window);fileTab.select(1);exportDesignWindow(fileTab.window,name:"template-file-tab");fileTab.window.orderOut(nil)

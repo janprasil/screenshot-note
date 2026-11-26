@@ -171,7 +171,8 @@ func finishSession(_ draft:Draft,root:URL,folders:[Topic]?=nil)throws {
  if let saved=draft.topic{draft.topic?.contextPolicy=saved.currentContextPolicy(in:folders ?? Topics.all) ?? {var off=ContextPolicy();off.enabled=false;return off}()}
  let topic=draft.topic ?? Topics.defaultTopic
  let folder=draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? topic.destination
- try Topics.validateDestination(topic,folder:folder)
+ // Dřív uložené vnoření snímek neblokuje; nové vnoření se odmítá při nastavení složky.
+ try Topics.validateDestination(topic,folder:folder,nested:true)
  try finish(draft,root:root,dest:folder,combinedFile:topic.combined ? topic.combinedFile:nil,previous:draft.previous)
 }
 

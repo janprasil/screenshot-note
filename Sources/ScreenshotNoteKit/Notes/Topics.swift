@@ -65,6 +65,30 @@ enum Topics {
   }
   return key(lhs)==key(rhs)
  }
+ /// `child` leží uvnitř `parent`; porovnává se po předcích jako `sameDestination`.
+ static func inside(_ child:URL,_ parent:URL)->Bool {
+  if parent.standardizedFileURL.path=="/"{return child.standardizedFileURL.path != "/"}
+  var current=child.standardizedFileURL
+  while current.path != "/" {current.deleteLastPathComponent();if current.path != "/",sameDestination(current,parent){return true}}
+  return false
+ }
+ /// Stejný adresář, předek nebo potomek; složky se nesmí překrývat.
+ static func overlaps(_ lhs:URL,_ rhs:URL)->Bool{sameDestination(lhs,rhs) || inside(lhs,rhs) || inside(rhs,lhs)}
+ static func nestedError(_ other:Topic)->CloudFailure{CloudFailure(LF("Adresář leží uvnitř složky „%@“ (nebo ji obsahuje). Vyber adresář mimo ni.",other.displayName))}
+ /// První jiná složka, se kterou se adresář překrývá (i dřív uložené vnoření).
+ static func overlapping(_ topic:Topic,among list:[Topic])->Topic? {
+  guard topic.savesLocally,let target=try? checkedDestination(topic.folder) else{return nil}
+  return list.first{$0.id != topic.id && $0.savesLocally && (try? checkedDestination($0.folder)).map{overlaps(target,$0)}==true}
+ }
+ /// Nadřazená složka cloudu nesmí být složkou ani ležet uvnitř žádné složky.
+ static func validateParent(_ root:URL,among list:[Topic])throws {
+  let target=try checkedDestination(root.path)
+  for other in list where other.savesLocally {
+   let folder=try checkedDestination(other.folder)
+   if sameDestination(target,folder) || inside(target,folder){throw nestedError(other)}
+  }
+ }
+ /// Uložený seznam: kolize jen u stejného adresáře, aby starší vnořené složky nezablokovaly ukládání ostatních.
  static func validateDestinations(_ list:[Topic])throws {
   var checked:[(Topic,URL)]=[]
   for topic in list where topic.savesLocally {
@@ -75,15 +99,37 @@ enum Topics {
    checked.append((topic,target))
   }
  }
- static func validateDestination(_ topic:Topic,folder:URL,among supplied:[Topic]?=nil)throws {
+ /// Adresář nastavované složky; `nested` povolí dřív uložené vnoření (synchronizace, ukládání snímku).
+ static func validateDestination(_ topic:Topic,folder:URL,among supplied:[Topic]?=nil,nested:Bool=false)throws {
   if supplied==nil && !CloudFolders.shared.isReadable{throw CloudFailure.invalid}
   let list=supplied ?? (Topics.local+CloudFolders.shared.allTopics)
   let target=try checkedDestination(folder.path)
   for other in list where other.id != topic.id && other.savesLocally {
-   if sameDestination(target,try checkedDestination(other.folder)) {
+   let existing=try checkedDestination(other.folder)
+   if sameDestination(target,existing) {
     throw CloudFailure(LF("Složku už používá „%@“. Pro „%@“ vyber jinou složku.",other.displayName,topic.displayName))
    }
+   if !nested,inside(target,existing) || inside(existing,target){throw nestedError(other)}
   }
+ }
+ /// Adresář leží na disku v /Volumes, který teď není připojený; nesmí vzniknout na systémovém disku.
+ static func volumeMissing(_ path:String)->Bool {
+  let parts=URL(fileURLWithPath:path).standardizedFileURL.pathComponents
+  return parts.count>=3 && parts[1]=="Volumes" && !fm.fileExists(atPath:"/Volumes/"+parts[2])
+ }
+ static func ensureVolume(_ path:String)throws{if volumeMissing(path){throw CloudFailure(L("Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář."))}}
+ /// Lokální složka, jejíž adresář zmizel, ačkoli do něj aplikace dřív ukládala relace.
+ static func missingLocal(_ topic:Topic)->Bool {
+  guard topic.cloudFolderID==nil,topic.savesLocally,!topic.folder.isEmpty,!fm.fileExists(atPath:topic.folder) else{return false}
+  let key=SessionIndex.key(topic.destination)+"/"
+  return SessionIndex.shared.all.contains{!$0.isCloud && $0.file.hasPrefix(key)}
+ }
+ /// Nový adresář lokální složky po zmizení starého; kontroluje kolize i vnoření.
+ static func relocateLocal(_ topic:Topic,to url:URL)throws {
+  guard CloudFolders.shared.isReadable else{throw CloudFailure.invalid}
+  var list=storedLocal;guard let i=list.firstIndex(where:{$0.id==topic.id}) else{throw CloudFailure.invalid}
+  try validateDestination(topic,folder:url,among:local+CloudFolders.shared.allTopics)
+  list[i].folder=url.path;try storeLocal(list)
  }
  static var storedLocal:[Topic]{
   if let data=UserDefaults.standard.data(forKey:"topics"),let list=try? JSONDecoder().decode([Topic].self,from:data),!list.isEmpty{return list.map(localProjection)}
@@ -250,7 +296,9 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  @objc func chooseCloudRoot(){
   let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
   panel.message=L("V této složce se vytvoří podsložky pojmenované podle cloudových složek.");panel.directoryURL=FolderDialogs.cloudRoot
-  if panel.runModal() == .OK,let url=panel.url{FolderDialogs.cloudRoot=url;Task{@MainActor in await FolderDialogs.mapUnmapped()}}
+  guard panel.runModal() == .OK,let url=panel.url else{return}
+  do{try Topics.validateParent(url,among:Topics.all)}catch{showError(error.localizedDescription);return}
+  FolderDialogs.cloudRoot=url;Task{@MainActor in await FolderDialogs.mapUnmapped()}
  }
  @objc func resetCloudRoot(){FolderDialogs.cloudRoot=nil}
  func tableView(_ tableView:NSTableView,heightOfRow row:Int)->CGFloat{58}
@@ -260,8 +308,10 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   let icon=NSImageView(frame:NSRect(x:10,y:18,width:24,height:22));icon.image=NSImage(systemSymbolName:team ? "person.2":cloud ? "icloud":"icloud.slash",accessibilityDescription:team ? L("Týmová složka"):cloud ? L("Cloudová složka"):L("Lokální složka"))?.withSymbolConfiguration(.init(pointSize:15,weight:.regular));icon.contentTintColor=cloud ? .systemBlue:.systemRed;cell.addSubview(icon)
   if topic.id==defaultID{let badge=NSImageView(frame:NSRect(x:26,y:11,width:13,height:13));badge.image=NSImage(systemSymbolName:"star.fill",accessibilityDescription:L("Výchozí složka"))?.withSymbolConfiguration(.init(pointSize:9,weight:.bold));badge.contentTintColor = .systemYellow;cell.addSubview(badge)}
   cell.addSubview(designLabel(topic.displayName,NSRect(x:46,y:28,width:152,height:21),size:13,weight:.medium))
-  let secondary=(cloud ? (topic.folder.isEmpty ? L("Bez místního adresáře"):L("Cloud")):L("Jen na tomto Macu"))+" · "+(topic.combined ? L("Společný soubor"):L("Samostatné relace"))
-  cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:AppPalette.secondary));cell.toolTip=topic.displayName+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
+  // Starší vnořená složka má místo popisu varování.
+  let nested=Topics.overlapping(topic,among:list) != nil
+  let secondary=nested ? L("Vnořená složka · změň adresář"):(cloud ? (topic.folder.isEmpty ? L("Bez místního adresáře"):L("Cloud")):L("Jen na tomto Macu"))+" · "+(topic.combined ? L("Společný soubor"):L("Samostatné relace"))
+  cell.addSubview(designLabel(secondary,NSRect(x:46,y:9,width:152,height:18),size:10,color:nested ? .systemOrange:AppPalette.secondary));cell.toolTip=topic.displayName+(topic.id==defaultID ? "\n"+L("Výchozí složka"):"");return cell
  }
  // Znovuvybrání stejné složky po překreslení seznamu nesmí přepsat rozpracovaný formulář.
  func tableViewSelectionDidChange(_ notification:Notification){
@@ -294,6 +344,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode();markLoaded()
+  if let other=Topics.overlapping(topic,among:list){showStatus(Topics.nestedError(other).message,warning:true)}
  }
  /// Týmovou složku smí nastavovat jen vlastník nebo správce; člen mění jen místní adresář.
  private var editingManaged:Bool{list.first{$0.id==editingID}?.canManageCloudFolder ?? true}
@@ -562,7 +613,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   }
   window.makeKeyAndOrderFront(nil)
  }
- private func showStatus(_ text:String,warning:Bool=false){saveStatus.stringValue=text;saveStatus.textColor=warning ? .systemOrange:AppPalette.secondary;saveStatus.alphaValue=0;animateDesign{saveStatus.animator().alphaValue=1}}
+ private func showStatus(_ text:String,warning:Bool=false){saveStatus.stringValue=text;saveStatus.toolTip=text;saveStatus.textColor=warning ? .systemOrange:AppPalette.secondary;saveStatus.alphaValue=0;animateDesign{saveStatus.animator().alphaValue=1}}
  @objc func saveTopic(){
   window.makeFirstResponder(nil);endNameEdit()
   let title=name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),path=folder.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
@@ -602,6 +653,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   if let previous,!confirmTemplateChange(previous,template:topic.markdownTemplate,file:topic.combinedTemplate,comment:topic.commentTemplate,image:topic.imageTemplate){return}
   var updated=list.filter{$0.cloudFolderID==nil}
   if let i=updated.firstIndex(where:{$0.id==topic.id}){updated[i]=topic}else{updated.append(topic)}
+  // Nový nebo změněný adresář nesmí ležet v jiné složce; ostatní složky se ukládají i se starším vnořením.
+  if previous?.folder != path{do{try Topics.validateDestination(topic,folder:topic.destination,among:updated+CloudFolders.shared.allTopics)}catch{showError(error.localizedDescription);return}}
   let defaultValue=pendingDefault ? topic.id:(UserDefaults.standard.string(forKey:"defaultTopic") ?? Topics.defaultTopic.id)
   do {
    try Topics.save(updated,defaultID:defaultValue);list=Topics.all;editingID=topic.id;reloadTable();load(topic);showStatus(L("Konfigurace byla uložena."))

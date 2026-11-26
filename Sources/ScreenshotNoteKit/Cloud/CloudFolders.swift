@@ -81,7 +81,7 @@ final class CloudFolders {
  // Upozornění ze synchronizace koše, každé jen jednou za relaci.
  private var messages:[String]=[]
  /// Upozornění: jednorázové zprávy a živý stav zadržených mazání (zmizí po vyřešení).
- var notices:[String]{messages+heldFolders.map{LP($0.1,"Ve složce %@ zmizela %ld relace. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).","Ve složce %@ zmizely %ld relace. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).","Ve složce %@ zmizelo %ld relací. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).",$0.0.displayName,$0.1)}}
+ var notices:[String]{messages+missingRoots.map{LF("Místní adresář složky %@ chybí.",$0.displayName)}+heldFolders.map{LP($0.1,"Ve složce %@ zmizela %ld relace. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).","Ve složce %@ zmizely %ld relace. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).","Ve složce %@ zmizelo %ld relací. Čeká na potvrzení přesunu do Koše (Zmizelé relace…).",$0.0.displayName,$0.1)}}
  /// Totožnost zadržené dávky; nová dávka se ptá znovu.
  func heldBatch(_ topic:Topic)->String{SessionIndex.shared.all.filter{$0.held==true && Self.inFolder($0,topic)}.map(\.id).sorted().joined(separator:",")}
  /// Záznam indexu patří do složky (a do jejího adresáře; stejnou týmovou složku můžou mít dva účty).
@@ -115,9 +115,13 @@ final class CloudFolders {
   try fm.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true)
   try data.write(to:file,options:.atomic);try fm.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path);records=updated
  }
+ /// Ostatní složky pro kontrolu adresáře; lokální přesunuté do cloudu se nepočítají.
+ private var otherTopics:[Topic]{localTopics().filter{!migratedLocalIDs.contains($0.id)}+allTopics}
  func setFolder(_ topic:Topic,path:String)throws {
   guard let i=records.firstIndex(where:{matches($0,topic) && $0.unavailable != true}) else{throw CloudFailure.invalid}
-  var updated=records;updated[i].folder=path
+  // Nový adresář nesmí ležet v jiné složce ani ji obsahovat.
+  if !path.isEmpty{try Topics.validateDestination(records[i].topic,folder:URL(fileURLWithPath:path,isDirectory:true),among:otherTopics)}
+  var updated=records;updated[i].folder=path;updated[i].missingRoot=nil;updated[i].detached=path.isEmpty ? updated[i].detached:nil
   try persist(updated)
  }
  /// Katalog aktivního účtu. `libraries` z /me; nil (starší server) znamená jen osobní library.
@@ -129,7 +133,7 @@ final class CloudFolders {
   var updated=records.filter{!mine($0)},lost:[CloudFolderRecord]=[]
   for var folder in folders {
    let previous=records.first(where:{mine($0) && $0.id==folder.id && $0.owner==folder.owner})
-   folder.folder=previous?.folder ?? "";folder.migratedLocalIDs=previous?.migratedLocalIDs;folder.confirmLocalDeletes=previous?.confirmLocalDeletes
+   folder.folder=previous?.folder ?? "";folder.migratedLocalIDs=previous?.migratedLocalIDs;folder.confirmLocalDeletes=previous?.confirmLocalDeletes;folder.missingRoot=previous?.missingRoot;folder.detached=previous?.detached
    folder.accountID=account.0;folder.unavailable=nil
    // Týmová složka: chybějící název a role se doplní z /me.
    if let team=teams[folder.owner]{folder.ownerKind=LibraryKind.team.rawValue;folder.ownerName=folder.ownerName ?? team.name;folder.role=folder.role ?? team.role}
@@ -194,12 +198,55 @@ final class CloudFolders {
   let old=superseded(record,storedLocal());if !old.isEmpty{try saveLocal(storedLocal().filter{!old.contains($0.id)})}
   try persist(without([record]));NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
  }
+ /// Cloudové složky, jejichž místní adresář zmizel; oznámení platí, dokud adresář chybí.
+ var missingRoots:[Topic]{records.filter{mine($0) && $0.missingRoot==true && $0.remoteDeleted != true && $0.unavailable != true && !$0.folder.isEmpty && !fm.fileExists(atPath:$0.folder)}.map(\.topic)}
+ func isMissing(_ topic:Topic)->Bool{records.contains{matches($0,topic) && $0.missingRoot==true}}
+ /// Složka odpojená na tomto Macu se znovu nenabízí k namapování.
+ func isDetached(_ topic:Topic)->Bool{records.contains{matches($0,topic) && $0.detached==true}}
+ private func markMissing(_ topic:Topic,_ value:Bool)throws {
+  guard let i=records.firstIndex(where:{matches($0,topic)}),(records[i].missingRoot==true) != value else{return}
+  var updated=records;updated[i].missingRoot=value ? true:nil;try persist(updated)
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+ }
+ /// Zapomene místní stav zmizelého adresáře; data na serveru zůstávají.
+ private func forget(_ topic:Topic) {
+  guard let id=topic.cloudFolderID,!topic.folder.isEmpty,let base=try? Topics.checkedDestination(topic.folder) else{return}
+  let index=SessionIndex.shared
+  index.batch{for record in index.cloudRecords(base:base,folder:id){index.remove(record)};index.clearRoot(base)}
+ }
+ /// Stáhnout znovu: prázdný adresář a nové stažení všech relací.
+ func redownload(_ topic:Topic)throws {
+  guard isMissing(topic),!topic.folder.isEmpty else{throw CloudFailure.invalid}
+  // Adresář se mezitím vrátil: jen se zruší stav, další synchronizace ho porovná.
+  if !fm.fileExists(atPath:topic.folder){try Topics.ensureVolume(topic.folder);forget(topic);try fm.createDirectory(at:topic.destination,withIntermediateDirectories:true)}
+  try markMissing(topic,false)
+ }
+ /// Jiný adresář pro složku se zmizelým adresářem; starý stav se zapomene.
+ func relocate(_ topic:Topic,path:String)throws {
+  let old=try? Topics.checkedDestination(topic.folder),new=try Topics.checkedDestination(path)
+  try setFolder(topic,path:path)
+  if let old,!Topics.sameDestination(old,new){forget(topic)}
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+ }
+ /// Odpojit na tomto Macu: složka zůstává v cloudu, místní kopie se nestahuje.
+ func detach(_ topic:Topic)throws {
+  guard let i=records.firstIndex(where:{matches($0,topic) && $0.unavailable != true}) else{throw CloudFailure.invalid}
+  var updated=records;updated[i].folder="";updated[i].missingRoot=nil;updated[i].detached=true
+  try persist(updated);forget(topic)
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+ }
+ /// Adresáře jiných složek uvnitř kořene (dřívější vnoření); synchronizace ani mazání do nich nelezou.
+ func nestedRoots(_ base:URL)->Set<String> {
+  Set(otherTopics.filter(\.savesLocally).compactMap{try? Topics.checkedDestination($0.folder)}.filter{Topics.inside($0,base)}.map{SessionIndex.key($0)})
+ }
  /// Soubory, které zapsala aplikace: Markdown relací, jejich obrázky (v kořeni i v podsložkách) a vygenerované kopie.
  func knownFiles(_ directory:URL)->Set<String> {
-  let key=SessionIndex.key(directory),assets=directory.appendingPathComponent("assets")
+  let key=SessionIndex.key(directory),assets=directory.appendingPathComponent("assets"),nested=nestedRoots(directory)
   var known=Set<String>()
   func add(_ url:URL){if fm.fileExists(atPath:url.path){known.insert(SessionIndex.key(url))}}
-  for record in SessionIndex.shared.all where record.file.hasPrefix(key+"/") && !record.file.hasPrefix(key+"/.trash/") {
+  // Soubory vnořené složky patří jí, ne této složce.
+  func foreign(_ path:String)->Bool{nested.contains{path.hasPrefix($0+"/")}}
+  for record in SessionIndex.shared.all where record.file.hasPrefix(key+"/") && !record.file.hasPrefix(key+"/.trash/") && !foreign(record.file) {
    let markdown=URL(fileURLWithPath:record.file),parent=markdown.deletingLastPathComponent()
    add(markdown)
    // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
@@ -209,7 +256,7 @@ final class CloudFolders {
     let video=assetVideoFiles(directory,image);add(video[0]);for file in regularFiles(video[1]){add(file)}}
    if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
   }
-  for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/"){add(URL(fileURLWithPath:path))}
+  for path in SessionIndex.shared.generatedFiles where path.hasPrefix(key+"/") && !path.hasPrefix(key+"/.trash/") && !foreign(path){add(URL(fileURLWithPath:path))}
   return known
  }
  /// Běžné soubory stromu bez skrytých položek (včetně .trash).
@@ -324,7 +371,10 @@ final class CloudFolders {
   guard let account,source.cloudFolderID==nil,target.cloudOrigin==account.1,
         let index=records.firstIndex(where:{matches($0,target) && $0.unavailable != true}) else{throw CloudFailure.invalid}
   var updated=records
-  if updated[index].folder.isEmpty{updated[index].folder=source.folder}
+  if updated[index].folder.isEmpty {
+   try Topics.validateDestination(updated[index].topic,folder:source.destination,among:otherTopics.filter{$0.id != source.id})
+   updated[index].folder=source.folder;updated[index].detached=nil
+  }
   updated[index].migratedLocalIDs=Array(Set((updated[index].migratedLocalIDs ?? [])+[source.id])).sorted()
   try persist(updated)
   if UserDefaults.standard.string(forKey:"defaultTopic")==source.id{UserDefaults.standard.set(updated[index].topic.id,forKey:"defaultTopic")}
@@ -375,7 +425,7 @@ final class CloudFolders {
   var updated=records,next=result.record(owner:owner,origin:c.endpoint,library:record.owner)
   // Vlastník složky se úpravou nemění.
   guard next.owner==record.owner else{throw CloudFailure.invalid}
-  next.folder=updated[index].folder;next.migratedLocalIDs=updated[index].migratedLocalIDs;next.confirmLocalDeletes=updated[index].confirmLocalDeletes
+  next.folder=updated[index].folder;next.migratedLocalIDs=updated[index].migratedLocalIDs;next.confirmLocalDeletes=updated[index].confirmLocalDeletes;next.missingRoot=updated[index].missingRoot;next.detached=updated[index].detached
   next.ownerKind=record.ownerKind;next.ownerName=next.ownerName ?? record.ownerName;next.role=next.role ?? record.role
   // Uložení nastavení AI název nevrací; drží se poslední známý stav.
   next.aiTitle=next.aiTitle ?? updated[index].aiTitle;next.defaultTitle=next.defaultTitle ?? updated[index].defaultTitle
@@ -495,7 +545,7 @@ final class CloudFolders {
    var failure:Error?
    for topic in topics where topic.savesLocally {
     do {
-     try Topics.validateDestination(topic,folder:topic.destination,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
+     try Topics.validateDestination(topic,folder:topic.destination,among:otherTopics,nested:true)
      let active=try await notes(topic,state:nil,endpoint:endpoint,token:c.token).filter{$0.trashed_at==nil}
      // Starší server koš nezná; bez seznamu koše se koš nesynchronizuje.
      let trashed=try? await notes(topic,state:"trashed",endpoint:endpoint,token:c.token).filter{$0.trashed_at != nil}
@@ -576,9 +626,11 @@ final class CloudFolders {
   guard isCurrent(topic,token:token),let folderID=topic.cloudFolderID else{throw CloudFailure.invalid}
   let base=try Topics.checkedDestination(topic.folder),index=SessionIndex.shared
   var active=input,trashed=listed
-  // Nedostupný kořen (odpojený disk, práva) se nesynchronizuje, aby nevznikl prázdný adresář.
+  // Nedostupný kořen (smazaný, odpojený disk, práva) se nesynchronizuje, aby nevznikl prázdný adresář; uživatel dostane oznámení.
   let identity=itemIdentity(base),readableRoot=identity != nil && (try? fm.contentsOfDirectory(atPath:base.path)) != nil
-  if !readableRoot && !index.cloudRecords(base:base,folder:folderID).isEmpty{return}
+  if !readableRoot && !index.cloudRecords(base:base,folder:folderID).isEmpty{try markMissing(topic,true);return}
+  // Nepřipojený disk: prázdná složka se nestahuje, jinak by vznikla na systémovém disku.
+  if !readableRoot && Topics.volumeMissing(base.path){return}
   if trashed != nil {
    // Relace vrácená uživatelem z .trash se obnoví i na serveru.
    for record in index.cloudRecords(base:base,folder:folderID) where record.trashed==true {
@@ -620,9 +672,12 @@ final class CloudFolders {
   }
   if readableRoot{flatten(topic,base:base);migrateImageLinks(in:base);migrateImageLinks(in:trashURL(base))}
   if trashed != nil,readableRoot,let identity {
-   if let saved=index.root(base),saved != identity {
-    // Vyměněný kořen: tento průchod nic nemaže a začíná znovu.
-    index.batch{for var record in index.cloudRecords(base:base,folder:folderID) where record.missingSince != nil{record.missingSince=nil;index.put(record)};index.setRoot(base,identity)}
+   // Neznámý kořen je nový, jen když v něm není žádná známá relace; jinak běží běžné hledání přesunů.
+   let saved=index.root(base),fresh=saved==nil && index.cloudRecords(base:base,folder:folderID).filter{$0.trashed != true}.allSatisfy{!fm.fileExists(atPath:$0.file)}
+   if (saved != nil && saved != identity) || fresh || isMissing(topic) {
+    // Vyměněný, vrácený nebo nový kořen: tento průchod nic nemaže a chybějící relace se stáhnou znovu.
+    index.batch{for var record in index.cloudRecords(base:base,folder:folderID) where record.keptLocal != true && (record.missingSince != nil || record.held != nil || record.askDelete != nil){record.missingSince=nil;record.held=nil;record.askDelete=nil;record.confirmed=nil;index.put(record)};index.setRoot(base,identity)}
+    try markMissing(topic,false)
    } else {
     index.setRoot(base,identity)
     active=try await propagateLocalDeletions(topic,active:active,base:base,endpoint:endpoint,token:token)
@@ -639,6 +694,8 @@ final class CloudFolders {
    flatten(topic,base:base)
    for item in trashed ?? []{trashSeparate(item.id,base:base)}
   }
+  // Kořen vytvořený prvním stažením se hned zapamatuje, aby jeho výměnu šlo poznat.
+  if index.root(base)==nil,let created=itemIdentity(base){index.setRoot(base,created)}
   // Místní poznámky v cloudovém adresáři přijdou o staré značky až po přepsání cloudových souborů.
   migrateLegacyMarkers(in:base,skip:[topic.combinedFile,(topic.combinedFile as NSString).deletingPathExtension+"_cloud.md"])
   if let failure{throw failure}
@@ -647,10 +704,12 @@ final class CloudFolders {
  /// Adresáře zmapovaného stromu včetně .trash; obrázky a skryté položky se přeskakují.
  private func treeDirectories(_ base:URL)->[URL] {
   guard let walker=fm.enumerator(at:base,includingPropertiesForKeys:[.isDirectoryKey],options:[]) else{return []}
-  var result:[URL]=[]
+  var result:[URL]=[];let nested=nestedRoots(base)
   for case let url as URL in walker {
    let name=url.lastPathComponent
    if name.hasPrefix("."),!(walker.level==1 && name==".trash"){walker.skipDescendants();continue}
+   // Vnořená složka (starší konfigurace) se neprohledává.
+   if !nested.isEmpty,nested.contains(SessionIndex.key(url)){walker.skipDescendants();continue}
    guard (try? url.resourceValues(forKeys:[.isDirectoryKey]))?.isDirectory==true else{continue}
    if name=="assets" || walker.level>=5{walker.skipDescendants()}
    if name != "assets" && name != ".trash"{result.append(url)}
@@ -1143,7 +1202,7 @@ final class CloudFolders {
   let contexts=try await contextAttachments(note,topic:topic,endpoint:endpoint,token:token)
   func sidecar(_ key:String)->Bool{key.hasSuffix(".context.json") || key.hasSuffix(".har") || key.hasSuffix(".mp4")}
   guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
-  try Topics.validateDestination(topic,folder:base,among:localTopics().filter{!self.migratedLocalIDs.contains($0.id)}+allTopics)
+  try Topics.validateDestination(topic,folder:base,among:otherTopics,nested:true)
   let assets=base.appendingPathComponent("assets");try fm.createDirectory(at:assets,withIntermediateDirectories:true)
   func finished(_ file:URL,_ body:String,_ names:[String],_ files:[String:String])->SessionRecord {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)

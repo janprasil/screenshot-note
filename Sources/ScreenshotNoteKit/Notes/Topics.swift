@@ -461,7 +461,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  @objc func editDefaults(){
   var values=[defaults.effectiveSession,defaults.effectiveFile,defaults.comment ?? defaultCommentTemplate,defaults.image ?? defaultImageTemplate];var selected=0
   // Šablona souboru (společný Markdown) je zatím schovaná; její hodnota se ukládá beze změny.
-  let shown=[0,2,3],titles=[(L("Šablona relace"),sessionTemplateHint),(L("Šablona souboru"),fileTemplateHint),(L("Komentář"),commentTemplateHint),(L("Obrázek"),imageTemplateHint)]
+  let shown=[0,3,2],titles=[(L("Šablona relace"),sessionTemplateHint),(L("Šablona souboru"),fileTemplateHint),(L("Komentář"),commentTemplateHint),(L("Obrázek"),imageTemplateHint)]
   while let edited=MarkdownEditor().run(title:L("Výchozí šablony"),tabs:shown.map{(titles[$0].0,values[$0],titles[$0].1)},selected:selected,apply:L("Uložit")){
    for (position,index) in shown.enumerated(){values[index]=edited[position]}
    guard TemplateDefaults.valid(session:values[0],file:values[1]) else{selected=0;showError(L("Šablona relace musí obsahovat {title}, {screenshots} a {text}; šablona souboru {sessions} právě jednou."));continue}
@@ -626,19 +626,19 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  @objc func editTemplate(){
   let sessionError=L("Šablona musí obsahovat {title}, {screenshots} a {text}.")
   func validSession(_ value:String)->Bool{["{title}","{screenshots}","{text}"].allSatisfy{value.contains($0)}}
-  // Záložky: relace, soubor (jen společný soubor), komentář a obrázek.
+  // Záložky: relace, soubor (jen společný soubor), obrázek a komentář (stejně jako na webu).
   let combined=mode.indexOfSelectedItem==1,offset=combined ? 1:0
-  var values=[template]+(combined ? [fileTemplate ?? defaultCombinedTemplate]:[])+[commentTemplate ?? defaultCommentTemplate,imageTemplate ?? defaultImageTemplate];var selected=0
+  var values=[template]+(combined ? [fileTemplate ?? defaultCombinedTemplate]:[])+[imageTemplate ?? defaultImageTemplate,commentTemplate ?? defaultCommentTemplate];var selected=0
   var tabs=[(L("Šablona relace"),values[0],sessionTemplateHint)]
   if combined{tabs.append((L("Šablona souboru"),values[1],fileTemplateHint))}
-  tabs+=[(L("Komentář"),values[1+offset],commentTemplateHint),(L("Obrázek"),values[2+offset],imageTemplateHint)]
+  tabs+=[(L("Obrázek"),values[1+offset],imageTemplateHint),(L("Komentář"),values[2+offset],commentTemplateHint)]
   while let edited=MarkdownEditor().run(title:L("Šablona Markdownu"),tabs:tabs.enumerated().map{($0.element.0,values[$0.offset],$0.element.2)},selected:selected,apply:L("Použít šablonu")){
    values=edited
    if !validSession(values[0]){selected=0;showError(sessionError);continue}
    if combined,!validCombinedTemplate(values[1]){selected=1;showError(L("Šablona souboru musí obsahovat {sessions} právě jednou."));continue}
-   if let problem=itemTemplateProblem(values[1+offset],values[2+offset]){selected=problem.0-1+offset;showError(problem.1);continue}
+   if let problem=itemTemplateProblem(values[2+offset],values[1+offset]){selected=(problem.0==2 ? 2:1)+offset;showError(problem.1);continue}
    template=values[0];if combined{fileTemplate=values[1]==defaultCombinedTemplate ? nil:values[1]}
-   commentTemplate=values[1+offset]==defaultCommentTemplate ? nil:values[1+offset];imageTemplate=values[2+offset]==defaultImageTemplate ? nil:values[2+offset];break
+   imageTemplate=values[1+offset]==defaultImageTemplate ? nil:values[1+offset];commentTemplate=values[2+offset]==defaultCommentTemplate ? nil:values[2+offset];break
   }
   window.makeKeyAndOrderFront(nil)
  }

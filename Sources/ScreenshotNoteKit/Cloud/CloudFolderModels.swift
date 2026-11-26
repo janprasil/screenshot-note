@@ -28,9 +28,11 @@ struct CloudFolderRecord:Codable {
  var aiTitle:Bool? = nil
  // Výchozí název relace ze serveru; nil = dědí z účtu.
  var defaultTitle:String? = nil
+ // Místní stav Macu: adresář složky zmizel, nebo ho uživatel na tomto Macu odpojil.
+ var missingRoot:Bool? = nil;var detached:Bool? = nil
  var account:UUID{accountID ?? owner}
  var isTeam:Bool{owner != account || ownerKind==LibraryKind.team.rawValue}
- enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable,aiTitle,defaultTitle;case accountID="account"}
+ enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable,aiTitle,defaultTitle,missingRoot,detached;case accountID="account"}
  var topic:Topic {
   var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes;value.commentTemplate=commentTemplate;value.imageTemplate=imageTemplate
   value.aiTitle=aiTitle;value.defaultTitle=defaultTitle

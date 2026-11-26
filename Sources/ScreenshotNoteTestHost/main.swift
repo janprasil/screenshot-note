@@ -22,6 +22,12 @@ if CommandLine.arguments.contains("--folder-sync-self-test") {
  dispatchMain()
 }
 
+if CommandLine.arguments.contains("--folder-safety-self-test") {
+ _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
+ Task{@MainActor in do{try await missingRootTests();try await nestedFolderTests();print("Folder safety self-test passed");exit(0)}catch{fputs("Folder safety test failed: \(error)\n",stderr);exit(1)}}
+ dispatchMain()
+}
+
 if CommandLine.arguments.contains("--folder-transfer-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
  Task{@MainActor in do{try await folderTransferTests();exit(0)}catch{fputs("Folder transfer test failed: \(error)\n",stderr);exit(1)}}

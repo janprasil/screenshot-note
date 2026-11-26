@@ -721,3 +721,17 @@
 "Elipsa" = "Ellipse";
 "Oříznout" = "Crop";
 "Element" = "Element";
+"Adresář leží uvnitř složky „%@“ (nebo ji obsahuje). Vyber adresář mimo ni." = "The directory is inside folder “%@” (or contains it). Choose a directory outside it.";
+"Místní adresář složky %@ chybí." = "The local directory of folder %@ is missing.";
+"Relace zůstávají v cloudu, nic se nesmazalo. Stáhni je znovu, vyber jiný adresář, nebo složku na tomto Macu odpoj." = "The sessions are still in the cloud and nothing was deleted. Download them again, choose another directory, or disconnect the folder on this Mac.";
+"Adresář se smazal nebo přesunul. Vytvoř ho znovu, nebo vyber jiný adresář." = "The directory was deleted or moved. Create it again or choose another directory.";
+"Stáhnout znovu" = "Download again";
+"Vytvořit znovu" = "Create again";
+"Vybrat jiný adresář…" = "Choose Another Directory…";
+"Odpojit na tomto Macu" = "Disconnect on This Mac";
+"Vyber místní adresář pro složku „%@“." = "Choose a local directory for folder “%@”.";
+"Chybí adresář složky…" = "Missing Folder Directory…";
+"Vnořená složka · změň adresář" = "Nested folder · change directory";
+"Archiv" = "Archive";
+"Disk se složkou není připojený. Připoj ho, nebo vyber jiný adresář." = "The disk with this folder is not connected. Connect it or choose another directory.";
+"Disk se složkou %@ není připojený." = "The disk with folder %@ is not connected.";

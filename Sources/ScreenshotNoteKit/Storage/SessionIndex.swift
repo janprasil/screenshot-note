@@ -122,6 +122,7 @@ final class SessionIndex {
  var generatedFiles:[String]{Array(store.generated.keys)}
  func setGenerated(_ url:URL,_ fingerprint:String?){var value=store;value.generated[Self.key(url)]=fingerprint;store=value}
  func root(_ url:URL)->String?{store.roots?[Self.key(url)]}
+ func clearRoot(_ url:URL){var value=store;guard value.roots?[Self.key(url)] != nil else{return};value.roots?[Self.key(url)]=nil;store=value}
  func setRoot(_ url:URL,_ identity:String){var value=store;var roots=value.roots ?? [:];guard roots[Self.key(url)] != identity else{return};roots[Self.key(url)]=identity;value.roots=roots;store=value}
  func isMigrated(_ url:URL)->Bool{store.migrated.contains(Self.key(url))}
  func markMigrated(_ url:URL){var value=store;let key=Self.key(url);if !value.migrated.contains(key){value.migrated.append(key);if value.migrated.count>2000{value.migrated.removeFirst()}};store=value}

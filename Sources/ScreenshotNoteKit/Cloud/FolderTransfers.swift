@@ -273,12 +273,17 @@ enum FolderDialogs {
  @MainActor static func mapUnmapped(folders:CloudFolders = .shared)async {
   // Složky čekající na znovupropojení se neptají na nový adresář.
   let repairing=Set(folders.repairCandidates.compactMap(\.formerCloudFolderID))
-  let unmapped=folders.topics.filter{$0.folder.isEmpty && $0.cloudFolderID != nil && !repairing.contains($0.cloudFolderID!)}
+  // Složky odpojené na tomto Macu zůstávají bez adresáře.
+  let unmapped=folders.topics.filter{$0.folder.isEmpty && $0.cloudFolderID != nil && !repairing.contains($0.cloudFolderID!) && !folders.isDetached($0)}
   guard !unmapped.isEmpty else{return}
   // Nastavená nadřazená složka: podsložky bez dotazu; chybí-li adresář, zeptá se jako dřív.
   if let root=cloudRoot,fm.fileExists(atPath:root.path){
-   do{try assign(unmapped,root:root,folders:folders);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil);await folders.refresh(CloudLibrary.shared.connection);return}
-   catch{showError(error.localizedDescription)}
+   // Starší nadřazená složka uvnitř jiné složky se zruší a appka se zeptá jako dřív.
+   if (try? Topics.validateParent(root,among:folders.allTopics.filter{!$0.folder.isEmpty}+Topics.local)) == nil{cloudRoot=nil}
+   else {
+    do{try assign(unmapped,root:root,folders:folders);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil);await folders.refresh(CloudLibrary.shared.connection);return}
+    catch{showError(error.localizedDescription)}
+   }
   }
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
   let answer=FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),
@@ -306,6 +311,8 @@ enum FolderDialogs {
  }
  /// Podsložky podle názvů; kolize dostanou číselnou příponu.
  static func assign(_ topics:[Topic],root:URL,folders:CloudFolders)throws {
+  // Nadřazená složka nesmí ležet v jiné složce, jinak by každá podsložka byla vnořená.
+  try Topics.validateParent(root,among:folders.allTopics.filter{!topics.map(\.id).contains($0.id)}+Topics.local)
   for topic in topics {
    let base=folderName(topic.name)
    var index=1
@@ -319,6 +326,51 @@ enum FolderDialogs {
     index+=1;guard index<=100 else{throw CloudFailure(LF("Pro „%@“ se nepodařilo najít volný adresář.",topic.displayName))}
    }
   }
+ }
+ @MainActor private static var deferredMissing=Set<String>()
+ /// Složky se zmizelým místním adresářem: cloudové po synchronizaci, lokální podle dřívějších relací.
+ static func missingFolders(_ folders:CloudFolders = .shared)->[Topic]{folders.missingRoots+Topics.local.filter(Topics.missingLocal)}
+ /// Před uložením snímku: chybějící adresář se nevytváří potichu.
+ static func isMissing(_ topic:Topic,folders:CloudFolders = .shared)->Bool{topic.cloudFolderID != nil ? folders.missingRoots.contains{$0.id==topic.id}:Topics.missingLocal(topic)}
+ /// Dotaz u složek se zmizelým adresářem; Později platí do dalšího spuštění (z menu se zeptá znovu).
+ @MainActor static func resolveMissing(folders:CloudFolders = .shared,manual:Bool=false)async {
+  var changed=false
+  // Sám se ptá jen u cloudových složek; lokální čeká na menu nebo na další snímek.
+  for topic in missingFolders(folders) where manual || (topic.cloudFolderID != nil && !deferredMissing.contains(topic.id)) {
+   if askMissing(topic,folders:folders) != nil{changed=true}else{deferredMissing.insert(topic.id)}
+  }
+  if changed{await folders.refresh(CloudLibrary.shared.connection)}
+ }
+ static func missingAlert(_ topic:Topic,capture:Bool)->NSAlert {
+  let cloud=topic.cloudFolderID != nil,alert=NSAlert();alert.alertStyle = .warning
+  alert.messageText=LF("Místní adresář složky %@ chybí.",topic.displayName)
+  alert.informativeText=(cloud ? L("Relace zůstávají v cloudu, nic se nesmazalo. Stáhni je znovu, vyber jiný adresář, nebo složku na tomto Macu odpoj."):L("Adresář se smazal nebo přesunul. Vytvoř ho znovu, nebo vyber jiný adresář."))+"\n\n"+(topic.folder as NSString).abbreviatingWithTildeInPath
+  alert.addButton(withTitle:cloud ? L("Stáhnout znovu"):L("Vytvořit znovu"));alert.addButton(withTitle:L("Vybrat jiný adresář…"))
+  if cloud{alert.addButton(withTitle:L("Odpojit na tomto Macu"))}
+  let later=alert.addButton(withTitle:capture ? L("Zrušit"):L("Později"));later.keyEquivalent="\u{1b}"
+  alert.window.level = .modalPanel
+  return alert
+ }
+ /// Jeden dotaz: cloud Stáhnout znovu / Vybrat jiný adresář… / Odpojit na tomto Macu, lokální Vytvořit znovu / Vybrat jiný adresář…
+ /// Vrací aktuální složku po vyřešení, nil = Později nebo Zrušit.
+ @MainActor static func askMissing(_ topic:Topic,folders:CloudFolders = .shared,capture:Bool=false)->Topic? {
+  NSApp.activate(ignoringOtherApps:true)
+  let cloud=topic.cloudFolderID != nil,alert=missingAlert(topic,capture:capture)
+  let response=alert.runModal()
+  do {
+   switch response {
+   case .alertFirstButtonReturn:if cloud{try folders.redownload(topic)}else{try Topics.ensureVolume(topic.folder);try fm.createDirectory(at:topic.destination,withIntermediateDirectories:true)}
+   case .alertSecondButtonReturn:
+    let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
+    panel.message=LF("Vyber místní adresář pro složku „%@“.",topic.displayName);panel.directoryURL=topic.destination.deletingLastPathComponent()
+    guard panel.runModal() == .OK,let url=panel.url else{return nil}
+    if cloud{try folders.relocate(topic,path:url.path)}else{try Topics.relocateLocal(topic,to:url)}
+   case .alertThirdButtonReturn where cloud:try folders.detach(topic)
+   default:return nil
+   }
+  } catch {showError(error.localizedDescription);return nil}
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+  return Topics.all.first{$0.id==topic.id} ?? folders.allTopics.first{$0.id==topic.id} ?? topic
  }
  /// Odložené a osiřelé položky cloudové fronty: Zkusit znovu, Uložit lokálně, Zahodit.
  @MainActor static func resolveParked(library:CloudLibrary = .shared) {

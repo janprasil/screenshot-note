@@ -5,6 +5,8 @@ import CoreGraphics
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  var folderEntry:NSMenuItem?
  var parkedEntry:NSMenuItem?
+ // Složky se zmizelým místním adresářem; skryté, dokud žádná nechybí.
+ var missingEntry:NSMenuItem?
  var updateEntry:NSMenuItem?
  let cloudSettings=CloudSettings()
  var item:NSStatusItem!;var statusMenu:NSMenu?;let hotkeys=Hotkeys();var settings:SettingsController!;var composer:Composer?;var capturing=false;var browsingSavedSessions=false;var session:URL?
@@ -70,6 +72,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     let parked=NSMenuItem(title:L("Odložené cloudové položky…"),action:#selector(openParked),keyEquivalent:"");parked.target=self
     let mark=NSImage(systemSymbolName:"exclamationmark.icloud",accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
     mark?.size=NSSize(width:18,height:18);mark?.isTemplate=true;parked.image=mark;parkedEntry=parked;menu.addItem(parked)
+    let missing=NSMenuItem(title:L("Chybí adresář složky…"),action:#selector(openMissing),keyEquivalent:"");missing.target=self
+    let warning=NSImage(systemSymbolName:"folder.badge.questionmark",accessibilityDescription:nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
+    warning?.size=NSSize(width:18,height:18);warning?.isTemplate=true;missing.image=warning;missing.isHidden=true;missingEntry=missing;menu.addItem(missing)
    }
   }
   updateFolderMenu();item.menu=menu;statusMenu=menu;hotkeys.callback={[weak self] id in
@@ -101,6 +106,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    await TemplateDefaults.shared.refresh()
    if NSApp.modalWindow==nil{await FolderDialogs.resolveHeld()}
    if NSApp.modalWindow==nil{await FolderDialogs.confirmDeletes()}
+   if self.composer==nil,NSApp.modalWindow==nil{await FolderDialogs.resolveMissing()}
    if self.composer==nil,NSApp.modalWindow==nil{FolderDialogs.resolveDeleted()}
    if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.offerRepair()}
    if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.mapUnmapped()}
@@ -195,11 +201,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  }
  @objc func openCloudSettings(){cloudSettings.show()}
  @objc func openParked(){Task{@MainActor in FolderDialogs.resolveParked()}}
+ @objc func openMissing(){Task{@MainActor in await FolderDialogs.resolveMissing(manual:true)}}
  @objc func preferences(){settings.show()}
  @objc func aboutApp(){AboutController.shared.show()}
  func menuNeedsUpdate(_ menu:NSMenu) {
   guard menu === item?.menu else{return}
   updateFolderMenu();parkedEntry?.isHidden=CloudLibrary.shared.parkedItems.isEmpty
+  let missing=FolderDialogs.missingFolders();missingEntry?.isHidden=missing.isEmpty
+  missingEntry?.title=missing.count==1 ? LF("Místní adresář složky %@ chybí.",missing[0].displayName):L("Chybí adresář složky…")
   updateEntry?.title=Updates.shared.updateWaiting ? L("Nainstalovat aktualizaci…"):L("Zkontrolovat aktualizace…")
  }
  /// Ukončení aplikace (i odhlášení systému) odloží otevřenou poznámku jako rozpracovanou.
@@ -402,8 +411,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   view.onRecord={[weak self] in self?.startRecording()}
   view.onStopRecording={[weak self] in self?.recording.stop()};view.setRecordingState(recording.state)
   view.recordingAvailable={[weak self] in self.map{!$0.capturing && !$0.browsingSavedSessions && $0.recording.state == .idle && !$0.deliveringRecording} ?? false}
-  view.complete={[weak self, weak view] result,draft in
+  view.complete={[weak self, weak view] result,saved in
    guard let self,let view else{return}
+   var draft=saved
+   // Zmizelý adresář složky se při uložení nevytvoří potichu; nejdřív dotaz.
+   if result == 2,draft.previous == nil,let topic=draft.topic,FolderDialogs.isMissing(topic) {
+    guard let fixed=MainActor.assumeIsolated({FolderDialogs.askMissing(topic,capture:true)}) else{view.window.makeKeyAndOrderFront(nil);return}
+    draft.topic=fixed;view.draft.topic=fixed
+   }
    let upload = result == 2 && draft.topic?.savesToCloud == true
    let cloudFolder = draft.topic?.cloudFolderID != nil
    // Cloudová složka se zapisuje jen přes stahování, i při doplnění uložené relace.

@@ -2,8 +2,8 @@
 """Fails when tests disappear from the test host or test code reaches the app sources."""
 import glob, re, sys
 
-# Stav po přidání testů podsložek (feat/subfolders): 38 testovacích funkcí, 1076 kontrol, 25 PASS řádků hlavního self-testu.
-FLOOR = {'functions': 38, 'checks': 1076, 'passes': 25}
+# Stav po podsložkách a průvodci prvním spuštěním: 39 testovacích funkcí, 1087 kontrol, 26 PASS řádků hlavního self-testu.
+FLOOR = {'functions': 39, 'checks': 1087, 'passes': 26}
 
 def read(pattern):
     return {p: open(p, encoding='utf-8').read() for p in sorted(glob.glob(pattern, recursive=True))}

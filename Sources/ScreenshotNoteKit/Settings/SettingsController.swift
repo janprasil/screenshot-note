@@ -5,9 +5,11 @@ import ServiceManagement
 final class SettingsController:NSObject {
  var window:NSWindow!;let login=NSSwitch();let browserBridge=NSSwitch();let automaticUpdates=NSSwitch();let releaseCandidates=NSButton(checkboxWithTitle:L("Nabízet i testovací verze (RC)"),target:nil,action:nil)
  var hotkeys:Hotkeys
+ /// Otevře průvodce prvním spuštěním.
+ var showGuide:(()->Void)?
  let topicSettings=TopicSettings()
  init(hotkeys:Hotkeys){self.hotkeys=hotkeys}
- func show(){if let w=window{automaticUpdates.state=Updates.shared.automaticChecks ? .on:.off;presentScreenshotPanel(w);return}
+ func show(){if let w=window{automaticUpdates.state=Updates.shared.automaticChecks ? .on:.off;presentAppWindow(w);return}
   // Řádek aktualizací jen u buildů s feedem; ostatní řádky se posunou nahoru.
   let updates=Updates.shared.isRunning;let extra:CGFloat=updates ? 82:0
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:660,height:512+extra),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Nastavení");window.isReleasedWhenClosed=false
@@ -29,10 +31,12 @@ final class SettingsController:NSObject {
    automaticUpdates.frame=NSRect(x:584,y:102,width:48,height:28);automaticUpdates.target=self;automaticUpdates.action=#selector(toggleAutomaticUpdates);automaticUpdates.state=Updates.shared.automaticChecks ? .on:.off;view.addSubview(automaticUpdates)
    releaseCandidates.frame=NSRect(x:76,y:62,width:330,height:20);releaseCandidates.target=self;releaseCandidates.action=#selector(toggleReleaseCandidates);releaseCandidates.state=Updates.shared.releaseCandidates ? .on:.off;view.addSubview(releaseCandidates)
   }
-  view.addSubview(designLabel(L("Zavřením okna zůstane aplikace v systémové liště."),NSRect(x:28,y:24,width:440,height:22),size:11,color:AppPalette.secondary))
+  view.addSubview(designLabel(L("Zavřením okna zůstane aplikace v systémové liště."),NSRect(x:28,y:24,width:300,height:22),size:11,color:AppPalette.secondary))
+  view.addSubview(styledButton(L("Průvodce…"),symbol:"sparkles",role:.quiet,frame:NSRect(x:342,y:20,width:140,height:32),target:self,action:#selector(openGuide)))
   let about=styledButton(L("O aplikaci"),symbol:"info.circle",role:.quiet,frame:NSRect(x:492,y:20,width:140,height:32),target:self,action:#selector(showAbout));view.addSubview(about)
-  presentScreenshotPanel(window)
+  presentAppWindow(window)
  }
+ @objc func openGuide(){showGuide?()}
  @objc func showAbout(){AboutController.shared.show()}
  @objc func toggleBrowserBridge(){
   do{

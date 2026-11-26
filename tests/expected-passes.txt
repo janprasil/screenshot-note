@@ -119,3 +119,4 @@ PASS: subfolder trashed on the web with its sessions: sessions go to .trash and 
 PASS: upload manifest carries subfolder_id only for a new session in a cloud folder
 PASS: combined-file folder writes one combined file per subfolder; a web move moves the block and its images
 PASS: local-only folder: subfolders are plain directories up to depth 2, a new session saves into the chosen one and the picker finds it
+PASS: first-run guide shows only on a fresh install or an unfinished guide; existing installs are marked done

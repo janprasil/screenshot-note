@@ -20,6 +20,16 @@ final class ShortcutButton:AppButton {
  }
 }
 
+/// Uloží zkratku, když nekoliduje s ostatními a jde zaregistrovat; jinak ukáže chybu a vrátí false.
+func assignShortcut(_ id:Int,_ candidate:Shortcut,hotkeys:Hotkeys)->Bool {
+ let others=(1...3).filter{$0 != id}.map(Shortcut.load)
+ guard !others.contains(where:{candidate.key == $0.key && candidate.modifiers == $0.modifiers}) else {showError(L("Tato kombinace už patří jiné zkratce."));return false}
+ let old=Shortcut.load(id);UserDefaults.standard.set(try? JSONEncoder().encode(candidate),forKey:"shortcut\(id)")
+ let errors=hotkeys.register()
+ if !errors.isEmpty {UserDefaults.standard.set(try? JSONEncoder().encode(old),forKey:"shortcut\(id)");_ = hotkeys.register();showError(errors.joined(separator:"\n"));return false}
+ return true
+}
+
 final class ShortcutSettings:NSObject,NSWindowDelegate {
  var window:NSWindow!;let hotkeys:Hotkeys
  private var shortcutButtons:[ShortcutButton]=[];private var macButton:AppButton!;private var macHint:NSTextField!
@@ -35,11 +45,8 @@ final class ShortcutSettings:NSObject,NSWindowDelegate {
    view.addSubview(designLabel([L("Vybraná oblast"),L("Celá hlavní obrazovka"),L("Záznam videa (start/stop)")][id-1],NSRect(x:28,y:y+12,width:290,height:23),size:14,weight:.medium))
    let button=ShortcutButton(frame:NSRect(x:342,y:y+4,width:250,height:38));button.shortcut=Shortcut.load(id);button.title=button.shortcut.display;button.toolTip=L("Fn může na Macu vyvolat F-klávesu; například Fn + ⌘ + F11 se zobrazí jako ⌘F11.")
    button.onChange={[weak self] candidate in
-    let others=(1...3).filter{$0 != id}.map(Shortcut.load)
-    guard !others.contains(where:{candidate.key == $0.key && candidate.modifiers == $0.modifiers}) else {showError(L("Tato kombinace už patří jiné zkratce."));return false}
-    let old=Shortcut.load(id);UserDefaults.standard.set(try? JSONEncoder().encode(candidate),forKey:"shortcut\(id)")
-    if let errors=self?.hotkeys.register(),!errors.isEmpty {UserDefaults.standard.set(try? JSONEncoder().encode(old),forKey:"shortcut\(id)");_ = self?.hotkeys.register();showError(errors.joined(separator:"\n"));return false}
-    DispatchQueue.main.async{self?.refresh()};return true
+    guard let self,assignShortcut(id,candidate,hotkeys:self.hotkeys) else{return false}
+    DispatchQueue.main.async{self.refresh()};return true
    };view.addSubview(button);shortcutButtons.append(button)
    view.addSubview(DesignDivider(NSRect(x:28,y:y-16,width:564,height:1)))
   }
@@ -50,7 +57,7 @@ final class ShortcutSettings:NSObject,NSWindowDelegate {
   refresh()
   view.addSubview(designLabel(L("Escape zruší zadávání nové kombinace."),NSRect(x:28,y:28,width:390,height:22),size:11,color:AppPalette.secondary))
   let done=styledButton(L("Hotovo"),role:.primary,frame:NSRect(x:482,y:22,width:110,height:34),target:self,action:#selector(close));done.keyEquivalent="\r";view.addSubview(done)
-  presentScreenshotPanel(window)
+  presentAppWindow(window)
   if isExportingDesign{exportDesignWindow(window,name:"shortcuts");return}
   NSApp.runModal(for:window);window.orderOut(nil)
  }

@@ -211,7 +211,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  // AI nastavení chybějící v katalogu se dotáže jednou za otevření.
  private var aiTitleRequested=Set<String>()
  func show(present:Bool=true,reload:Bool=true){
-  if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentScreenshotPanel(w)};return}
+  if let w=window{if !isExportingDesign && reload{list=Topics.all};reloadFolders();if present{presentAppWindow(w)};return}
   if !isExportingDesign && reload{list=Topics.all}
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:900,height:620+Self.lift),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Konfigurace");window.isReleasedWhenClosed=false;window.delegate=self
   let view=installDesignRoot(window,headerHeight:108)
@@ -264,7 +264,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   // Horní část formuláře jde o lift výš; kontext a výchozí název dole tak mají místo nad linkou.
   for child in view.subviews+sidebar.subviews where child !== sidebar && child.frame.minY>=150 && child.autoresizingMask.isEmpty {child.frame.origin.y+=Self.lift}
   scroll.frame.size.height+=Self.lift
-  reloadFolders();if present{presentScreenshotPanel(window)}
+  reloadFolders();if present{presentAppWindow(window)}
  }
  @objc func foldersChanged(){
   if !isExportingDesign{list=Topics.all}

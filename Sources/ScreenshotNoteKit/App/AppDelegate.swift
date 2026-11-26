@@ -17,6 +17,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
  /// Hotové video čeká na kontext a doručení do konceptu; snímek ani nový záznam zatím ne.
  private var deliveringRecording=false
  func applicationDidFinishLaunching(_ notification:Notification){
+  // Průvodce se rozhoduje před zafixováním staré složky, ta by jinak vypadala jako stávající instalace.
+  let automated=CommandLine.arguments.dropFirst().contains(where:{$0.hasPrefix("--")})
+  let showGuide=CommandLine.arguments.contains("--onboarding") || (!automated && !isExportingDesign && Onboarding.pending())
+  if !automated{pinLegacyDestination()}
   installEditingMenu()
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   CloudLibrary.shared.onEditConflict={id,fields in CloudFolders.shared.keepLocalEdit(id,fields)}
@@ -85,12 +89,25 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
   recording.onFinish={[weak self] result in self?.recordingFinished(result)}
   let errors=CommandLine.arguments.contains("--preview-test") ? [] : hotkeys.register();if !errors.isEmpty{DispatchQueue.main.async{showError(errors.joined(separator:"\n"))}}
   DistributedNotificationCenter.default().addObserver(self,selector:#selector(external(_:)),name:NSNotification.Name("cz.janprasil.screenshotnote.capture"),object:nil)
-  // První spuštění: nabídka zkratek (ne v testech a automatických bězích s přepínači).
-  if !CommandLine.arguments.dropFirst().contains(where:{$0.hasPrefix("--")}),!isExportingDesign{DispatchQueue.main.asyncAfter(deadline:.now()+1){[weak self] in guard let self else{return};MainActor.assumeIsolated{offerSystemShortcuts(self.hotkeys)}}}
+  settings.showGuide={[weak self] in self?.onboarding.show(at:.welcome)}
+  // Průvodce prvním spuštěním (ne v testech a automatických bězích s přepínači); --onboarding ho vynutí.
+  if showGuide{DispatchQueue.main.asyncAfter(deadline:.now()+0.6){[weak self] in self?.onboarding.show()}}
   if CommandLine.arguments.contains("--preview-test"){previewTest()}
   else if CommandLine.arguments.contains("--capture"){DispatchQueue.main.asyncAfter(deadline:.now()+0.3){self.capture(full:CommandLine.arguments.contains("--fullscreen"))}}
  }
  @objc func external(_ notification:Notification){capture(full:notification.object as? String == "full")}
+ lazy var onboarding:Onboarding={
+  let guide=Onboarding(hotkeys:hotkeys)
+  guide.manageFolders={[weak self] in self?.settings.topicSettings.show()}
+  guide.onFinish={[weak self] capture in
+   guard let self else{return}
+   // Dialogy složek čekaly na konec průvodce; s prvním snímkem počkají na zavření poznámky.
+   if capture{DispatchQueue.main.asyncAfter(deadline:.now()+0.3){self.capture(full:false)}}else{self.nextFolderRefresh = .distantPast;self.refreshCloudFolders()}
+  }
+  return guide
+ }()
+ /// Dialogy synchronizace složek se neukazují přes jiné modální okno ani během průvodce.
+ var dialogsAllowed:Bool{NSApp.modalWindow==nil && !onboarding.isVisible}
  func refreshCloudFolders(){
   CloudFolders.shared.activate(CloudLibrary.shared.connection)
   guard Date()>=nextFolderRefresh,!CloudFolders.shared.syncing else{return};nextFolderRefresh=Date().addingTimeInterval(60)
@@ -104,19 +121,19 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
    // Po chybě složky počkají na Retry-After nebo rostoucí odstup.
    if Date()>=CloudFolders.shared.retryAt{await CloudFolders.shared.refresh(library.connection)}
    await TemplateDefaults.shared.refresh()
-   if NSApp.modalWindow==nil{await FolderDialogs.resolveHeld()}
-   if NSApp.modalWindow==nil{await FolderDialogs.confirmDeletes()}
-   if self.composer==nil,NSApp.modalWindow==nil{await FolderDialogs.resolveMissing()}
-   if self.composer==nil,NSApp.modalWindow==nil{FolderDialogs.resolveDeleted()}
-   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.offerRepair()}
-   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil{await FolderDialogs.mapUnmapped()}
+   if self.dialogsAllowed{await FolderDialogs.resolveHeld()}
+   if self.dialogsAllowed{await FolderDialogs.confirmDeletes()}
+   if self.composer==nil,self.dialogsAllowed{await FolderDialogs.resolveMissing()}
+   if self.composer==nil,self.dialogsAllowed{FolderDialogs.resolveDeleted()}
+   if self.composer==nil,self.dialogsAllowed,CloudFolders.shared.lastError==nil{await FolderDialogs.offerRepair()}
+   if self.composer==nil,self.dialogsAllowed,CloudFolders.shared.lastError==nil{await FolderDialogs.mapUnmapped()}
    // Po každém připojení Macu nabídne nahrání lokálních složek; bez tarifu počká, až bude aktivní.
-   if self.composer==nil,NSApp.modalWindow==nil,CloudFolders.shared.lastError==nil,!FolderTransfers.shared.busy,CloudFolders.shared.canMoveToCloud,let c=CloudLibrary.shared.connection,let owner=c.ownerID,!Topics.local.isEmpty {
+   if self.composer==nil,self.dialogsAllowed,CloudFolders.shared.lastError==nil,!FolderTransfers.shared.busy,CloudFolders.shared.canMoveToCloud,let c=CloudLibrary.shared.connection,let owner=c.ownerID,!Topics.local.isEmpty {
     let key="folder-transfer-offer:"+sessionFingerprint(Data((c.endpoint+owner.uuidString+c.id.uuidString).utf8))
     if !UserDefaults.standard.bool(forKey:key) {
      let local=Topics.local
      let answer=FolderListDialog().run(title:L("Synchronizovat lokální složky s cloudem?"),message:L("Vybrané složky se nahrají do cloudu a budou dostupné na webu i dalších zařízeních. U shodných názvů vybereš sloučení nebo přejmenování. Místní soubory zůstanou zachované."),
-      folders:local.map(\.displayName),checkboxes:true,buttons:[L("Synchronizovat"),L("Teď ne")])
+      folders:local,checkboxes:true,buttons:[L("Synchronizovat"),L("Teď ne")])
      UserDefaults.standard.set(true,forKey:key)
      let chosen=zip(local,answer.checked).filter{$0.1}.map(\.0)
      if answer.choice == 0,!chosen.isEmpty{await FolderDialogs.move(chosen,confirm:false)}

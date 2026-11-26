@@ -36,7 +36,14 @@ func serverTitle(_ title:String)->String {
 }
 let fm = FileManager.default
 let draftRoot = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Screenshot Note/Draft", isDirectory: true)
-var destination: URL { URL(fileURLWithPath: UserDefaults.standard.string(forKey:"destination") ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshot Note").path, isDirectory:true) }
+var destination: URL { URL(fileURLWithPath: UserDefaults.standard.string(forKey:"destination") ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents/ScreenshotNote/Default").path, isDirectory:true) }
+/// Dřívější výchozí složka; instalace, které ji už používají, si ji ponechají.
+let legacyDestination = fm.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshot Note", isDirectory:true)
+/// Stávající instalace bez uložené cesty a složek zůstane u staré výchozí složky, pokud na disku existuje.
+func pinLegacyDestination(_ defaults:UserDefaults = .standard, legacy:URL = legacyDestination) {
+ guard defaults.object(forKey:"destination") == nil, defaults.data(forKey:"topics") == nil, fm.fileExists(atPath:legacy.path) else { return }
+ defaults.set(legacy.path, forKey:"destination")
+}
 func readDraft(_ root: URL) throws -> Draft {
  let file = root.appendingPathComponent("draft.json")
  guard fm.fileExists(atPath:file.path) else { return Draft(images:[], comment:"") }

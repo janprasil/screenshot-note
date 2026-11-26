@@ -1530,7 +1530,7 @@ final class CloudFolders {
   try? fm.createDirectory(at:assets,withIntermediateDirectories:true)
   for image in record.images where !image.contains("/") && fm.fileExists(atPath:source.appendingPathComponent(image).path) {
    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
-   let name=uniqueName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
+   let name=mergedName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
    for (from,to) in zip([source.appendingPathComponent(image)]+assetContextFiles(source,image)+assetVideoFiles(source,image),[assets.appendingPathComponent(name)]+assetContextFiles(assets,name)+assetVideoFiles(assets,name)) where fm.fileExists(atPath:from.path){try? fm.moveItem(at:from,to:to)}
    if name != image{renamed[image]=name}
   }
@@ -1787,7 +1787,7 @@ extension CloudFolders {
    let directory=record.directory,markdown=URL(fileURLWithPath:record.file).lastPathComponent
    guard fm.fileExists(atPath:directory.path) else{return nil}
    if SessionIndex.key(directory.deletingLastPathComponent())==SessionIndex.key(target){return record}
-   let destination=target.appendingPathComponent(uniqueName(directory.lastPathComponent){fm.fileExists(atPath:target.appendingPathComponent($0).path)},isDirectory:true)
+   let destination=target.appendingPathComponent(mergedName(directory.lastPathComponent){fm.fileExists(atPath:target.appendingPathComponent($0).path)},isDirectory:true)
    guard (try? fm.moveItem(at:directory,to:destination)) != nil else{return nil}
    var next=record;next.file=SessionIndex.key(destination.appendingPathComponent(markdown));next.inode=itemIdentity(destination);index.put(next);return next
   }
@@ -1795,7 +1795,7 @@ extension CloudFolders {
   guard fm.fileExists(atPath:markdown.path) else{return nil}
   if SessionIndex.key(markdown.deletingLastPathComponent()) != SessionIndex.key(target) {
    let stem=markdown.deletingPathExtension().lastPathComponent
-   let destination=target.appendingPathComponent(uniqueName(stem){fm.fileExists(atPath:target.appendingPathComponent($0+".md").path)}+".md")
+   let destination=target.appendingPathComponent(mergedName(stem){fm.fileExists(atPath:target.appendingPathComponent($0+".md").path)}+".md")
    guard (try? fm.moveItem(at:markdown,to:destination)) != nil else{return nil}
    if let hash=next.files.removeValue(forKey:markdown.lastPathComponent){next.files[destination.lastPathComponent]=hash}
    markdown=destination;next.file=SessionIndex.key(destination)
@@ -1805,7 +1805,7 @@ extension CloudFolders {
    let sourceAssets=from.appendingPathComponent("assets"),targetAssets=target.appendingPathComponent("assets"),own=Set(ownImages(record,container:from))
    for image in record.images where fm.fileExists(atPath:sourceAssets.appendingPathComponent(image).path) {
     let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
-    let name=uniqueName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:targetAssets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
+    let name=mergedName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:targetAssets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
     let sources=[sourceAssets.appendingPathComponent(image)]+assetContextFiles(sourceAssets,image)+assetVideoFiles(sourceAssets,image)
     let targets=[targetAssets.appendingPathComponent(name)]+assetContextFiles(targetAssets,name)+assetVideoFiles(targetAssets,name)
     try? fm.createDirectory(at:targetAssets,withIntermediateDirectories:true)

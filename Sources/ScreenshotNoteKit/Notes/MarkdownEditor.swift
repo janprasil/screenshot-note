@@ -65,11 +65,16 @@ final class MarkdownEditor:NSObject,NSWindowDelegate {
  /// Editor s více záložkami, třeba šablona relace a šablona souboru.
  func run(title:String,tabs:[(title:String,text:String,hint:String)],selected:Int=0,apply:String?=nil,present:Bool=true)->[String]? {
   self.tabs=tabs;selectedTab=selected;build(tabs[selected].text,title:title,hint:tabs[selected].hint,apply:apply,present:present)
-  let width:CGFloat=170
-  for (i,tab) in tabs.enumerated().reversed(){
-   let button=styledButton(tab.title,role:i==selected ? .selected:.quiet,frame:NSRect(x:772-CGFloat(tabs.count-i)*(width+6)+6,y:580,width:width,height:32),target:self,action:#selector(switchTab(_:)))
-   button.tag=i;button.autoresizingMask=[.minXMargin,.minYMargin];window.contentView!.addSubview(button);tabButtons.insert(button,at:0)
+  // Záložky pod nadpisem: text s podtržením vybrané, linka přes celou šířku.
+  let strip=NSView(frame:NSRect(x:28,y:540,width:744,height:34));strip.autoresizingMask=[.width,.minYMargin];window.contentView!.addSubview(strip)
+  strip.addSubview(DesignDivider(NSRect(x:0,y:0,width:744,height:1)));strip.subviews.last?.autoresizingMask=[.width]
+  var x:CGFloat=0
+  for (i,tab) in tabs.enumerated(){
+   let width=ceil((tab.title as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.semibold)]).width)+28
+   let button=styledButton(tab.title,role:.quiet,frame:NSRect(x:x,y:2,width:width,height:30),target:self,action:#selector(switchTab(_:)))
+   button.tag=i;button.setAccessibilityRole(.radioButton);strip.addSubview(button);tabButtons.append(button);x+=width+4
   }
+  tabLine=DesignSurface(frame:.zero,fill:AppPalette.accent,radius:1);strip.addSubview(tabLine!);markTab(selected)
   guard present else{return nil}
   if isExportingDesign{exportDesignWindow(window,name:"template-tabs");return nil}
   NSApp.runModal(for:window);window.orderOut(nil);guard accepted else{return nil}
@@ -80,18 +85,26 @@ final class MarkdownEditor:NSObject,NSWindowDelegate {
   guard tabs.indices.contains(index),index != selectedTab else{return}
   tabs[selectedTab].text=text.string;selectedTab=index
   text.string=tabs[index].text;text.renderMarkdown();hintLabel.stringValue=tabs[index].hint
-  for (i,button) in tabButtons.enumerated(){button.role=i==index ? .selected:.quiet;button.needsDisplay=true}
+  markTab(index)
   window.makeFirstResponder(text)
+ }
+ private var tabLine:DesignSurface?
+ /// Vybraná záložka: zvýrazněný text a čára pod ní.
+ private func markTab(_ index:Int) {
+  for (i,button) in tabButtons.enumerated(){button.tabInk=i==index ? AppPalette.accent:AppPalette.secondary;button.setAccessibilityValue(i==index ? 1:0);button.needsDisplay=true}
+  if tabButtons.indices.contains(index){let frame=tabButtons[index].frame;tabLine?.frame=NSRect(x:frame.minX+8,y:0,width:frame.width-16,height:2)}
  }
  private func build(_ initial:String,title:String?,hint:String?,apply applyTitle:String?,present:Bool=true){
   window=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:800,height:640),styleMask:[.titled,.closable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false);window.title=L("Komentář");window.minSize=NSSize(width:650,height:460);window.delegate=self
-  let view=installDesignRoot(window,headerHeight:154,showClose:false)
-  let heading=designLabel(title ?? L("Komentář"),NSRect(x:28,y:580,width:tabs.isEmpty ? 744:360,height:32),size:24,weight:.semibold);heading.autoresizingMask=[.minYMargin];view.addSubview(heading)
-  hintLabel=designLabel(hint ?? L("Markdown se formátuje přímo při psaní."),NSRect(x:28,y:553,width:744,height:22),size:12,color:AppPalette.secondary);hintLabel.autoresizingMask=[.minYMargin];view.addSubview(hintLabel)
-  let toolbar=DesignSurface(frame:NSRect(x:28,y:499,width:744,height:42),fill:AppPalette.accent.withAlphaComponent(0.085),radius:9);toolbar.autoresizingMask=[.width,.minYMargin];view.addSubview(toolbar)
+  // Se záložkami je pod nadpisem řada záložek; obsah se posune níž.
+  let shift:CGFloat=tabs.isEmpty ? 0:40
+  let view=installDesignRoot(window,headerHeight:154+shift,showClose:false)
+  let heading=designLabel(title ?? L("Komentář"),NSRect(x:28,y:580,width:744,height:32),size:24,weight:.semibold);heading.autoresizingMask=[.minYMargin];view.addSubview(heading)
+  hintLabel=designLabel(hint ?? L("Markdown se formátuje přímo při psaní."),NSRect(x:28,y:553-shift,width:744,height:22),size:12,color:AppPalette.secondary);hintLabel.autoresizingMask=[.minYMargin];view.addSubview(hintLabel)
+  let toolbar=DesignSurface(frame:NSRect(x:28,y:499-shift,width:744,height:42),fill:AppPalette.accent.withAlphaComponent(0.085),radius:9);toolbar.autoresizingMask=[.width,.minYMargin];view.addSubview(toolbar)
   let tools=[("textformat.size",L("Nadpis")),("bold",L("Tučné písmo")),("italic",L("Kurzíva")),("list.bullet",L("Seznam")),("link",L("Odkaz")),("chevron.left.forwardslash.chevron.right",L("Kód"))]
   for(i,tool) in tools.enumerated(){let button=styledButton("",symbol:tool.0,role:.quiet,frame:NSRect(x:5+CGFloat(i)*42,y:5,width:34,height:32),target:self,action:#selector(format));button.tag=i;button.toolTip=tool.1;toolbar.addSubview(button)}
-  let scroll=NSScrollView(frame:NSRect(x:28,y:82,width:744,height:387));scroll.hasVerticalScroller=true;scroll.borderType = .noBorder;scroll.backgroundColor=AppPalette.paper;scroll.autoresizingMask=[.width,.height];scroll.wantsLayer=true;scroll.layer?.cornerRadius=10
+  let scroll=NSScrollView(frame:NSRect(x:28,y:82,width:744,height:387-shift));scroll.hasVerticalScroller=true;scroll.borderType = .noBorder;scroll.backgroundColor=AppPalette.paper;scroll.autoresizingMask=[.width,.height];scroll.wantsLayer=true;scroll.layer?.cornerRadius=10
   text=LiveMarkdownView(frame:NSRect(x:0,y:0,width:scroll.contentSize.width,height:scroll.contentSize.height));text.backgroundColor=AppPalette.paper;text.textContainerInset=NSSize(width:28,height:25);text.isVerticallyResizable=true;text.isHorizontallyResizable=false;text.autoresizingMask=[.width];text.textContainer?.widthTracksTextView=true;text.textContainer?.containerSize=NSSize(width:scroll.contentSize.width,height:CGFloat.greatestFiniteMagnitude);text.string=initial;scroll.documentView=text;view.addSubview(scroll);text.renderMarkdown()
   view.addSubview(DesignDivider(NSRect(x:28,y:66,width:744,height:1)))
   let cancel=styledButton(L("Zrušit"),role:.quiet,frame:NSRect(x:28,y:22,width:90,height:34),target:self,action:#selector(cancel));cancel.keyEquivalent="\u{1b}";view.addSubview(cancel)

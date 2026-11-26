@@ -28,6 +28,8 @@ final class DesignDivider:DesignSurface {
 class AppButton:NSButton {
  enum Role{case primary,secondary,quiet,success,selected}
  var role:Role = .secondary
+ // Barva textu záložky (vybraná akcent, ostatní tlumená); nil = podle role.
+ var tabInk:NSColor?
  var hovered=false;private var tracking:NSTrackingArea?
  override func updateTrackingAreas(){super.updateTrackingAreas();if let area=tracking{removeTrackingArea(area)};let area=NSTrackingArea(rect:.zero,options:[.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self,userInfo:nil);tracking=area;addTrackingArea(area)}
  override func resetCursorRects(){super.resetCursorRects();if isEnabled{addCursorRect(bounds,cursor:.pointingHand)}}
@@ -42,7 +44,7 @@ class AppButton:NSButton {
   else if role == .selected{AppPalette.paper.setFill();p.fill();AppPalette.stroke.setStroke();p.lineWidth=1;p.stroke()}
   else if role == .success{AppPalette.success.withAlphaComponent(isHighlighted ? 0.24:(hovered ? 0.18:0.13)).setFill();p.fill()}
   else if role == .secondary || hovered || isHighlighted{AppPalette.raised.withAlphaComponent(isHighlighted ? 0.6:1).setFill();p.fill()}
-  let ink: NSColor = !isEnabled ? .tertiaryLabelColor:(active ? NSColor.white:(role == .success ? AppPalette.success:AppPalette.text))
+  let ink: NSColor = !isEnabled ? .tertiaryLabelColor:(tabInk ?? (active ? NSColor.white:(role == .success ? AppPalette.success:AppPalette.text)))
   let font=NSFont.systemFont(ofSize:13,weight:.medium);let attrs:[NSAttributedString.Key:Any]=[.font:font,.foregroundColor:ink]
   let textSize=(title as NSString).size(withAttributes:attrs)
   let hasImage=image != nil && imagePosition != .noImage;let hasText = !title.isEmpty && imagePosition != .imageOnly

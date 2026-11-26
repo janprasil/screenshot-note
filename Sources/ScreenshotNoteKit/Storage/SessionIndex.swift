@@ -186,6 +186,13 @@ func uniqueName(_ name:String,taken:(String)->Bool)->String {
  var n=1
  while true{let candidate=n==1 ? name:name+" \(n)";if !taken(candidate){return candidate};n+=1}
 }
+/// Název při sloučení podsložek: obsazený dostane „ (n)“ s nejnižším volným n ≥ 1.
+func mergedName(_ name:String,taken:(String)->Bool)->String {
+ if !taken(name){return name}
+ var n=1
+ while taken(name+" (\(n))"){n+=1}
+ return name+" (\(n))"
+}
 func parseServerDate(_ raw:String?)->Date? {
  guard var value=raw?.trimmingCharacters(in:.whitespaces),!value.isEmpty else{return nil}
  value=value.replacingOccurrences(of:" ",with:"T").replacingOccurrences(of:"\\.[0-9]+",with:"",options:.regularExpression)

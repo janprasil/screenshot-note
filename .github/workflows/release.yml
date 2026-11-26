@@ -119,10 +119,11 @@ jobs:
           ln -s /Applications staging-app/Applications
           ditto "$APP" "$app"
           python3 scripts/configure-build.py "$app/Contents/Info.plist"
-          # Bez hardened runtime: ad-hoc appka by jinak odmítla ad-hoc Sparkle.framework.
-          codesign --force --sign - "$app"
+          # Stejný podpis jako build.sh: hardened runtime s výjimkou pro ad-hoc Sparkle.framework.
+          codesign --force --options runtime --entitlements scripts/adhoc.entitlements --sign - "$app"
           codesign --verify --strict --deep "$app"
           "$app/Contents/MacOS/ScreenshotNote" --language-check
+          DYLD_INSERT_LIBRARIES=/nonexistent/inject.dylib "$app/Contents/MacOS/ScreenshotNote" --language-check
           hdiutil create -volname "Screenshot Note (staging)" -srcfolder staging-app -ov -format UDZO staging/Screenshot-Note-staging.dmg
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: actions/upload-artifact@v7

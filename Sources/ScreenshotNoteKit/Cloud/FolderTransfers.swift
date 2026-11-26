@@ -238,7 +238,7 @@ enum FolderDialogs {
   let candidates=folders.repairCandidates.filter{!declined.contains($0.id)}
   guard !candidates.isEmpty else{return}
   let answer=FolderListDialog().run(title:L("Znovu propojit složky s cloudem?"),message:L("Tyto lokální složky dřív patřily do cloudu tohoto účtu. Místní relace se nahrají, cloudové se stáhnou a rozdílné verze se uloží vedle jako _cloud.md."),
-   folders:candidates.map(\.displayName),checkboxes:true,buttons:[L("Propojit"),L("Teď ne")])
+   folders:candidates,checkboxes:true,buttons:[L("Propojit"),L("Teď ne")])
   let accepted=answer.choice == 0
   var rejected=declined
   for (topic,checked) in zip(candidates,answer.checked) {
@@ -287,7 +287,7 @@ enum FolderDialogs {
   }
   guard unmapped.contains(where:{!dismissed.contains($0.cloudFolderID!)}) else{return}
   let answer=FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),
-   folders:unmapped.map(\.displayName),checkboxes:false,buttons:[L("Jedna nadřazená složka…"),L("Každou zvlášť…"),L("Později")])
+   folders:unmapped,checkboxes:false,buttons:[L("Jedna nadřazená složka…"),L("Každou zvlášť…"),L("Později")])
   var mapped=false
   switch answer.choice {
   case 0:

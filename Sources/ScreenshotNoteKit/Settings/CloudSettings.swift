@@ -30,7 +30,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
  init(library: CloudLibrary? = nil) { suppliedLibrary=library;super.init() }
 
  func show() {
-  if let window { refresh(); startPolling(); presentScreenshotPanel(window); return }
+  if let window { refresh(); startPolling(); presentAppWindow(window); return }
   let panel = ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:380),styleMask:[.nonactivatingPanel],backing:.buffered,defer:false)
   panel.isReleasedWhenClosed=false;panel.delegate=self;window=panel
   let view=installDesignRoot(panel,headerHeight:92)
@@ -59,7 +59,7 @@ final class CloudSettings: NSObject, NSWindowDelegate {
   parked=styledButton(L("Odložené…"),role:.primary,frame:.zero,target:self,action:#selector(resolveParked))
   for b in [connectButton!,forget!,retry!,browser!,cancel!,held!,parked!] { view.addSubview(b) }
   library.didChange={ [weak self] in self?.refresh() }
-  refresh();startPolling();presentScreenshotPanel(panel)
+  refresh();startPolling();presentAppWindow(panel)
  }
  private func startPolling() {
   timer?.invalidate()

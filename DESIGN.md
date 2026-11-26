@@ -10,6 +10,8 @@ A calm, native Mac workspace for collecting visual context. Screenshots provide 
 - Configurations: a persistent sidebar and a single details form. No repeated card containers.
 - Team folders: shown as `<Team> · <Folder>` with the `person.2` SF Symbol (15 pt, same tint as cloud folders) in the sidebar and as a template image in the folder picker. For a member, the folder name, description, mode, file and template controls are disabled and the pencil and delete actions are hidden; only the local directory stays editable, explained by the sync caption.
 - Cloud Library: team uploads that lost access or role land in the shared „Set Aside…“ list (Try Again, Save Locally, Discard) like other parked items; there is no separate blocked button.
+- First-run guide: one window with six steps (welcome, permissions, shortcuts, Cloud Library, default folder, finish), step dots in the footer, Back on the left and the main action on the right. Permission rows show a Required/Optional pill and turn into a green “Allowed” state live. It resumes at the saved step after a relaunch and can be reopened from Settings.
+- Folder lists in sync dialogs: one bordered card, each row with a storage icon badge, the folder name and its storage kind (team, personal cloud, this Mac only) underneath.
 - Settings: three plain rows for configurations, shortcuts and login behavior.
 - Annotation editor: one icon toolbar, neutral image canvas and a common action row.
 - Markdown editor: a restrained formatting toolbar and an uncluttered writing surface.
@@ -30,7 +32,7 @@ Text uses system semantic colors, not frozen RGB values. System SF typography: 2
 
 ## Interaction
 
-Panels continue to work above fullscreen apps. The interface uses brief entrance fades, compact/expand transitions and save confirmation fades. Reduce Motion is respected. Hover states, tooltips and semantic selection distinguish controls without adding constant chrome. Existing keyboard shortcuts and single-line/Markdown comment behavior remain intact.
+The session window and its editors float on every Space and above fullscreen apps. Settings, Cloud Library, About, the first-run guide and folder dialogs are ordinary windows (so system permission prompts stay on top); they float only while a session window is open, to stay above it. The interface uses brief entrance fades, compact/expand transitions and save confirmation fades. Reduce Motion is respected. Hover states, tooltips and semantic selection distinguish controls without adding constant chrome. Existing keyboard shortcuts and single-line/Markdown comment behavior remain intact.
 
 ## Verification
 

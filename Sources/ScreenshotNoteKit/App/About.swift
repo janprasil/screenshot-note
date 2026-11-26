@@ -4,7 +4,7 @@ final class AboutController:NSObject {
  static let shared=AboutController()
  var window:NSWindow?
  @objc func show(){
-  if let existing=window{presentScreenshotPanel(existing);return}
+  if let existing=window{presentAppWindow(existing);return}
   let panel=ScreenshotPanel(contentRect:NSRect(x:0,y:0,width:580,height:550),styleMask:[.titled,.closable,.nonactivatingPanel],backing:.buffered,defer:false)
   panel.title=L("O aplikaci");panel.isReleasedWhenClosed=false;window=panel
   let view=installDesignRoot(panel,headerHeight:220)
@@ -27,7 +27,7 @@ final class AboutController:NSObject {
   view.addSubview(DesignDivider(NSRect(x:28,y:78,width:524,height:1)))
   view.addSubview(designLabel("Swift & AppKit · macOS 13+",NSRect(x:28,y:31,width:360,height:22),size:11,color:AppPalette.secondary))
   let done=styledButton(L("Hotovo"),role:.primary,frame:NSRect(x:432,y:24,width:120,height:34),target:self,action:#selector(close));done.keyEquivalent="\r";view.addSubview(done)
-  presentScreenshotPanel(panel)
+  presentAppWindow(panel)
  }
  @objc func close(){window?.orderOut(nil)}
 }

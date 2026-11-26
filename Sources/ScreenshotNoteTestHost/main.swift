@@ -531,6 +531,8 @@ if CommandLine.arguments.contains("--self-test") {
  print("PASS: Czech/English system-language resolution, complete translation catalogs, bilingual Markdown discovery and unchanged user content")
  try updateTests()
  print("PASS: updater starts only in production builds with an HTTPS feed and public key, never in tests; release candidates are opt-in")
+ try onboardingTests()
+ print("PASS: first-run guide shows only on a fresh install or an unfinished guide; existing installs are marked done")
  let manyRoot=root.appendingPathComponent("many");try fm.createDirectory(at:manyRoot,withIntermediateDirectories:true)
  let customDestination=manyRoot.appendingPathComponent("output")
  var customTopic=topic;customTopic.folder=customDestination.path;customTopic.combined=true;customTopic.combinedFile="All.md";customTopic.markdownTemplate="{text}\n\n### {title}\n\n{screenshots}\n";customTopic.combinedTemplate="{sessions}"

@@ -108,27 +108,6 @@ func macShortcutsTakenOver()->Bool{usesMacShortcuts() || SystemScreenshotShortcu
  }
 }
 
-/// Při prvním spuštění nabídne převzít systémové zkratky pro snímky (⇧⌘4, ⇧⌘3, ⇧⌘5); jinak vysvětlí výchozí zkratky aplikace.
-@MainActor func offerSystemShortcuts(_ hotkeys:Hotkeys){
- let done="shortcutOnboardingDone",defaults=UserDefaults.standard
- guard !defaults.bool(forKey:done) else{return}
- defaults.set(true,forKey:done)
- // Jen nová instalace: kdo už má zkratky nebo složky, dialog nedostane (i s výchozími zkratkami).
- let existing=["topics","destination","defaultTopic","lastTopic"].contains{defaults.object(forKey:$0) != nil}
- guard !existing,!(1...3).contains(where:{defaults.data(forKey:"shortcut\($0)") != nil}) else{return}
- NSApp.activate(ignoringOtherApps:true)
- let alert=NSAlert();alert.messageText=L("Nahradit systémové zkratky pro snímky?")
- alert.informativeText=L("Screenshot Note může používat ⇧⌘4 pro výřez, ⇧⌘3 pro celou obrazovku a ⇧⌘5 pro záznam videa. Systémové zkratky pro snímky přitom vypneme; vrátit je můžeš v Nastavení → Klávesové zkratky.")
- alert.addButton(withTitle:L("Nahradit"));alert.addButton(withTitle:L("Ponechat výchozí"))
- if alert.runModal() == .alertFirstButtonReturn {
-  applyMacShortcuts(hotkeys)
- } else {
-  let info=NSAlert();info.messageText=L("Výchozí zkratky Screenshot Note")
-  info.informativeText=LF("%@ výřez, %@ celá obrazovka, %@ záznam videa. Změníš je v Nastavení → Klávesové zkratky.",Shortcut.load(1).display,Shortcut.load(2).display,Shortcut.load(3).display)
-  info.addButton(withTitle:L("Rozumím"));info.runModal()
- }
-}
-
 final class Hotkeys {
  var refs:[EventHotKeyRef]=[];var handler:EventHandlerRef?;var callback:((Int)->Void)?
  private var monitor:Any?;private var registered=Set<Int>();private var lastTrigger:(Int,TimeInterval)?

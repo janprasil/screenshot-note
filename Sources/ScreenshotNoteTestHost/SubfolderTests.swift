@@ -78,6 +78,8 @@ import AppKit
  for good in ["Sprint 1","Bugy","Ž","a.b"]{assert(validSubfolderName(good),good)}
  for bad in [""," Sprint","Sprint ",".skryté","assets","ASSETS","a/b","a\\b","a:b","a*b","a?b","a\"b","a<b","a>b","a|b","a\u{7}b","Rodic\u{30C}",String(repeating:"x",count:101),String(repeating:"ž",count:128)]{assert(!validSubfolderName(bad),bad)}
  assert(cleanSubfolderName(" Rodic\u{30C} ")=="Rodič" && subfolderNameKey("SPRINT")==subfolderNameKey("sprint"))
+ // Kolize při sloučení: nejnižší volné (n) od 1.
+ assert(mergedName("a"){_ in false}=="a" && mergedName("a"){["a"].contains($0)}=="a (1)" && mergedName("a"){["a","a (1)","a (3)"].contains($0)}=="a (2)")
  let a1=UUID(),a2=UUID(),deep=UUID()
  let tree=validSubfolderTree([CloudSubfolder(id:a1,parent:nil,name:"A",revision:"1"),CloudSubfolder(id:a2,parent:a1,name:"B",revision:"1"),CloudSubfolder(id:deep,parent:a2,name:"C",revision:"1"),CloudSubfolder(id:UUID(),parent:nil,name:"a",revision:"1"),CloudSubfolder(id:UUID(),parent:nil,name:"assets",revision:"1")])
  assert(tree.map(\.name)==["A","B"] && orderedSubfolders(tree).map{$0.1}==[0,1])

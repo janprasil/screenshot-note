@@ -33,6 +33,8 @@ struct SessionRecord:Codable,Equatable {
  var author:String? = nil;var authorID:String? = nil
  // Smazání cizí relace v týmové složce zůstalo jen na tomto Macu; znovu se neposílá.
  var keptLocal:Bool? = nil
+ // Umístění podle serveru: podsložka (nil = kořen složky) a její revize.
+ var subfolder:String? = nil;var location:String? = nil
  var isCloud:Bool{base != nil}
  // Cloudové relace a rozpracovaná mazání se z indexu nikdy nevyřazují.
  var pinned:Bool{isCloud || trashed==true || missingSince != nil || held==true || askDelete==true || confirmed==true}
@@ -40,7 +42,7 @@ struct SessionRecord:Codable,Equatable {
 }
 final class SessionIndex {
  static var shared=SessionIndex()
- private struct Store:Codable{var version=1;var records:[SessionRecord]=[];var generated:[String:String]=[:];var migrated:[String]=[];var roots:[String:String]? = nil}
+ private struct Store:Codable{var version=1;var records:[SessionRecord]=[];var generated:[String:String]=[:];var migrated:[String]=[];var roots:[String:String]? = nil;var subfolders:[String:SubfolderLink]? = nil}
  let file:URL
  private var loaded:Store?
  private var depth=0,dirty=false
@@ -124,9 +126,25 @@ final class SessionIndex {
  func root(_ url:URL)->String?{store.roots?[Self.key(url)]}
  func clearRoot(_ url:URL){var value=store;guard value.roots?[Self.key(url)] != nil else{return};value.roots?[Self.key(url)]=nil;store=value}
  func setRoot(_ url:URL,_ identity:String){var value=store;var roots=value.roots ?? [:];guard roots[Self.key(url)] != identity else{return};roots[Self.key(url)]=identity;value.roots=roots;store=value}
+ /// Adresář podsložky podle ID (klíč kořen|id); identita pozná přejmenování i přesun.
+ func subfolderLinks(base:URL)->[UUID:SubfolderLink]{let prefix=Self.key(base)+"|";return Dictionary((store.subfolders ?? [:]).compactMap{key,value in key.hasPrefix(prefix) ? UUID(uuidString:String(key.dropFirst(prefix.count))).map{($0,value)}:nil},uniquingKeysWith:{a,_ in a})}
+ func setSubfolderLink(base:URL,_ id:UUID,_ link:SubfolderLink?){var value=store;var all=value.subfolders ?? [:];let key=Self.key(base)+"|"+id.uuidString.lowercased();guard all[key] != link else{return};all[key]=link;value.subfolders=all.isEmpty ? nil:all;store=value}
+ /// Přejmenovaný adresář: cesty záznamů, vygenerovaných souborů a vnořených podsložek pod ním se přepíšou.
+ func movePaths(from old:String,to new:String) {
+  guard old != new else{return}
+  var value=store;let prefix=old+"/"
+  func moved(_ path:String)->String{path==old ? new:path.hasPrefix(prefix) ? new+path.dropFirst(old.count):path}
+  for i in value.records.indices{value.records[i].file=moved(value.records[i].file);value.records[i].away=value.records[i].away.map(moved);value.records[i].trashNote=value.records[i].trashNote.map(moved)}
+  value.generated=Dictionary(value.generated.map{(moved($0.key),$0.value)},uniquingKeysWith:{a,_ in a})
+  if let links=value.subfolders{value.subfolders=links.mapValues{SubfolderLink(path:moved($0.path),inode:$0.inode)}}
+  store=value
+ }
  func isMigrated(_ url:URL)->Bool{store.migrated.contains(Self.key(url))}
  func markMigrated(_ url:URL){var value=store;let key=Self.key(url);if !value.migrated.contains(key){value.migrated.append(key);if value.migrated.count>2000{value.migrated.removeFirst()}};store=value}
 }
+
+/// Místní adresář podsložky: poslední cesta a identita.
+struct SubfolderLink:Codable,Equatable{var path:String;var inode:String?}
 
 // Sekundární identita v rozšířeném atributu; editory ho mohou zahodit.
 let sessionTagName="cz.janprasil.screenshotnote.session"

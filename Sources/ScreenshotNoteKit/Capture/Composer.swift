@@ -97,6 +97,8 @@ final class Composer:NSObject,NSWindowDelegate {
  var childEditorOpen=false
  let sessionPicker=NSPopUpButton();var previousChoices:[PreviousSession]=[]
  var selectionText:[String:(String,String)]=[:]
+ // Podsložka nové relace vedle výběru složky.
+ let subfolderLink=ContextLinkButton();private var subfolderTopicID:String?
 
 
  init(draft:Draft,root:URL){self.draft=draft;self.root=root;if self.draft.topic == nil{self.draft.topic=Topics.initialTopic}}
@@ -105,7 +107,7 @@ final class Composer:NSObject,NSWindowDelegate {
   let view=installDesignRoot(window,headerHeight:108,showClose:false)
   titleField.frame=NSRect(x:26,y:500,width:692,height:44);titleField.isBordered=false;titleField.drawsBackground=false;titleField.font = .systemFont(ofSize:27,weight:.semibold);titleField.textColor = .labelColor;titleField.placeholderString=L("Nadpis poznámky");titleField.stringValue=draft.title ?? "";view.addSubview(titleField)
   let collapse=styledButton("",symbol:"arrow.down.right.and.arrow.up.left",role:.quiet,frame:NSRect(x:736,y:506,width:36,height:34),target:self,action:#selector(toggleCompact));collapse.toolTip=L("Sbalit poznámku a prohlédnout si okno pod ní");view.addSubview(collapse)
-  for (button,symbol,x,width,action) in [(topicLink,"folder",CGFloat(28),CGFloat(400),#selector(chooseConfiguration))]{
+  for (button,symbol,x,width,action) in [(topicLink,"folder",CGFloat(28),CGFloat(400),#selector(chooseConfiguration)),(subfolderLink,"arrow.turn.down.right",CGFloat(0),CGFloat(200),#selector(chooseSubfolder))]{
    button.role = .quiet;button.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);button.imagePosition = .imageLeading;button.target=self;button.action=action;button.frame=NSRect(x:x,y:430,width:width,height:36);view.addSubview(button)
   }
   let add=addShotButton;add.title=L("Přidat výřez");add.image=NSImage(systemSymbolName:"plus.viewfinder",accessibilityDescription:nil);add.imagePosition = .imageLeading;add.target=self;add.action=#selector(addScreenshot)
@@ -155,7 +157,85 @@ final class Composer:NSObject,NSWindowDelegate {
   draft.topic=availableTopics[i];let topic=availableTopics[i];topicDescription.stringValue=topic.detail+(topic.detail.isEmpty ? "":" · ")+(topic.combined ? L("Jeden společný MD"):L("MD pro každou relaci"))
   topicLink.title=topic.displayName;topicLink.toolTip=topic.displayName+"\n"+topic.storageKind+(topic.detail.isEmpty ? "":"\n"+topic.detail)
   topicLink.image=NSImage(systemSymbolName:topic.storageSymbol,accessibilityDescription:topic.storageKind)
+  // Jiná složka: naposledy zvolená podsložka té složky.
+  if subfolderTopicID != topic.id{if subfolderTopicID != nil || draft.subfolder==nil{draft.subfolder=LastSubfolder.get(topic)};subfolderTopicID=topic.id}
+  refreshSubfolder()
   refreshPreviousSessions()
+ }
+ /// Aktuální stav složky (strom podsložek ze serveru), ne kopie uložená v konceptu.
+ var liveTopic:Topic?{draft.topic.map{topic in topic.cloudFolderID==nil ? topic:(CloudFolders.shared.topics.first{$0.id==topic.id} ?? topic)}}
+ func refreshSubfolder(){
+  guard let topic=liveTopic else{subfolderLink.isHidden=true;return}
+  // Starší server strom neposílá; složka jen v cloudu nemá místní adresáře.
+  let supported=topic.cloudFolderID != nil ? topic.subfolders != nil:topic.savesLocally
+  let choices=supported ? subfolderChoices(topic):[]
+  if let key=draft.subfolder,!choices.contains(where:{$0.key==key}){draft.subfolder=nil}
+  subfolderLink.isHidden = !supported
+  subfolderLink.title=draft.subfolder.flatMap{subfolderPath($0,in:topic)} ?? L("Bez podsložky")
+  subfolderLink.isEnabled=draft.previous == nil
+  subfolderLink.toolTip=draft.previous == nil ? L("Podsložka nové relace"):L("Uložená relace zůstává ve své podsložce.")
+  subfolderLink.setAccessibilityLabel(L("Podsložka")+": "+subfolderLink.title)
+  subfolderLink.needsDisplay=true;layoutContextRow()
+ }
+ @objc func chooseSubfolder(){
+  guard draft.previous == nil,let topic=liveTopic else{return}
+  let menu=NSMenu();menu.autoenablesItems=false
+  func add(_ title:String,_ key:String?,depth:Int){
+   let item=NSMenuItem(title:title,action:#selector(pickSubfolder(_:)),keyEquivalent:"");item.target=self;item.representedObject=key;item.indentationLevel=depth
+   item.state=draft.subfolder==key ? .on:.off;if key != nil{item.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil)};menu.addItem(item)
+  }
+  add(L("Bez podsložky"),nil,depth:0)
+  for choice in subfolderChoices(topic){add(choice.name,choice.key,depth:choice.depth+1)}
+  menu.addItem(.separator())
+  let create=NSMenuItem(title:L("Nová podsložka…"),action:#selector(newSubfolder),keyEquivalent:"");create.target=self;create.image=NSImage(systemSymbolName:"folder.badge.plus",accessibilityDescription:nil)
+  // Strukturu týmové složky spravuje vlastník nebo správce.
+  create.isEnabled=topic.canManageCloudFolder;if !create.isEnabled{create.toolTip=L("Podsložky týmové složky spravuje jen vlastník nebo správce týmu.")};menu.addItem(create)
+  menu.popUp(positioning:nil,at:NSPoint(x:0,y:subfolderLink.isFlipped ? subfolderLink.bounds.maxY+4:subfolderLink.bounds.minY-4),in:subfolderLink)
+ }
+ @objc func pickSubfolder(_ sender:NSMenuItem){
+  draft.subfolder=sender.representedObject as? String
+  if let topic=draft.topic{LastSubfolder.set(topic,draft.subfolder)}
+  refreshSubfolder()
+ }
+ /// Dialog nové podsložky: název a umístění (kořen nebo podsložka první úrovně).
+ func subfolderAlert(_ topic:Topic)->(NSAlert,NSTextField,NSPopUpButton,[SubfolderChoice]) {
+  let parents=subfolderChoices(topic).filter{$0.depth==0}
+  let alert=NSAlert();alert.messageText=L("Nová podsložka")
+  alert.informativeText=topic.cloudFolderID != nil ? L("Podsložka se vytvoří v cloudu a hned potom na tomto Macu."):L("Podsložka se vytvoří v místním adresáři složky.")
+  let view=NSView(frame:NSRect(x:0,y:0,width:300,height:62))
+  let field=NSTextField(frame:NSRect(x:0,y:36,width:300,height:24));field.placeholderString=L("Název podsložky");view.addSubview(field)
+  let parent=NSPopUpButton(frame:NSRect(x:-2,y:0,width:304,height:26));parent.addItem(withTitle:L("V kořeni složky"))
+  for choice in parents{parent.addItem(withTitle:LF("V podsložce %@",choice.name))}
+  // Vnořit jde jen do první úrovně; vybraná podsložka je předvolená.
+  let current=draft.subfolder.flatMap{key in subfolderChoices(topic).first{$0.key==key}}.flatMap{$0.parent ?? $0.key}
+  if let current,let i=parents.firstIndex(where:{$0.key==current}){parent.selectItem(at:i+1)}
+  view.addSubview(parent);alert.accessoryView=view
+  alert.addButton(withTitle:L("Vytvořit"));alert.addButton(withTitle:L("Zrušit"));alert.window.initialFirstResponder=field
+  return (alert,field,parent,parents)
+ }
+ @objc func newSubfolder(){
+  guard let topic=liveTopic else{return}
+  childEditorOpen=true;defer{childEditorOpen=false};snapshotFields()
+  let (alert,field,parent,parents)=subfolderAlert(topic)
+  guard alert.runModal() == .alertFirstButtonReturn else{window.makeKeyAndOrderFront(nil);return}
+  window.makeKeyAndOrderFront(nil)
+  let name=cleanSubfolderName(field.stringValue),parentKey=parent.indexOfSelectedItem>0 ? parents[parent.indexOfSelectedItem-1].key:nil
+  guard validSubfolderName(name) else{showError(CloudFolders.invalidSubfolderName.message);return}
+  if topic.cloudFolderID != nil {
+   subfolderLink.isEnabled=false
+   Task{@MainActor in
+    do {
+     let created=try await CloudFolders.shared.createSubfolder(topic,name:name,parent:parentKey.flatMap{UUID(uuidString:$0)})
+     if self.draft.topic?.id==topic.id{self.draft.subfolder=created.id.uuidString.lowercased();LastSubfolder.set(topic,self.draft.subfolder)}
+    } catch {showError(error.localizedDescription)}
+    self.refreshSubfolder()
+   }
+   return
+  }
+  // Místní složka: obyčejný adresář, název nesmí kolidovat (bez ohledu na velikost písmen).
+  guard !subfolderChoices(topic).contains(where:{$0.parent==parentKey && subfolderNameKey($0.name)==subfolderNameKey(name)}) else{showError(L("Podsložka s tímto názvem už existuje."));return}
+  let key=(parentKey.map{$0+"/"} ?? "")+name
+  do{_ = try localSubfolderDirectory(topic,key);draft.subfolder=key;LastSubfolder.set(topic,key);refreshSubfolder()}catch{showError(error.localizedDescription)}
  }
  @objc func refreshSavedSessions(){refreshPreviousSessions()}
  func refreshPreviousSessions(){
@@ -168,6 +248,7 @@ final class Composer:NSObject,NSWindowDelegate {
  func updatePreviousAvailability(){sessionLink.title=draft.previous.flatMap{target in previousChoices.first{$0.target.id==target.id}?.title} ?? L("Nová relace");sessionLink.toolTip=sessionLink.title
   sessionLink.isEnabled=draft.topic?.savesLocally != false
   topicLink.isEnabled=draft.previous == nil;topicLink.needsDisplay=true
+  subfolderLink.isEnabled=draft.previous == nil;subfolderLink.needsDisplay=true
   topicLink.toolTip=draft.previous == nil ? draft.topic.map{$0.displayName+($0.detail.isEmpty ? "":"\n"+$0.detail)}:L("Konfiguraci uložené relace nelze změnit.")
   copyLinkButton.isHidden=shareableSessionID()==nil
   layoutContextRow()
@@ -176,9 +257,11 @@ final class Composer:NSObject,NSWindowDelegate {
   let available=max(0,(topicLink.superview?.bounds.width ?? window?.contentView?.bounds.width ?? 800)-56)
   let cap=max(0,(available-32)/3)
   topicLink.frame=NSRect(x:28,y:430,width:topicLink.fittingWidth(maximum:cap),height:36)
-  sessionLink.frame=NSRect(x:topicLink.frame.maxX+16,y:430,width:sessionLink.fittingWidth(maximum:cap),height:36)
+  // Podsložka hned za složkou; skrytá nezabírá místo.
+  subfolderLink.frame=NSRect(x:topicLink.frame.maxX+4,y:430,width:subfolderLink.isHidden ? 0:subfolderLink.fittingWidth(maximum:cap),height:36)
+  sessionLink.frame=NSRect(x:(subfolderLink.isHidden ? topicLink.frame.maxX:subfolderLink.frame.maxX)+16,y:430,width:sessionLink.fittingWidth(maximum:cap),height:36)
   // Odkaz relace se v okně nezobrazuje; kdyby ano, tlačítko jde až za něj.
-  let anchor=sessionLink.superview == nil || sessionLink.isHidden ? topicLink.frame.maxX:sessionLink.frame.maxX
+  let anchor=sessionLink.superview == nil || sessionLink.isHidden ? (subfolderLink.isHidden ? topicLink.frame.maxX:subfolderLink.frame.maxX):sessionLink.frame.maxX
   copyLinkButton.frame=NSRect(x:anchor+8,y:432,width:copyLinkWidth(maximum:cap),height:32)
   let trailing=28+available
   captureGroup.frame=NSRect(x:trailing-174,y:432,width:174,height:32)

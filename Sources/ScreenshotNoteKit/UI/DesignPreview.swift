@@ -45,6 +45,13 @@ func exportDesignPreviews(to directory:URL)throws{
    exportDesignWindow(composer.window,name:"capture-hover")
    thumbnail.setHovered(false)
   }
+  // Podsložka nové relace vedle složky a dialog nové podsložky.
+  var tree=demo;tree.id="preview-subfolders";tree.cloudFolderID=UUID();tree.cloudOwnerID=UUID();tree.cloudOrigin="https://screenshotnote.com";tree.name=L("Výzkum uživatelů")
+  let interviews=UUID();tree.subfolders=[CloudSubfolder(id:interviews,parent:nil,name:L("Rozhovory"),revision:"1"),CloudSubfolder(id:UUID(),parent:interviews,name:L("Květen"),revision:"1"),CloudSubfolder(id:UUID(),parent:nil,name:L("Testování"),revision:"1")]
+  var nestedDraft=composer.draft;nestedDraft.topic=tree;nestedDraft.subfolder=tree.subfolders![1].id.uuidString.lowercased()
+  let withSubfolder=Composer(draft:nestedDraft,root:root);withSubfolder.show();exportDesignWindow(withSubfolder.window,name:"capture-subfolder")
+  let created=withSubfolder.subfolderAlert(tree).0;created.window.appearance=NSAppearance(named:appearance);created.layout();created.window.orderFront(nil);created.window.displayIfNeeded();exportDesignWindow(created.window,name:"subfolder-new");created.window.orderOut(nil)
+  withSubfolder.window.orderOut(nil)
   let imageNote=ImageNoteEditor();_ = imageNote.run(L("Zjednodušit poslední krok objednávky."),image:root.appendingPathComponent("sample-\(language)-0.png"))
   let chooser=SessionChoiceDialog();_ = chooser.run(title:L("Vybrat konfiguraci"),choices:[SessionChoice(title:demo.name,detail:demo.detail),SessionChoice(title:second.name,detail:second.detail)])
   let sessions=SessionChoiceDialog();_ = sessions.run(title:L("Vybrat relaci"),choices:[SessionChoice(title:L("Nová relace"),detail:L("Vytvořit novou poznámku z aktuálních snímků.")),SessionChoice(title:L("Průchod objednávkou"),detail:L("Zvýraznit vybranou platbu a zjednodušit potvrzení objednávky."),images:[root.appendingPathComponent("sample-\(language)-0.png"),root.appendingPathComponent("sample-\(language)-1.png")])])
@@ -60,7 +67,7 @@ func exportDesignPreviews(to directory:URL)throws{
   MainActor.assumeIsolated{_ = FolderListDialog().run(title:L("Cloudové složky potřebují místní adresář"),message:L("Každá cloudová složka se na tomto Macu ukládá do vlastního adresáře. Chybí u těchto složek:"),folders:[L("Výzkum uživatelů"),L("Sdílené podklady")],checkboxes:false,buttons:[L("Jedna nadřazená složka…"),L("Každou zvlášť…"),L("Později")])}
   let hotkeys=Hotkeys();let settings=SettingsController(hotkeys:hotkeys);settings.show();exportDesignWindow(settings.window,name:"settings")
   var signed=cloudVault.value!;signed.ownerID=UUID()
-  var cloudTopic=demo;cloudTopic.cloudFolderID=UUID();cloudTopic.cloudOwnerID=signed.ownerID;cloudTopic.cloudOrigin="https://screenshotnote.com";cloudTopic.id="preview-cloud";cloudTopic.name=L("Výzkum uživatelů");cloudTopic.detail=L("Rozhovory a testování s uživateli");cloudTopic.folder="/Users/example/Pictures/Cloud Notes";cloudTopic.combined=true;cloudTopic.combinedFile=language=="en" ? "Research.md":"Vyzkum.md"
+  var cloudTopic=demo;cloudTopic.cloudFolderID=UUID();cloudTopic.cloudOwnerID=signed.ownerID;cloudTopic.cloudOrigin="https://screenshotnote.com";cloudTopic.id="preview-cloud";cloudTopic.name=L("Výzkum uživatelů");cloudTopic.detail=L("Rozhovory a testování s uživateli");cloudTopic.folder="/Users/example/Pictures/Cloud Notes";cloudTopic.combined=true;cloudTopic.combinedFile=language=="en" ? "Research.md":"Vyzkum.md";cloudTopic.subfolders=tree.subfolders
   var cloudSeparate=cloudTopic;cloudSeparate.id="preview-cloud-2";cloudSeparate.cloudFolderID=UUID();cloudSeparate.name=L("Sdílené podklady");cloudSeparate.detail="";cloudSeparate.combined=false;cloudSeparate.folder="/Users/example/Pictures/Shared"
   let topics=TopicSettings(connection:{signed});topics.previewDefaultID=demo.id;topics.list=[demo,second,cloudTopic,cloudSeparate];topics.show();topics.folder.stringValue=language=="en" ? "~/Pictures/Screenshot Note/Product":"~/Pictures/Screenshot Note/Produkt";exportDesignWindow(topics.window,name:"configurations")
   topics.editingID=cloudTopic.id;topics.reloadFolders();exportDesignWindow(topics.window,name:"cloud-folders")

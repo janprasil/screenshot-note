@@ -12,7 +12,9 @@ struct PreviousSessionTarget:Codable,Equatable {
 struct PreviousSession {
  var target:PreviousSessionTarget;var title:String;var comment:String;var images:[String];var modified:Date;var section:Int
  var imageNotes:[String:String] = [:]
- var display:String{title+" · "+localizedImageCount(images.count)+" · "+URL(fileURLWithPath:target.path).lastPathComponent+" · "+LF("Část %ld",section)}
+ // Umístění v podsložce „Složka › Podsložka“; v kořeni nil.
+ var place:String? = nil
+ var display:String{[title,place,localizedImageCount(images.count),URL(fileURLWithPath:target.path).lastPathComponent,LF("Část %ld",section)].compactMap{$0}.joined(separator:" · ")}
 }
 struct SessionMetadata:Codable {var title:String;var comment:String;var images:[String];var imageNotes:[String:String];var bodyLength:Int;var bodyHash:String;var sessionID:String;var template:String}
 // Soubory ze složek čteme jen do pevného limitu, obří soubor se přeskočí.
@@ -211,9 +213,17 @@ func previousSessions(for topic:Topic)throws->[PreviousSession] {
  let template=topic.markdownTemplate ?? defaultMarkdownTemplate
  if topic.cloudFolderID==nil{migrateLegacyMarkers(in:topic.destination);migrateImageLinks(in:topic.destination)}
  var result=try previousSessions(in:topic.destination,template:template)
+ // Relace v podsložkách (cloud podle mapování, místní složka do hloubky 2).
+ let nested:[(URL,String)]=topic.cloudFolderID != nil
+  ? orderedSubfolders(topic.subfolders ?? []).compactMap{item in CloudFolders.shared.subfolderDirectory(topic,item.0.id).map{($0,subfolderPath(item.0.id.uuidString.lowercased(),in:topic) ?? item.0.name)}}
+  : localSubfolders(topic.destination).map{(topic.destination.appendingPathComponent($0.key,isDirectory:true),$0.key.replacingOccurrences(of:"/",with:" › "))}
+ for (directory,path) in nested{result+=((try? previousSessions(in:directory,template:template)) ?? []).map{var session=$0;session.place=topic.displayName+" › "+path;return session}}
+ if !nested.isEmpty{result.sort{if $0.modified != $1.modified{return $0.modified>$1.modified};return $0.target.start>$1.target.start}}
  if topic.cloudFolderID != nil || topic.formerCloudFolderID != nil {
   let known=Set(SessionIndex.shared.all.filter{$0.trashed != true}.map{SessionIndex.key($0.directory)})
-  let children=(try? fm.contentsOfDirectory(at:topic.destination,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []
+  // Podsložky už jsou načtené výše; starší adresáře relací ne.
+  let subfolders=Set(nested.map{SessionIndex.key($0.0)})
+  let children=((try? fm.contentsOfDirectory(at:topic.destination,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []).filter{!subfolders.contains(SessionIndex.key($0))}
   for child in children where child.lastPathComponent.range(of:"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(-[0-9a-f]{12})?$",options:.regularExpression) != nil || known.contains(SessionIndex.key(child)) || readSessionTag(child) != nil {
    result+=(try? previousSessions(in:child,template:template)) ?? []
   }

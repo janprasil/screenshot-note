@@ -13,7 +13,7 @@ private struct CloudJob: Codable {
  let endpoint: String
  let ownerID: UUID
  let sessionID: UUID
- let manifest: CloudManifest
+ var manifest: CloudManifest
  var manifestDigest: String?
  // Texty stažené relace jako základ tříčestného sloučení při doplnění.
  var base: CloudLibrary.CloudEdit.Fields? = nil
@@ -309,7 +309,10 @@ final class CloudLibrary {
          (folders ?? CloudFolders.shared.topics).contains(where:{$0.cloudFolderID == folder && $0.cloudOwnerID == draft.topic?.cloudOwnerID && $0.cloudOrigin == c.endpoint}) else {throw CloudFailure.invalid}
   }
   // Doplnění nese revizi stažené relace, aby nepřepsalo úpravy z webu.
-  let manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID,base_images:base?.count,revision:base != nil && CloudManifest.validRevision(revision) ? revision:nil)
+  var manifest = CloudManifest(title:heading,comment:draft.comment,configuration:config,template:template,captions:captions,images:images,folder_id:draft.topic?.cloudFolderID,base_images:base?.count,revision:base != nil && CloudManifest.validRevision(revision) ? revision:nil)
+  // Nová relace jde rovnou do zvolené podsložky, pokud ji složka pořád má.
+  if base == nil, let key = draft.subfolder, let id = UUID(uuidString: key), let folder = draft.topic?.cloudFolderID,
+     (folders ?? CloudFolders.shared.topics).first(where:{$0.cloudFolderID == folder && $0.cloudOwnerID == draft.topic?.cloudOwnerID})?.subfolders?.contains(where:{$0.id == id}) == true { manifest.subfolder_id = id }
   let job = CloudJob(schemaVersion:1,endpoint:c.endpoint,ownerID:owner,sessionID:id,manifest:manifest,base:base != nil && original?.captions.count==base?.count ? original:nil,attachments:attachments.isEmpty ? nil:attachments)
   let final=queue.appendingPathComponent(id.uuidString.lowercased(),isDirectory:true)
   if fm.fileExists(atPath:final.path) {
@@ -567,6 +570,11 @@ final class CloudLibrary {
      rebased[original.sessionID, default:0] += 1
      do { try await rebase(directory,original,endpoint:endpoint,token:c.token) }
      catch { tried.insert(directory.lastPathComponent);if try jobFailed(error,key:key,directory:directory,job:original){throw error} }
+    }
+    catch let failure as CloudFailure where failure.status == 409 && failure.code == "subfolder_not_found" && original.manifest.subfolder_id != nil && original.manifestDigest == nil {
+     // Podsložka mezitím zmizela: relace se nahraje do kořene složky.
+     var job = original; job.manifest.subfolder_id = nil
+     do { try JSONEncoder().encode(job).write(to:directory.appendingPathComponent("job.json"),options:.atomic) } catch { tried.insert(directory.lastPathComponent); if try jobFailed(error,key:key,directory:directory,job:original){throw error} }
     }
     catch let failure as CloudFailure where failure.status == 400 && failure.code == "folder_required" {
      let reason=L("Relace bez cloudové složky už nejde nahrát. Zůstala odložená ve frontě.");try park(directory,original,reason:reason);lastError=reason

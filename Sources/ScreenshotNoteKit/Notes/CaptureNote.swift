@@ -9,6 +9,8 @@ struct Draft: Codable { var images: [String]; var comment: String; var title: St
  var contexts:[String:String]? = nil
  // Názvy v assets/ znovuotevřené relace, jejichž kontext uživatel odebral; smažou se po uložení.
  var removedContexts:[String]? = nil
+ // Podsložka nové relace: ID (cloud) nebo relativní cesta (místní složka); nil = kořen.
+ var subfolder:String? = nil
 }
 /// Otisk obsahu konceptu (text, popisky a bajty snímků) pro zjištění neuložené práce.
 func draftSignature(_ draft:Draft,root:URL)->String {
@@ -170,9 +172,10 @@ func finishSession(_ draft:Draft,root:URL,folders:[Topic]?=nil)throws {
  // Kontext podle aktuálního nastavení složky, ne podle kopie v konceptu.
  if let saved=draft.topic{draft.topic?.contextPolicy=saved.currentContextPolicy(in:folders ?? Topics.all) ?? {var off=ContextPolicy();off.enabled=false;return off}()}
  let topic=draft.topic ?? Topics.defaultTopic
- let folder=draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? topic.destination
  // Dřív uložené vnoření snímek neblokuje; nové vnoření se odmítá při nastavení složky.
- try Topics.validateDestination(topic,folder:folder,nested:true)
+ try Topics.validateDestination(topic,folder:draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? topic.destination,nested:true)
+ // Nová relace místní složky jde do zvolené podsložky; doplnění zůstává ve svém souboru.
+ let folder=try draft.previous.map{URL(fileURLWithPath:$0.path).deletingLastPathComponent()} ?? localSubfolderDirectory(topic,draft.subfolder)
  try finish(draft,root:root,dest:folder,combinedFile:topic.combined ? topic.combinedFile:nil,previous:draft.previous)
 }
 

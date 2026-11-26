@@ -107,3 +107,15 @@ PASS: folder directories may not overlap: same, ancestor, descendant, symlink, c
 PASS: cloud mapping rejects nesting in setFolder and parent assignment; legacy nested mapping keeps the catalog and other folders saving
 PASS: cloud folder containing an older nested folder never claims or deletes the nested folder's files
 Folder safety self-test passed
+PASS: subfolder names follow the server rules (NFC, forbidden characters, dot, assets, length); tree keeps two levels and unique names
+PASS: server tree becomes directories, new sessions download straight into their subfolder with its own assets/, session picker shows Folder › Subfolder
+PASS: web rename renames the local directory by identity (sessions keep their files), a foreign directory with the same name gets a suffix, Finder rename is reverted
+PASS: web move moves the session files to the new subfolder (server wins on location), a concurrent local edit is kept, edits follow the session id
+PASS: Finder move into a known subfolder (or the root) calls move_session with the last location revision and takes the images along
+PASS: stale Finder move (location_conflict) moves the files to where the server has the session and says so
+PASS: a directory created in Finder is not synced: no server call, the moved session goes back and the app explains why
+PASS: New subfolder… creates it on the server first (own id, NFC name), then the directory; duplicates and invalid names are refused
+PASS: subfolder trashed on the web with its sessions: sessions go to .trash and the empty directory is removed; an edited session and its directory stay with a notice
+PASS: upload manifest carries subfolder_id only for a new session in a cloud folder
+PASS: combined-file folder writes one combined file per subfolder; a web move moves the block and its images
+PASS: local-only folder: subfolders are plain directories up to depth 2, a new session saves into the chosen one and the picker finds it

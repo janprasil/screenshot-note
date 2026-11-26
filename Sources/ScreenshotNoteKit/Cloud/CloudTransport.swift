@@ -10,7 +10,9 @@ struct CloudFailure: LocalizedError {
  var code: String? = nil
  // Strojový důvod chyby, např. "retention" u smazání po konci předplatného.
  var reason: String? = nil
- init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0, code: String? = nil, reason: String? = nil) { self.message = message; self.status = status; self.retryAfter = retryAfter; self.code = code; self.reason = reason }
+ // Objekt `error` z odpovědi (např. aktuální stav u konfliktu).
+ var details: Data? = nil
+ init(_ message: String, status: Int = 0, retryAfter: TimeInterval = 0, code: String? = nil, reason: String? = nil, details: Data? = nil) { self.message = message; self.status = status; self.retryAfter = retryAfter; self.code = code; self.reason = reason; self.details = details }
  var errorDescription: String? { message }
  // Kvóta účtu (tarif nebo plné úložiště); 413 resource_limit je jen příliš velký požadavek.
  var isQuota: Bool { status == 402 || (status == 413 && code == "billing_storage_limit") }
@@ -70,7 +72,7 @@ final class CloudTransport: NSObject, URLSessionTaskDelegate {
     case 409, 410: message = L("Přenos zatím nelze dokončit. Zkus jej později znovu; lokální data zůstávají zachovaná.")
     default: message = LF("Cloud vrátil chybu HTTP %ld.", http.statusCode)
    }
-   throw CloudFailure(message, status: http.statusCode, retryAfter: max(retry, code == "upload_incomplete" ? 90 : 0), code: code, reason: error?["reason"] as? String)
+   throw CloudFailure(message, status: http.statusCode, retryAfter: max(retry, code == "upload_incomplete" ? 90 : 0), code: code, reason: error?["reason"] as? String, details: error.flatMap { try? JSONSerialization.data(withJSONObject: $0) })
   }
   return data
  }

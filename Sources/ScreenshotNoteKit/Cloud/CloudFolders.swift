@@ -13,7 +13,9 @@ private struct RemoteFolder:Decodable {
  var ai_title:Bool? = nil
  // Výchozí název relace; null = dědí z účtu.
  var default_title:String? = nil
- enum CodingKeys:String,CodingKey{case id,name,revision,description,combined,combined_file,markdown_template,combined_template,owner_id,owner_kind,owner_name,role,comment_template,image_template,ai_title,default_title}
+ // Strom podsložek; starší server ho neposílá.
+ var subfolders:[CloudSubfolder]? = nil;var subfolders_revision:String? = nil
+ enum CodingKeys:String,CodingKey{case id,name,revision,description,combined,combined_file,markdown_template,combined_template,owner_id,owner_kind,owner_name,role,comment_template,image_template,ai_title,default_title,subfolders,subfolders_revision}
  init(from decoder:Decoder)throws {
   let c=try decoder.container(keyedBy:CodingKeys.self)
   id=try c.decode(UUID.self,forKey:.id);name=try c.decode(String.self,forKey:.name);revision=try c.decode(String.self,forKey:.revision)
@@ -24,12 +26,15 @@ private struct RemoteFolder:Decodable {
   items=c.contains(.comment_template) && c.contains(.image_template)
   ai_title=try c.decodeIfPresent(Bool.self,forKey:.ai_title)
   default_title=(try? c.decodeIfPresent(String.self,forKey:.default_title)).flatMap{validDefaultTitle($0) ? $0:nil}
+  // Vadný strom nezablokuje katalog; neplatné položky se zahodí.
+  if let list=try? c.decodeIfPresent([RemoteSubfolder].self,forKey:.subfolders){subfolders=validSubfolderTree(list.map(\.value))}
+  subfolders_revision=(try? c.decodeIfPresent(FlexibleString.self,forKey:.subfolders_revision))?.value
  }
  func record(owner account:UUID,origin:String,library:UUID?=nil)->CloudFolderRecord {
   var value=CloudFolderRecord(id:id,name:name,owner:owner_id ?? library ?? account,origin:origin,revision:revision,description:description,combined:combined,combinedFile:combined_file,markdownTemplate:markdown_template,combinedTemplate:combined_template)
   value.accountID=account;value.ownerKind=owner_kind;value.ownerName=owner_name;value.role=role
   if items{value.commentTemplate=comment_template;value.imageTemplate=image_template;value.itemTemplates=true}
-  value.aiTitle=ai_title;value.defaultTitle=default_title
+  value.aiTitle=ai_title;value.defaultTitle=default_title;value.subfolders=subfolders;value.subfoldersRevision=subfolders_revision
   return value
  }
 }
@@ -49,7 +54,11 @@ private struct FolderSettingsBody:Encodable {
  }
 }
 private struct RemoteNoteList:Decodable {
- struct Note:Decodable{let id:UUID;let deleting:Bool?;let updated_at:String?;let created_at:String?;let trashed_at:String?;var revision:FlexibleString? = nil;var author:CloudAuthor? = nil}
+ struct Note:Decodable{let id:UUID;let deleting:Bool?;let updated_at:String?;let created_at:String?;let trashed_at:String?;var revision:FlexibleString? = nil;var author:CloudAuthor? = nil
+  // Umístění v podsložce; starší server ho neposílá.
+  var subfolder_id:UUID? = nil;var location_revision:FlexibleString? = nil
+  var subfolder:String?{subfolder_id?.uuidString.lowercased()}
+ }
  struct Pagination:Decodable{let has_more:Bool}
  let data:[Note];let pagination:Pagination
 }
@@ -77,6 +86,10 @@ final class CloudFolders {
  private var readable=true
  var isReadable:Bool{readable}
  private(set) var syncing=false
+ // Adresáře podsložek podle kořene z posledního průchodu.
+ private var resolvedSubfolders:[String:[UUID:URL]]=[:]
+ // Přesun z Finderu čeká na server; stahování relaci v tomto průchodu nevrací.
+ private var localMoves=Set<String>()
  var lastError:String?
  // Upozornění ze synchronizace koše, každé jen jednou za relaci.
  private var messages:[String]=[]
@@ -267,7 +280,7 @@ final class CloudFolders {
  }
  /// Soubory, které zapsala aplikace: Markdown relací, jejich obrázky (v kořeni i v podsložkách) a vygenerované kopie.
  func knownFiles(_ directory:URL)->Set<String> {
-  let key=SessionIndex.key(directory),assets=directory.appendingPathComponent("assets"),nested=nestedRoots(directory)
+  let key=SessionIndex.key(directory),nested=nestedRoots(directory)
   var known=Set<String>()
   func add(_ url:URL){if fm.fileExists(atPath:url.path){known.insert(SessionIndex.key(url))}}
   // Soubory vnořené složky patří jí, ne této složce.
@@ -277,7 +290,8 @@ final class CloudFolders {
    add(markdown)
    // Plochá relace má obrázky ve společném assets/, starší podsložka ve vlastním.
    let flat=record.flat==true || SessionIndex.key(parent)==key
-   for image in record.images{let directory=flat ? assets:parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}
+   // Obrázky leží v assets/ vedle Markdownu (kořen i podsložka).
+   for image in record.images{let directory=parent.appendingPathComponent("assets");add(directory.appendingPathComponent(image));for file in assetContextFiles(directory,image){add(file)}
     // Video: MP4 a soubory ve složce snímků patří relaci.
     let video=assetVideoFiles(directory,image);add(video[0]);for file in regularFiles(video[1]){add(file)}}
    if !flat{for name in record.files.keys{add(parent.appendingPathComponent(name))}}
@@ -457,6 +471,8 @@ final class CloudFolders {
   next.ownerKind=record.ownerKind;next.ownerName=next.ownerName ?? record.ownerName;next.role=next.role ?? record.role
   // Uložení nastavení AI název nevrací; drží se poslední známý stav.
   next.aiTitle=next.aiTitle ?? updated[index].aiTitle;next.defaultTitle=next.defaultTitle ?? updated[index].defaultTitle
+  // Strom podsložek mění jen jejich vlastní RPC.
+  next.subfolders=next.subfolders ?? updated[index].subfolders;next.subfoldersRevision=next.subfoldersRevision ?? updated[index].subfoldersRevision
   if let name=next.combinedFile,!validCombinedFile(name){next.combinedFile=nil}
   updated[index]=next;try persist(updated);NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
   return next.topic
@@ -659,6 +675,12 @@ final class CloudFolders {
   if !readableRoot && !index.cloudRecords(base:base,folder:folderID).isEmpty{try markMissing(topic,true);return}
   // Nepřipojený disk: prázdná složka se nestahuje, jinak by vznikla na systémovém disku.
   if !readableRoot && Topics.volumeMissing(base.path){return}
+  localMoves.removeAll()
+  // Nová složka s podsložkami: kořen vznikne hned, aby relace šly rovnou na své místo.
+  if !readableRoot,topic.subfolders?.isEmpty==false{try? fm.createDirectory(at:base,withIntermediateDirectories:true)}
+  let orphans=fm.fileExists(atPath:base.path) ? applySubfolders(topic,base:base):[]
+  // Adresáře smazaných podsložek se uklidí až po zpracování koše.
+  defer{removeOrphans(orphans,base:base)}
   if trashed != nil {
    // Relace vrácená uživatelem z .trash se obnoví i na serveru.
    for record in index.cloudRecords(base:base,folder:folderID) where record.trashed==true {
@@ -770,12 +792,15 @@ final class CloudFolders {
   defer{if kept>0{say(LF("Smazání ve složce %@ zůstává jen na tomto Macu: cizí relace v týmové složce smí do Koše přesunout jen autor nebo správce.",topic.displayName))}}
   let records=index.cloudRecords(base:base,folder:folderID).filter{$0.trashed != true && activeIDs.contains($0.id) && ($0.stem != nil)==topic.combined}
   guard !records.isEmpty else{return active}
-  var text:NSString?,mainKey=""
+  // Společné soubory kořene a podsložek; smazaný celý soubor se jen znovu vygeneruje.
+  var texts:[String:NSString]=[:]
   if topic.combined {
-   let main=base.appendingPathComponent(validCombinedFile(topic.combinedFile) ? topic.combinedFile:defaultCombinedFile);mainKey=SessionIndex.key(main)
-   // Smazaný celý společný soubor se jen znovu vygeneruje.
-   guard let data=try? boundedData(main,max:20000000),let value=String(data:data,encoding:.utf8) else{return active}
-   text=value as NSString
+   let name=validCombinedFile(topic.combinedFile) ? topic.combinedFile:defaultCombinedFile
+   for dir in [base]+(resolvedSubfolders[SessionIndex.key(base)] ?? [:]).values {
+    let main=dir.appendingPathComponent(name)
+    if let data=try? boundedData(main,max:20000000),let value=String(data:data,encoding:.utf8){texts[SessionIndex.key(main)]=value as NSString}
+   }
+   if texts.isEmpty{return active}
   }
   var cached:[URL]?,tags:Set<String>?
   func tree()->[URL]{if let cached{return cached};let value=treeDirectories(base);cached=value;return value}
@@ -793,11 +818,13 @@ final class CloudFolders {
    }
    tags=found;return found
   }
-  var gone:[(SessionRecord,URL?)]=[]
+  var gone:[(SessionRecord,URL?)]=[],moves:[(SessionRecord,URL)]=[]
   for var record in records {
    var present=false,inTrash:URL?
-   if let text {
-    guard record.file==mainKey else{continue}
+   if topic.combined {
+    // Blok přesunutý do jiné podsložky, který se ještě nezapsal, není smazání.
+    if record.length==0 && record.hash.isEmpty{continue}
+    guard let text=texts[record.file] else{continue}
     let lines=Set((text as String).components(separatedBy:"\n"))
     present=locateSession(record,in:text,avoid:[]) != nil || record.images.contains{containsImageLink(text as String,$0)} || (!record.heading.isEmpty && lines.contains(record.heading))
    } else if isRoot(record,base) {
@@ -823,7 +850,15 @@ final class CloudFolders {
      }
     }
    }
-   if present{record.missingSince=nil;record.held=nil;record.confirmed=nil;record.askDelete=nil;record.keptLocal=nil;index.put(record);continue}
+   if present {
+    record.missingSince=nil;record.held=nil;record.confirmed=nil;record.askDelete=nil;record.keptLocal=nil;index.put(record)
+    // Relace v jiném adresáři, než ji má cloud: přesun z Finderu (jen se stromem ze serveru a známou podsložkou).
+    if !topic.combined,topic.subfolders != nil,resolved(record.subfolder,base:base) {
+     let actual=home(record,base:base),expected=container(record.subfolder,base:base)
+     if SessionIndex.key(actual) != SessionIndex.key(expected),!SessionIndex.key(actual).hasPrefix(trash){moves.append((record,actual))}
+    }
+    continue
+   }
    // Přesun do adresáře vnořené složky není smazání; relace zůstane jen místní.
    if record.keptLocal != true,nestedTags().contains(record.id){record.keptLocal=true;record.missingSince=record.missingSince ?? stamp;record.held=nil;record.askDelete=nil;record.confirmed=nil;index.put(record);continue}
    // Smazání, které zůstalo jen místní, se znovu neposílá.
@@ -868,7 +903,9 @@ final class CloudFolders {
    if !ask && location==nil && record.confirmed != true,let post=onTrashedQuietly{post(next,topic)}
    else{say(LF("Relace „%@“ přesunuta do Koše na webu (lze obnovit 30 dní).",record.title))}
   }
-  return active.filter{!removed.contains($0.id.uuidString.lowercased())}
+  var remaining=active.filter{!removed.contains($0.id.uuidString.lowercased())}
+  if !moves.isEmpty{try await applyLocalMoves(moves,topic:topic,base:base,active:&remaining,endpoint:endpoint,token:token)}
+  return remaining
  }
  var onTrashedQuietly:((SessionRecord,Topic)->Void)?
  /// Systémové oznámení o relacích smazaných po konci předplatného.
@@ -910,8 +947,8 @@ final class CloudFolders {
  /// Najde relaci, kterou uživatel vrátil z .trash zpět do složky.
  private func isRoot(_ record:SessionRecord,_ base:URL)->Bool{record.stem==nil && (record.flat==true || SessionIndex.key(record.directory)==SessionIndex.key(base))}
  /// Soubor záznamu: u ploché relace Markdown podle cesty, obrázky ze společného assets/.
- private func fileURL(_ record:SessionRecord,_ key:String,base:URL)->URL{isRoot(record,base) ? (key==URL(fileURLWithPath:record.file).lastPathComponent ? URL(fileURLWithPath:record.file):base.appendingPathComponent(key)):record.directory.appendingPathComponent(key)}
- private func flatStem(_ name:String,base:URL)->String{uniqueName(name){fm.fileExists(atPath:base.appendingPathComponent($0+".md").path) || fm.fileExists(atPath:base.appendingPathComponent("assets/"+$0+"-1.png").path) || fm.fileExists(atPath:self.trashURL(base).appendingPathComponent($0+".md").path)}}
+ private func fileURL(_ record:SessionRecord,_ key:String,base:URL)->URL{isRoot(record,base) ? (key==URL(fileURLWithPath:record.file).lastPathComponent ? URL(fileURLWithPath:record.file):imageHome(record,base:base).appendingPathComponent(key)):record.directory.appendingPathComponent(key)}
+ private func flatStem(_ name:String,in home:URL?=nil,base:URL)->String{let home=home ?? base;return uniqueName(name){fm.fileExists(atPath:home.appendingPathComponent($0+".md").path) || fm.fileExists(atPath:home.appendingPathComponent("assets/"+$0+"-1.png").path) || fm.fileExists(atPath:self.trashURL(base).appendingPathComponent($0+".md").path)}}
  /// Starší podsložky relací se zploští do kořene, pokud je nikdo neupravil; upravené zůstávají.
  private func flatten(_ topic:Topic,base:URL) {
   guard !topic.combined,let folder=topic.cloudFolderID else{return}
@@ -941,15 +978,16 @@ final class CloudFolders {
    index.put(record);writeSessionTag(target,record.id)
   }
  }
- /// Obrázky relace z kořene, které nepoužívá žádná jiná poznámka ve složce.
- private func ownImages(_ record:SessionRecord,base:URL)->[String] {
-  let others=SessionIndex.shared.all.filter{$0.id != record.id && $0.trashed != true && (SessionIndex.key($0.directory)==SessionIndex.key(base) || ($0.base != nil && $0.base==SessionIndex.key(base)))}.flatMap(\.images)
-  let texts=((try? fm.contentsOfDirectory(at:base,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles])) ?? []).filter{$0.pathExtension.lowercased()=="md" && SessionIndex.key($0) != record.file}.compactMap{(try? boundedData($0,max:20000000)).flatMap{String(data:$0,encoding:.utf8)}}
+ /// Obrázky ploché relace, které nepoužívá žádná jiná poznámka v jejím adresáři (kořen nebo podsložka).
+ private func ownImages(_ record:SessionRecord,container:URL)->[String] {
+  let key=SessionIndex.key(container)
+  let others=SessionIndex.shared.all.filter{$0.id != record.id && $0.trashed != true && SessionIndex.key($0.directory)==key}.flatMap(\.images)
+  let texts=((try? fm.contentsOfDirectory(at:container,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles])) ?? []).filter{$0.pathExtension.lowercased()=="md" && SessionIndex.key($0) != record.file}.compactMap{(try? boundedData($0,max:20000000)).flatMap{String(data:$0,encoding:.utf8)}}
   return record.images.filter{name in !others.contains(name) && !texts.contains{containsImageLink($0,name)}}
  }
  /// Obrázky relace jdou do .trash/assets: vlastní se přesunou, sdílené s živou relací zkopírují.
  private func trashImages(_ record:SessionRecord,base:URL)->(moved:[String],copied:[String]) {
-  let assets=base.appendingPathComponent("assets"),trash=trashURL(base).appendingPathComponent("assets"),own=Set(ownImages(record,base:base))
+  let home=imageHome(record,base:base),assets=home.appendingPathComponent("assets"),trash=trashURL(base).appendingPathComponent("assets"),own=Set(ownImages(record,container:home))
   var moved:[String]=[],copied:[String]=[]
   for image in record.images where fm.fileExists(atPath:assets.appendingPathComponent(image).path) && !fm.fileExists(atPath:trash.appendingPathComponent(image).path) {
    let target=trash.appendingPathComponent(image);try? fm.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
@@ -966,7 +1004,7 @@ final class CloudFolders {
  }
  /// Web přesunul do koše relaci z kořene: do .trash jde jen její Markdown a vlastní obrázky.
  private func trashRoot(_ record:SessionRecord,base:URL) {
-  var next=record;let markdown=URL(fileURLWithPath:record.file),name=markdown.lastPathComponent,assets=base.appendingPathComponent("assets")
+  var next=record;let markdown=URL(fileURLWithPath:record.file),name=markdown.lastPathComponent,assets=imageHome(record,base:base).appendingPathComponent("assets")
   guard fm.fileExists(atPath:markdown.path) else{next.trashed=true;next.away=record.file;next.rootMoved=[];SessionIndex.shared.put(next);return}
   guard fileHash(markdown)==record.files[name],record.images.allSatisfy({fileHash(assets.appendingPathComponent($0))==record.files["assets/"+$0]}) else{notice(record);return}
   let trash=trashURL(base),target=trash.appendingPathComponent(uniqueName((name as NSString).deletingPathExtension){fm.fileExists(atPath:trash.appendingPathComponent($0+".md").path)}+".md")
@@ -978,9 +1016,12 @@ final class CloudFolders {
  }
  /// Vrátí Markdown a přesunuté obrázky na původní místa; obsazené názvy dostanou příponu.
  private func restoreRoot(_ record:SessionRecord,base:URL,markdown found:URL?=nil)->SessionRecord {
-  var next=record;let assets=base.appendingPathComponent("assets"),trash=trashURL(base)
+  var next=record;let trash=trashURL(base)
   next.trashed=false;next.noticed=nil
   let original=URL(fileURLWithPath:record.away ?? record.file),current=found ?? URL(fileURLWithPath:record.file)
+  // Obrázky se vrací vedle Markdownu: do původního adresáře (podsložky), jinak do kořene.
+  let restoredHome=found?.deletingLastPathComponent() ?? (fm.fileExists(atPath:original.deletingLastPathComponent().path) ? original.deletingLastPathComponent():base)
+  let assets=restoredHome.appendingPathComponent("assets")
   if found != nil{next.file=SessionIndex.key(current)}
   else if fm.fileExists(atPath:current.path) {
    let stem=(original.lastPathComponent as NSString).deletingPathExtension
@@ -1026,7 +1067,9 @@ final class CloudFolders {
    // Markdown vrácený uživatelem z .trash do kořene.
    guard !fm.fileExists(atPath:record.file) else{return nil}
    let name=URL(fileURLWithPath:record.file).lastPathComponent,hash=record.files[name]
-   let files=((try? fm.contentsOfDirectory(at:base,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles])) ?? []).filter{$0.pathExtension.lowercased()=="md"}
+   // Kořen i původní podsložka.
+   let places=[base]+[record.away.map{URL(fileURLWithPath:$0).deletingLastPathComponent()}].compactMap{$0}.filter{SessionIndex.key($0) != SessionIndex.key(base)}
+   let files=places.flatMap{((try? fm.contentsOfDirectory(at:$0,includingPropertiesForKeys:nil,options:[.skipsHiddenFiles])) ?? []).filter{$0.pathExtension.lowercased()=="md"}}
    return files.first{readSessionTag($0)==record.id} ?? files.first{hash != nil && fileHash($0)==hash}
   }
   if record.stem != nil {
@@ -1053,11 +1096,12 @@ final class CloudFolders {
   SessionIndex.shared.put(next)
  }
  private func moveImagesBack(_ record:SessionRecord,base:URL) {
+  let home=home(record,base:base)
   for name in record.images {
-   let from=trashURL(base).appendingPathComponent("assets/"+name),to=base.appendingPathComponent("assets/"+name)
+   let from=trashURL(base).appendingPathComponent("assets/"+name),to=home.appendingPathComponent("assets/"+name)
    guard fm.fileExists(atPath:from.path),!fm.fileExists(atPath:to.path) else{continue}
    try? fm.createDirectory(at:to.deletingLastPathComponent(),withIntermediateDirectories:true);try? fm.moveItem(at:from,to:to)
-   for (source,side) in zip(assetVideoFiles(trashURL(base).appendingPathComponent("assets"),name),assetVideoFiles(base.appendingPathComponent("assets"),name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
+   for (source,side) in zip(assetVideoFiles(trashURL(base).appendingPathComponent("assets"),name),assetVideoFiles(home.appendingPathComponent("assets"),name)) where fm.fileExists(atPath:source.path) && !fm.fileExists(atPath:side.path){try? fm.moveItem(at:source,to:side)}
   }
  }
  /// Video posteru v .trash: MP4 jen netknuté (hash z indexu), složka snímků s ním.
@@ -1086,7 +1130,7 @@ final class CloudFolders {
    // Mazat se smí jen adresář uvnitř .trash, nikdy kořen složky.
    if record.trashed==true{if SessionIndex.key(directory).hasPrefix(SessionIndex.key(trashURL(base))+"/"),directoryUnmodified(directory,record.files){try? fm.removeItem(at:directory)}}
    else if isRoot(record,base){trashRoot(record,base:base)}
-   else if SessionIndex.key(directory.deletingLastPathComponent())==SessionIndex.key(base),directoryUnmodified(directory,record.files) {
+   else if SessionIndex.key(directory).hasPrefix(SessionIndex.key(base)+"/"),!SessionIndex.key(directory).hasPrefix(SessionIndex.key(trashURL(base))+"/"),directoryUnmodified(directory,record.files) {
     let trash=trashURL(base);try? fm.createDirectory(at:trash,withIntermediateDirectories:true)
     try? fm.moveItem(at:directory,to:trash.appendingPathComponent(uniqueName(directory.lastPathComponent){fm.fileExists(atPath:trash.appendingPathComponent($0).path)}))
    }
@@ -1132,7 +1176,7 @@ final class CloudFolders {
  /// Obrázky relace s videem a kontextem jdou do .trash/assets; obsazený název dostane příponu.
  /// Vlastní se přesunou, sdílené s jinou relací zkopírují; nil = přesun selhal.
  private func retainImages(_ record:SessionRecord,base:URL)->[String:String]? {
-  let assets=base.appendingPathComponent("assets"),trash=trashURL(base).appendingPathComponent("assets"),own=Set(ownImages(record,base:base))
+  let home=imageHome(record,base:base),assets=home.appendingPathComponent("assets"),trash=trashURL(base).appendingPathComponent("assets"),own=Set(ownImages(record,container:home))
   var renamed:[String:String]=[:]
   for image in record.images where fm.fileExists(atPath:assets.appendingPathComponent(image).path) {
    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
@@ -1163,7 +1207,8 @@ final class CloudFolders {
   guard var record=index.cloud(id,base:base),record.trashed != true,record.stem==nil else{return}
   if isRoot(record,base){trashRoot(record,base:base);return}
   let directory=record.directory,markdown=URL(fileURLWithPath:record.file).lastPathComponent
-  guard SessionIndex.key(directory.deletingLastPathComponent())==SessionIndex.key(base) else{return}
+  // Starší adresář relace může ležet i v podsložce, nikdy ale v .trash.
+  guard SessionIndex.key(directory).hasPrefix(SessionIndex.key(base)+"/"),!SessionIndex.key(directory).hasPrefix(SessionIndex.key(trashURL(base))+"/") else{return}
   if !fm.fileExists(atPath:directory.path){record.trashed=true;record.away=SessionIndex.key(directory);index.put(record);return}
   guard directoryUnmodified(directory,record.files) else{notice(record);return}
   let trash=trashURL(base);try? fm.createDirectory(at:trash,withIntermediateDirectories:true)
@@ -1174,7 +1219,7 @@ final class CloudFolders {
  /// Blok společného souboru se v koši uloží jako samostatná poznámka s obrázky.
  private func trashCombined(_ record:inout SessionRecord,base:URL)->Bool {
   guard let note=record.note,let stem=record.stem else{return false}
-  let assets=base.appendingPathComponent("assets"),trash=trashURL(base)
+  let assets=home(record,base:base).appendingPathComponent("assets"),trash=trashURL(base)
   for name in record.images {
    let url=assets.appendingPathComponent(name)
    if fm.fileExists(atPath:url.path),fileHash(url) != record.files["assets/"+name] || fm.fileExists(atPath:trash.appendingPathComponent("assets/"+name).path){return false}
@@ -1227,7 +1272,17 @@ final class CloudFolders {
   // Místně smazaná relace čeká na potvrzení a znovu se nestahuje.
   if let saved=record,saved.missingSince != nil || saved.held==true{return}
   // Na webu obnovená relace se vrací z koše.
+  // Přesun z Finderu čeká na server: nic se nestahuje ani nepřesouvá, obrázky zatím leží na starém místě.
+  if localMoves.contains(lower),record?.trashed != true{return}
   if let saved=record,saved.trashed==true{record=restoreSeparate(saved,base:base)}
+  func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
+  // Umístění podle serveru: jiná podsložka znamená přesun souborů (server vyhrává), ne nové stažení.
+  let want=container(item.subfolder,base:base)
+  if var saved=record {
+   if saved.subfolder != item.subfolder || (item.location_revision != nil && saved.location != item.location_revision?.value){saved.subfolder=item.subfolder;saved.location=item.location_revision?.value ?? saved.location;index.put(saved);record=saved}
+   // Starší server podsložky nezná: umístění na disku zůstává uživateli.
+   if topic.subfolders != nil,!localMoves.contains(lower),resolved(item.subfolder,base:base),exists(saved),SessionIndex.key(home(saved,base:base)) != SessionIndex.key(want),let moved=relocate(saved,from:imageHome(saved,base:base),to:want,base:base){record=moved}
+  }
   func present(_ r:SessionRecord)->Bool{!r.files.isEmpty && r.files.keys.allSatisfy{fm.fileExists(atPath:self.fileURL(r,$0,base:base).path)}}
   // Beze změny na serveru se nic nestahuje.
   // Změněná revize (úprava, komentář, šablona) znamená nové vykreslení i beze změny updated_at.
@@ -1252,9 +1307,9 @@ final class CloudFolders {
    var next=cloudRecord(id,topic:topic,base:base,body:body,images:names,note:note)
    next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created;next.digest=digest;next.shas=shas;next.revision=stamp?.revision?.value
    next.file=SessionIndex.key(file);next.files=files;next.flat=true;next.render=cloudRenderVersion;next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:names)
-   next.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):"";return next
+   next.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):""
+   next.subfolder=item.subfolder;next.location=item.location_revision?.value ?? record?.location;return next
   }
-  func exists(_ r:SessionRecord)->Bool{isRoot(r,base) ? fm.fileExists(atPath:r.file):fm.fileExists(atPath:r.directory.path)}
   if let saved=record,!isRoot(saved,base),fm.fileExists(atPath:saved.directory.path),directoryUnmodified(saved.directory,saved.files) {
    // Starší netknutá podsložka se aktualizuje na místě; při další synchronizaci se zploští.
    let directory=saved.directory,markdown=URL(fileURLWithPath:saved.file).lastPathComponent,names=note.images.map{"\($0.index).png"},body=cloudSessionBody(note,images:names,contexts:contexts,assets:directory.appendingPathComponent("assets"),fallbackTitle:DefaultTitle.resolve(topic))
@@ -1268,7 +1323,7 @@ final class CloudFolders {
   }
   if let saved=record,exists(saved) {
    let flat=isRoot(saved,base),markdown=URL(fileURLWithPath:saved.file),stem=markdown.deletingPathExtension().lastPathComponent
-   let folderAssets=flat ? assets:saved.directory.appendingPathComponent("assets")
+   let folderAssets=flat ? imageHome(saved,base:base).appendingPathComponent("assets"):saved.directory.appendingPathComponent("assets")
    var names:[String]=[]
    for i in data.indices{names.append(i<saved.images.count ? saved.images[i]:(flat ? uniqueName(stem+"-\(i+1)"){assetStemTaken(folderAssets,$0) || names.contains($0+".png")}+".png":"\(i+1).png"))}
    let unmodified = !saved.files.isEmpty && saved.files.allSatisfy{fileHash(fileURL(saved,$0.key,base:base))==$0.value}
@@ -1278,10 +1333,11 @@ final class CloudFolders {
    }
    if flat && unmodified {
     // Netknutá plochá relace se aktualizuje na místě; nové snímky dostanou další -N ve společném assets/.
-    let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets,fallbackTitle:DefaultTitle.resolve(topic));var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
-    for (name,bytes) in zip(names,data){let url=assets.appendingPathComponent(name);if fileHash(url) != sessionFingerprint(bytes){try bytes.write(to:url,options:.atomic)};files["assets/"+name]=sessionFingerprint(bytes)}
+    let body=cloudSessionBody(note,images:names,contexts:contexts,assets:folderAssets,fallbackTitle:DefaultTitle.resolve(topic));var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
+    try fm.createDirectory(at:folderAssets,withIntermediateDirectories:true)
+    for (name,bytes) in zip(names,data){let url=folderAssets.appendingPathComponent(name);if fileHash(url) != sessionFingerprint(bytes){try bytes.write(to:url,options:.atomic)};files["assets/"+name]=sessionFingerprint(bytes)}
     try Data(body.utf8).write(to:markdown,options:.atomic)
-    files.merge(try writeContextAttachments(contexts,names:names,assets:assets,previous:saved.files)){a,_ in a}
+    files.merge(try writeContextAttachments(contexts,names:names,assets:folderAssets,previous:saved.files)){a,_ in a}
     index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower);return
    }
    // Upravená místní kopie zůstává; cloudová verze jde vedle jako <název>_cloud.md.
@@ -1300,19 +1356,20 @@ final class CloudFolders {
    if !fm.fileExists(atPath:copy.path) || fileHash(copy)==saved.cloudCopy{try text.write(to:copy,options:.atomic)}
    var kept=saved;kept.fallback=note.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? DefaultTitle.resolve(topic):"";kept.digest=digest;kept.revision=stamp?.revision?.value;kept.updated=stamp?.updated_at ?? item.updated_at;kept.shas=shas;kept.cloudCopy=sessionFingerprint(text);kept.render=cloudRenderVersion;kept.files.merge(sides){_,b in b};index.put(kept);return
   }
-  // Nová relace: „YYYY-MM-DD Název.md“ v kořeni, obrázky „YYYY-MM-DD Název-N.png“ ve společném assets/.
-  let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)
-  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
-  let body=cloudSessionBody(note,images:names,contexts:contexts,assets:assets,fallbackTitle:DefaultTitle.resolve(topic)),markdown=base.appendingPathComponent(stem+".md")
+  // Nová relace: „YYYY-MM-DD Název.md“ v kořeni nebo podsložce, obrázky „YYYY-MM-DD Název-N.png“ v jejím assets/.
+  let home=want,homeAssets=home.appendingPathComponent("assets");try fm.createDirectory(at:homeAssets,withIntermediateDirectories:true)
+  let stem=flatStem(readableSessionName(note.title,created:parseServerDate(record?.created ?? created) ?? Date(),fallback:DefaultTitle.resolve(topic)),in:home,base:base)
+  var names:[String]=[];for i in data.indices{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(homeAssets,$0) || names.contains($0+".png")}+".png")}
+  let body=cloudSessionBody(note,images:names,contexts:contexts,assets:homeAssets,fallbackTitle:DefaultTitle.resolve(topic)),markdown=home.appendingPathComponent(stem+".md")
   var files=[markdown.lastPathComponent:sessionFingerprint(Data(body.utf8))]
-  for (name,bytes) in zip(names,data){try bytes.write(to:assets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
+  for (name,bytes) in zip(names,data){try bytes.write(to:homeAssets.appendingPathComponent(name),options:.withoutOverwriting);files["assets/"+name]=sessionFingerprint(bytes)}
   try Data(body.utf8).write(to:markdown,options:.withoutOverwriting)
-  files.merge(try writeContextAttachments(contexts,names:names,assets:assets)){a,_ in a}
+  files.merge(try writeContextAttachments(contexts,names:names,assets:homeAssets)){a,_ in a}
   index.put(finished(markdown,body,names,files));writeSessionTag(markdown,lower)
  }
- private func uniqueStem(_ name:String,base:URL)->String {
-  let used=Set(SessionIndex.shared.all.filter{$0.base==SessionIndex.key(base)}.compactMap(\.stem))
-  return uniqueName(name){used.contains($0) || fm.fileExists(atPath:base.appendingPathComponent("assets/"+$0+"-1.png").path) || fm.fileExists(atPath:self.trashURL(base).appendingPathComponent($0+".md").path)}
+ private func uniqueStem(_ name:String,base:URL,home:URL?=nil)->String {
+  let used=Set(SessionIndex.shared.all.filter{$0.base==SessionIndex.key(base)}.compactMap(\.stem)),home=home ?? base
+  return uniqueName(name){used.contains($0) || fm.fileExists(atPath:base.appendingPathComponent("assets/"+$0+"-1.png").path) || fm.fileExists(atPath:home.appendingPathComponent("assets/"+$0+"-1.png").path) || fm.fileExists(atPath:self.trashURL(base).appendingPathComponent($0+".md").path)}
  }
  /// Starší obrázky `assets/<uuid>/N.png` se přejmenují, pokud je nikdo neupravil.
  private func migrateCombined(_ id:UUID,created:String?,topic:Topic,base:URL,endpoint:CloudEndpoint,owner:UUID)->SessionRecord? {
@@ -1335,9 +1392,11 @@ final class CloudFolders {
  /// Společný soubor se skládá ze všech aktivních relací; ručně upravený soubor se nepřepíše.
  @MainActor private func materializeCombined(_ items:[RemoteNoteList.Note],trashed:[RemoteNoteList.Note],topic:Topic,base:URL,endpoint:CloudEndpoint,token:String)async throws {
   guard isCurrent(topic,token:token),let owner=topic.cloudOwnerID,let folderID=topic.cloudFolderID else{throw CloudFailure.invalid}
-  let index=SessionIndex.shared,assets=base.appendingPathComponent("assets",isDirectory:true)
-  var sections:[(SessionRecord,Int)]=[],refreshed=Set<String>(),failure:Error?
-  func present(_ r:SessionRecord)->Bool{r.note != nil && !r.images.isEmpty && r.images.allSatisfy{fm.fileExists(atPath:assets.appendingPathComponent($0).path)}}
+  let index=SessionIndex.shared,name=validCombinedFile(topic.combinedFile) ? topic.combinedFile:defaultCombinedFile
+  var sections:[(SessionRecord,Int)]=[],refreshed=Set<String>(),relocated=Set<String>(),failure:Error?
+  // Obrázky relace leží v assets/ vedle jejího společného souboru (kořen nebo podsložka).
+  func assetsOf(_ r:SessionRecord)->URL{home(r,base:base).appendingPathComponent("assets",isDirectory:true)}
+  func present(_ r:SessionRecord)->Bool{r.note != nil && !r.images.isEmpty && r.images.allSatisfy{fm.fileExists(atPath:assetsOf(r).appendingPathComponent($0).path)}}
   // Relace bez názvu: změna výchozího názvu přegeneruje její blok.
   func markFallback(_ r:inout SessionRecord) {
    let want=(r.note?.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ?? false) ? DefaultTitle.resolve(topic):""
@@ -1348,6 +1407,13 @@ final class CloudFolders {
    var record=index.cloud(item.id,base:base)
    if let saved=record,saved.stem==nil{record=nil}
    if let saved=record,saved.trashed==true{record=restoreCombined(saved,base:base)}
+   // Jiná podsložka na serveru: obrázky jdou k jejímu souboru, blok se přesune při zápisu.
+   let want=container(item.subfolder,base:base)
+   if var saved=record {
+    saved.subfolder=item.subfolder;saved.location=item.location_revision?.value ?? saved.location
+    if topic.subfolders != nil,resolved(item.subfolder,base:base),!saved.file.isEmpty,SessionIndex.key(home(saved,base:base)) != SessionIndex.key(want){saved=moveCombinedImages(saved,to:want,file:want.appendingPathComponent(name),base:base);relocated.insert(saved.id)}
+    if saved != record{index.put(saved);record=saved}
+   }
    if var saved=record,let updated=item.updated_at,saved.updated==updated,item.revision==nil || item.revision?.value==saved.revision,saved.render==cloudRenderVersion,present(saved){markFallback(&saved);sections.append((saved,order));continue}
    let fetched:(RemoteNote,RemoteNoteStamp?,String)
    do{fetched=try await fetchNote(item.id,endpoint:endpoint,token:token)}
@@ -1370,8 +1436,9 @@ final class CloudFolders {
     failure=failure ?? error;if let saved=record{sections.append((saved,order))};continue
    }
    guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
+   let assets=record.map(assetsOf) ?? want.appendingPathComponent("assets",isDirectory:true)
    try fm.createDirectory(at:assets,withIntermediateDirectories:true)
-   let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base)
+   let stem=record?.stem ?? uniqueStem(readableSessionName(note.title,created:parseServerDate(created) ?? Date(),fallback:DefaultTitle.resolve(topic)),base:base,home:want)
    var names=Array((record?.images ?? []).prefix(data.count)),files=record?.files ?? [:]
    for (i,bytes) in data.enumerated() {
     if i>=names.count{names.append(uniqueName(stem+"-\(i+1)"){assetStemTaken(assets,$0) || names.contains($0+".png")}+".png")}
@@ -1389,7 +1456,9 @@ final class CloudFolders {
    files=files.filter{!$0.key.hasSuffix(".context.json") && !$0.key.hasSuffix(".har") && !$0.key.hasSuffix(".mp4")}.merging(sides){a,_ in a}
    var next=cloudRecord(item.id,topic:topic,base:base,body:"",images:names,note:note)
    next.combined=true;next.files=files.filter{names.contains(String($0.key.dropFirst(7))) || sides[$0.key] != nil};next.updated=stamp?.updated_at ?? item.updated_at;next.created=record?.created ?? created
-   next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? "";next.revision=stamp?.revision?.value
+   // Nová relace patří do souboru své podsložky.
+   next.digest=digest;next.shas=data.map(sessionFingerprint);next.note=note;next.stem=stem;next.file=record?.file ?? SessionIndex.key(want.appendingPathComponent(name));next.revision=stamp?.revision?.value
+   next.subfolder=item.subfolder;next.location=item.location_revision?.value ?? record?.location
    // Metadata čtení patří bloku v souboru; nová se zapíšou až s novým blokem.
    next.render=cloudRenderVersion;next.imageTemplate=record?.imageTemplate ?? note.image_template;next.imageComments=record.map{$0.imageComments} ?? cloudImageComments(note,images:names)
    if let saved=record{next.start=saved.start;next.length=saved.length;next.hash=saved.hash;next.heading=saved.heading;next.footer=saved.footer}
@@ -1411,39 +1480,70 @@ final class CloudFolders {
   var skeleton=renderCombinedTemplate(topic.combinedTemplate ?? defaultCombinedTemplate,folderName:folderText.0,folderDescription:folderText.1,sessions:marker)
   if !skeleton.contains(marker){skeleton+=marker}
   let split=(skeleton as NSString).range(of:marker),header=(skeleton as NSString).substring(to:split.location),footer=(skeleton as NSString).substring(from:NSMaxRange(split))
-  var text=header;var placed:[(SessionRecord,Int,String)]=[]
-  for (i,(record,_)) in ordered.enumerated() {
-   if i>0{text+="\n\n---\n\n"}
-   let body=cloudSessionBody(record.note!,images:record.images,contexts:diskContexts(record.images,assets:assets),fallbackTitle:DefaultTitle.resolve(topic));placed.append((record,(text as NSString).length,body));text+=body
-  }
-  text+=footer
-  let name=validCombinedFile(topic.combinedFile) ? topic.combinedFile:defaultCombinedFile
-  var target=base.appendingPathComponent(name)
-  let generated=Data(text.utf8),existing=try? boundedData(target,max:20000000)
-  let baseline=index.generated(target) ?? readReceipt(receiptFile(endpoint,owner:owner,base:base,id:folderID,kind:"combined-file:"+name))?.fingerprint
+  // Jeden společný soubor na adresář: kořen vždy, podsložka s relacemi nebo s dřív zapsaným souborem.
+  var groups:[String:(URL,[SessionRecord])]=[SessionIndex.key(base):(base,[])]
+  for (record,_) in ordered{let dir=home(record,base:base);groups[SessionIndex.key(dir),default:(dir,[])].1.append(record)}
+  for dir in (resolvedSubfolders[SessionIndex.key(base)] ?? [:]).values where groups[SessionIndex.key(dir)]==nil && index.generated(dir.appendingPathComponent(name)) != nil{groups[SessionIndex.key(dir)]=(dir,[])}
   guard try Topics.checkedDestination(topic.folder)==base,isCurrent(topic,token:token) else{throw CloudFailure.invalid}
-  try fm.createDirectory(at:base,withIntermediateDirectories:true)
-  let mainKey=SessionIndex.key(target),current=existing.flatMap{String(data:$0,encoding:.utf8)}.map{$0 as NSString}
-  // Ručně vedený soubor, který už obsahuje všechny relace beze změny, nepotřebuje kopii _cloud.
-  let covered=existing != generated && existing.map(sessionFingerprint) != baseline && current != nil && !placed.isEmpty && placed.allSatisfy{entry in entry.0.file==mainKey && !refreshed.contains(entry.0.id) && locateSession(entry.0,in:current!,avoid:[]).map{sessionFingerprint(Data(current!.substring(with:$0.0).utf8))==entry.0.hash}==true}
-  if existing==generated || covered{}
-  else if existing==nil || existing.map(sessionFingerprint)==baseline{try generated.write(to:target,options:.atomic)}
-  else {
-   target=try writeGeneratedCopy(generated,to:base.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.md"))
-  }
-  index.batch {
-   if !covered{index.setGenerated(target,sessionFingerprint(generated))}
-   for (record,start,body) in placed {
-    // Bloky z ručně upraveného hlavního souboru se dál hlídají v něm a drží svou pozici.
-    var next=record;next.combined=true
-    if record.file==mainKey && (covered || SessionIndex.key(target) != mainKey){index.put(next);continue}
-    if let note=next.note{next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:next.images)}
-    next.file=SessionIndex.key(target);next.start=start;next.length=(body as NSString).length;next.hash=sessionFingerprint(Data(body.utf8))
-    next.heading=firstLine(body);next.footer=footer;index.put(next)
+  for (_,(dir,list)) in groups.sorted(by:{$0.key<$1.key}) {
+   let assets=dir.appendingPathComponent("assets",isDirectory:true)
+   var text=header;var placed:[(SessionRecord,Int,String)]=[]
+   for (i,record) in list.enumerated() {
+    if i>0{text+="\n\n---\n\n"}
+    let body=cloudSessionBody(record.note!,images:record.images,contexts:diskContexts(record.images,assets:assets),fallbackTitle:DefaultTitle.resolve(topic));placed.append((record,(text as NSString).length,body));text+=body
    }
+   text+=footer
+   var target=dir.appendingPathComponent(name)
+   let generated=Data(text.utf8),existing=try? boundedData(target,max:20000000)
+   // Účtenka starší verze patří jen souboru v kořeni.
+   let root=SessionIndex.key(dir)==SessionIndex.key(base)
+   let baseline=index.generated(target) ?? (root ? readReceipt(receiptFile(endpoint,owner:owner,base:base,id:folderID,kind:"combined-file:"+name))?.fingerprint:nil)
+   try fm.createDirectory(at:dir,withIntermediateDirectories:true)
+   let mainKey=SessionIndex.key(target),current=existing.flatMap{String(data:$0,encoding:.utf8)}.map{$0 as NSString}
+   // Ručně vedený soubor, který už obsahuje všechny relace beze změny, nepotřebuje kopii _cloud.
+   let covered=existing != generated && existing.map(sessionFingerprint) != baseline && current != nil && !placed.isEmpty && placed.allSatisfy{entry in entry.0.file==mainKey && !refreshed.contains(entry.0.id) && locateSession(entry.0,in:current!,avoid:[]).map{sessionFingerprint(Data(current!.substring(with:$0.0).utf8))==entry.0.hash}==true}
+   if existing==generated || covered{}
+   else if existing==nil || existing.map(sessionFingerprint)==baseline{try generated.write(to:target,options:.atomic)}
+   else {
+    target=try writeGeneratedCopy(generated,to:dir.appendingPathComponent((name as NSString).deletingPathExtension+"_cloud.md"))
+   }
+   index.batch {
+    if !covered{index.setGenerated(target,sessionFingerprint(generated))}
+    for (record,start,body) in placed {
+     // Bloky z ručně upraveného hlavního souboru se dál hlídají v něm a drží svou pozici.
+     var next=record;next.combined=true
+     // Přesunutá relace vždy ukazuje tam, kam se její blok zapsal.
+     if record.file==mainKey && (covered || SessionIndex.key(target) != mainKey) && !relocated.contains(record.id){index.put(next);continue}
+     if let note=next.note{next.imageTemplate=note.image_template;next.imageComments=cloudImageComments(note,images:next.images)}
+     next.file=SessionIndex.key(target);next.start=start;next.length=(body as NSString).length;next.hash=sessionFingerprint(Data(body.utf8))
+     next.heading=firstLine(body);next.footer=footer;index.put(next)
+    }
+   }
+   tagCombinedFile(target)
   }
-  tagCombinedFile(target)
   if let failure{throw failure}
+ }
+ /// Obrázky relace společného souboru se přesunou do assets/ jiného adresáře; obsazené názvy dostanou příponu.
+ private func moveCombinedImages(_ record:SessionRecord,to target:URL,file:URL,base:URL)->SessionRecord {
+  let source=home(record,base:base).appendingPathComponent("assets"),assets=target.appendingPathComponent("assets")
+  var next=record,renamed:[String:String]=[:]
+  try? fm.createDirectory(at:assets,withIntermediateDirectories:true)
+  for image in record.images where !image.contains("/") && fm.fileExists(atPath:source.appendingPathComponent(image).path) {
+   let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
+   let name=uniqueName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:assets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
+   for (from,to) in zip([source.appendingPathComponent(image)]+assetContextFiles(source,image)+assetVideoFiles(source,image),[assets.appendingPathComponent(name)]+assetContextFiles(assets,name)+assetVideoFiles(assets,name)) where fm.fileExists(atPath:from.path){try? fm.moveItem(at:from,to:to)}
+   if name != image{renamed[image]=name}
+  }
+  next.images=next.images.map{renamed[$0] ?? $0}
+  next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
+  next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
+  for (old,new) in renamed {
+   let o=(old as NSString).deletingPathExtension,n=(new as NSString).deletingPathExtension
+   for (from,to) in [(old,new),(o+".context.json",n+".context.json"),(o+".har",n+".har"),(o+".mp4",n+".mp4")]{if let hash=next.files.removeValue(forKey:"assets/"+from){next.files["assets/"+to]=hash}}
+  }
+  // Blok zatím v novém souboru není; zapíše se při skládání.
+  next.file=SessionIndex.key(file);next.start=0;next.length=0;next.hash=""
+  return next
  }
  /// Otisky obrázků, které server u stažené relace má.
  func serverImages(for target:PreviousSessionTarget,topic:Topic)->(UUID,[String])? {
@@ -1576,5 +1676,259 @@ final class CloudFolders {
    result.append(data)
   }
   return result
+ }
+}
+
+// MARK: - Podsložky
+private struct SubfolderEnvelope:Decodable{let data:Created;struct Created:Decodable{let id:UUID;let parent_id:UUID?;let name:String;let revision:FlexibleString;let subfolders_revision:FlexibleString?}}
+private struct MoveResult:Decodable{let data:Location}
+private struct Location:Decodable{let subfolder_id:UUID?;let location_revision:FlexibleString}
+private struct LocationConflict:Decodable{let current:Location}
+
+extension CloudFolders {
+ /// Adresář relací podsložky z posledního průchodu; neznámá podsložka je kořen složky.
+ func container(_ subfolder:String?,base:URL)->URL {
+  guard let subfolder,let id=UUID(uuidString:subfolder) else{return base}
+  return resolvedSubfolders[SessionIndex.key(base)]?[id] ?? base
+ }
+ /// Kořen nebo podsložka, která má v tomto průchodu adresář; jinak se umístění nemění.
+ private func resolved(_ subfolder:String?,base:URL)->Bool{subfolder.flatMap(UUID.init(uuidString:)).map{resolvedSubfolders[SessionIndex.key(base)]?[$0] != nil} ?? true}
+ /// Podsložka podle adresáře: nil = kořen, .some(nil) neexistuje; neznámý adresář je nil.
+ private func subfolder(at directory:URL,base:URL)->String?? {
+  let key=SessionIndex.key(directory)
+  if key==SessionIndex.key(base){return .some(nil)}
+  // Podle identity adresáře; cesta se může lišit velikostí písmen.
+  let identity=itemIdentity(directory)
+  return (resolvedSubfolders[SessionIndex.key(base)] ?? [:]).first{SessionIndex.key($0.value)==key || (identity != nil && itemIdentity($0.value)==identity)}.map{.some($0.key.uuidString.lowercased())}
+ }
+ /// Skutečný název položky na disku (výchozí svazek nerozlišuje velikost písmen v cestě).
+ private func diskName(_ url:URL)->String {
+  let identity=itemIdentity(url)
+  return ((try? fm.contentsOfDirectory(atPath:url.deletingLastPathComponent().path)) ?? []).first{itemIdentity(url.deletingLastPathComponent().appendingPathComponent($0))==identity} ?? url.lastPathComponent
+ }
+ /// Adresář, ve kterém relace leží: Markdown ploché relace, jinak nadřazený adresář starší podsložky.
+ private func home(_ record:SessionRecord,base:URL)->URL{record.file.isEmpty ? base:isRoot(record,base) || record.stem != nil ? URL(fileURLWithPath:record.file).deletingLastPathComponent():record.directory.deletingLastPathComponent()}
+ /// Adresář s assets/ ploché relace: vedle Markdownu; Markdown přesunutý dřív bez obrázků je má v kořeni.
+ private func imageHome(_ record:SessionRecord,base:URL)->URL {
+  let home=home(record,base:base)
+  guard record.stem==nil,let first=record.images.first,!first.contains("/"),!fm.fileExists(atPath:home.appendingPathComponent("assets/"+first).path),fm.fileExists(atPath:base.appendingPathComponent("assets/"+first).path) else{return home}
+  return base
+ }
+ /// Adresáře podsložek do hloubky 2 podle identity.
+ private func subfolderDirectories(_ base:URL)->[String:URL] {
+  var result:[String:URL]=[:]
+  func children(_ url:URL)->[URL]{((try? fm.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles])) ?? []).filter{let v=try? $0.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey]);return v?.isDirectory==true && v?.isSymbolicLink != true && $0.lastPathComponent != "assets"}}
+  for top in children(base).prefix(5000) {
+   if let id=itemIdentity(top){result[id]=top}
+   for child in children(top).prefix(5000){if let id=itemIdentity(child){result[id]=child}}
+  }
+  return result
+ }
+ /// Strom ze serveru na disku: adresář podle ID a identity, přejmenování a přesun atomicky, nové se vytvoří.
+ /// Cizí adresář se stejným názvem se nikdy neslučuje, podsložka dostane příponu. Vrací adresáře smazaných podsložek.
+ @discardableResult func applySubfolders(_ topic:Topic,base:URL)->[(UUID,URL)] {
+  let index=SessionIndex.shared,links=index.subfolderLinks(base:base),key=SessionIndex.key(base)
+  // Starší server strom neposílá: zůstává poslední známé mapování.
+  guard let list=topic.subfolders else{resolvedSubfolders[key]=links.compactMapValues{fm.fileExists(atPath:$0.path) ? URL(fileURLWithPath:$0.path,isDirectory:true):nil};return []}
+  var resolved:[UUID:URL]=[:],claimed=Set<String>(),scanned:[String:URL]?
+  func locate(_ link:SubfolderLink)->URL? {
+   guard let inode=link.inode else{return nil}
+   let url=URL(fileURLWithPath:link.path,isDirectory:true)
+   if itemIdentity(url)==inode{return url}
+   if scanned==nil{scanned=subfolderDirectories(base)}
+   return scanned?[inode].flatMap{itemIdentity($0)==inode ? $0:nil}
+  }
+  for (item,_) in orderedSubfolders(list) {
+   guard let parent=item.parent.map({resolved[$0]}) ?? base else{continue}
+   // Mapování se čte znovu: přejmenování rodiče posunulo cesty dětí.
+   let current=index.subfolderLinks(base:base)[item.id].flatMap(locate).flatMap{claimed.contains(itemIdentity($0) ?? "") ? nil:$0},identity=current.flatMap(itemIdentity)
+   // Volný název v rodiči; obsazený jiným adresářem dostane příponu.
+   let name=uniqueName(item.name){candidate in let url=parent.appendingPathComponent(candidate);guard fm.fileExists(atPath:url.path) else{return false};return identity==nil || itemIdentity(url) != identity}
+   var target=parent.appendingPathComponent(name,isDirectory:true)
+   if let current {
+    let old=SessionIndex.key(current)
+    if old != SessionIndex.key(target) || diskName(current) != name {
+     if rename(current.path,target.path)==0{index.movePaths(from:old,to:SessionIndex.key(target));scanned=nil}else{target=current}
+    }
+   } else {
+    guard (try? fm.createDirectory(at:target,withIntermediateDirectories:false)) != nil else{continue}
+   }
+   resolved[item.id]=target;if let id=itemIdentity(target){claimed.insert(id)}
+   index.setSubfolderLink(base:base,item.id,SubfolderLink(path:SessionIndex.key(target),inode:itemIdentity(target)))
+  }
+  // Na serveru smazané podsložky: mapování zmizí, prázdný adresář se uklidí po zpracování koše.
+  var orphans:[(UUID,URL)]=[]
+  let alive=Set(list.map(\.id))
+  for (id,link) in links where !alive.contains(id) {
+   if let url=locate(link),!claimed.contains(itemIdentity(url) ?? ""){orphans.append((id,url))}else{index.setSubfolderLink(base:base,id,nil)}
+  }
+  resolvedSubfolders[key]=resolved
+  return orphans.sorted{$0.1.path.count>$1.1.path.count}
+ }
+ /// Adresář smazané podsložky zmizí, jen když v něm nic nezůstalo; jinak zůstane jako obyčejný adresář.
+ private func removeOrphans(_ orphans:[(UUID,URL)],base:URL) {
+  for (id,url) in orphans {
+   SessionIndex.shared.setSubfolderLink(base:base,id,nil)
+   guard fm.fileExists(atPath:url.path) else{continue}
+   let files=(fm.enumerator(at:url,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles])?.allObjects as? [URL] ?? []).filter{(try? $0.resourceValues(forKeys:[.isRegularFileKey]))?.isRegularFile==true}
+   // Vygenerovaný společný soubor beze změny se počítá jako prázdno.
+   if files.allSatisfy({SessionIndex.shared.generated($0) != nil && SessionIndex.shared.generated($0)==fileHash($0)}){try? recycle(url)}
+   else{let text=LF("Podsložka %@ už v cloudu není. Místní soubory v ní zůstaly.",url.lastPathComponent);if !messages.contains(text){say(text)}}
+  }
+ }
+ /// Přesune relaci do jiného adresáře: Markdown, obrázky s videem a kontextem; obsazené názvy dostanou příponu.
+ /// `from` je adresář, kde leží její obrázky (u přesunu z Finderu se Markdown už přesunul sám).
+ private func relocate(_ record:SessionRecord,from:URL,to target:URL,base:URL)->SessionRecord? {
+  guard record.trashed != true,record.stem==nil else{return nil}
+  let index=SessionIndex.shared
+  guard (try? fm.createDirectory(at:target,withIntermediateDirectories:true)) != nil else{return nil}
+  if !isRoot(record,base) {
+   // Starší adresář relace se přesune celý.
+   let directory=record.directory,markdown=URL(fileURLWithPath:record.file).lastPathComponent
+   guard fm.fileExists(atPath:directory.path) else{return nil}
+   if SessionIndex.key(directory.deletingLastPathComponent())==SessionIndex.key(target){return record}
+   let destination=target.appendingPathComponent(uniqueName(directory.lastPathComponent){fm.fileExists(atPath:target.appendingPathComponent($0).path)},isDirectory:true)
+   guard (try? fm.moveItem(at:directory,to:destination)) != nil else{return nil}
+   var next=record;next.file=SessionIndex.key(destination.appendingPathComponent(markdown));next.inode=itemIdentity(destination);index.put(next);return next
+  }
+  var next=record,markdown=URL(fileURLWithPath:record.file)
+  guard fm.fileExists(atPath:markdown.path) else{return nil}
+  if SessionIndex.key(markdown.deletingLastPathComponent()) != SessionIndex.key(target) {
+   let stem=markdown.deletingPathExtension().lastPathComponent
+   let destination=target.appendingPathComponent(uniqueName(stem){fm.fileExists(atPath:target.appendingPathComponent($0+".md").path)}+".md")
+   guard (try? fm.moveItem(at:markdown,to:destination)) != nil else{return nil}
+   if let hash=next.files.removeValue(forKey:markdown.lastPathComponent){next.files[destination.lastPathComponent]=hash}
+   markdown=destination;next.file=SessionIndex.key(destination)
+  }
+  var renamed:[String:String]=[:]
+  if SessionIndex.key(from) != SessionIndex.key(target) {
+   let sourceAssets=from.appendingPathComponent("assets"),targetAssets=target.appendingPathComponent("assets"),own=Set(ownImages(record,container:from))
+   for image in record.images where fm.fileExists(atPath:sourceAssets.appendingPathComponent(image).path) {
+    let stem=(image as NSString).deletingPathExtension,ext=(image as NSString).pathExtension
+    let name=uniqueName(stem){candidate in [ext,"context.json","har","mp4","frames"].contains{fm.fileExists(atPath:targetAssets.appendingPathComponent(candidate+"."+$0).path)}}+"."+ext
+    let sources=[sourceAssets.appendingPathComponent(image)]+assetContextFiles(sourceAssets,image)+assetVideoFiles(sourceAssets,image)
+    let targets=[targetAssets.appendingPathComponent(name)]+assetContextFiles(targetAssets,name)+assetVideoFiles(targetAssets,name)
+    try? fm.createDirectory(at:targetAssets,withIntermediateDirectories:true)
+    for (source,destination) in zip(sources,targets) where fm.fileExists(atPath:source.path){if own.contains(image){try? fm.moveItem(at:source,to:destination)}else{try? fm.copyItem(at:source,to:destination)}}
+    if name != image{renamed[image]=name}
+   }
+  }
+  if !renamed.isEmpty {
+   // Obsazený název: záznam i odkazy v Markdownu ukazují na přejmenovaný obrázek.
+   next.images=next.images.map{renamed[$0] ?? $0}
+   next.notes=Dictionary(next.notes.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})
+   next.imageComments=next.imageComments.map{Dictionary($0.map{(renamed[$0.key] ?? $0.key,$0.value)},uniquingKeysWith:{a,_ in a})}
+   for (old,new) in renamed {
+    let o=(old as NSString).deletingPathExtension,n=(new as NSString).deletingPathExtension
+    for (from,to) in [(old,new),(o+".context.json",n+".context.json"),(o+".har",n+".har"),(o+".mp4",n+".mp4")]{if let hash=next.files.removeValue(forKey:"assets/"+from){next.files["assets/"+to]=hash}}
+   }
+   if let text=(try? boundedData(markdown,max:20000000)).flatMap({String(data:$0,encoding:.utf8)}) {
+    let key=markdown.lastPathComponent,pristine=fileHash(markdown)==next.files[key],output=rewriteImageLinks(text,order:record.images,rename:renamed)
+    if output != text,(try? Data(output.utf8).write(to:markdown,options:.atomic)) != nil {
+     if pristine{next.files[key]=sessionFingerprint(Data(output.utf8));next.length=(output as NSString).length;next.hash=sessionFingerprint(Data(output.utf8));next.heading=firstLine(output)}
+    }
+   }
+  }
+  index.put(next);writeSessionTag(markdown,record.id)
+  return next
+ }
+ /// Relace přesunutá ve Finderu: známá podsložka jde na server, jinak se vrátí na místo podle cloudu.
+ @MainActor private func applyLocalMoves(_ moves:[(SessionRecord,URL)],topic:Topic,base:URL,active:inout [RemoteNoteList.Note],endpoint:CloudEndpoint,token:String)async throws {
+  let index=SessionIndex.shared
+  func back(_ record:SessionRecord,_ message:String?) {
+   let expected=container(record.subfolder,base:base)
+   _ = relocate(record,from:expected,to:expected,base:base)
+   if let message,!messages.contains(message){say(message)}
+  }
+  func patch(_ id:String,_ subfolder:UUID?,_ revision:String) {
+   if let i=active.firstIndex(where:{$0.id.uuidString.lowercased()==id}){active[i].subfolder_id=subfolder;active[i].location_revision=FlexibleString(revision)}
+  }
+  for (record,actual) in moves {
+   let expected=container(record.subfolder,base:base),root=SessionIndex.key(base),inside=SessionIndex.key(actual)
+   let relative=inside.hasPrefix(root+"/") ? String(inside.dropFirst(root.count+1)):actual.lastPathComponent
+   guard let target=subfolder(at:actual,base:base) else{back(record,LF("Adresář %@ není podsložka v cloudu. Vytvoř ji v aplikaci nebo na webu.",relative));continue}
+   // Cizí relaci v týmové složce přesouvá jen autor nebo správce.
+   let listed=active.first{$0.id.uuidString.lowercased()==record.id},author=listed?.author?.id?.uuidString.lowercased() ?? record.authorID
+   // Bez známé revize umístění (první průchod po upgradu serveru) vyhrává server, když relaci mezitím přesunul.
+   if record.location==nil,let listed,listed.subfolder != record.subfolder {
+    var moved=record;moved.subfolder=listed.subfolder;moved.location=listed.location_revision?.value;index.put(moved)
+    _ = relocate(moved,from:expected,to:container(moved.subfolder,base:base),base:base);continue
+   }
+   guard topic.canManageCloudFolder || (account != nil && author==account?.0.uuidString.lowercased()) else{back(record,LF("Relaci „%@“ v týmové složce smí přesunout jen autor nebo správce. Vrátil jsem ji na místo.",record.title));continue}
+   let revision=record.location ?? active.first{$0.id.uuidString.lowercased()==record.id}?.location_revision?.value ?? "0"
+   let body=try JSONSerialization.data(withJSONObject:["subfolder_id":target.map{$0 as Any} ?? NSNull(),"location_revision":revision])
+   do {
+    let data=try await send(endpoint,"/api/v1/sessions/"+record.id+"/move","POST",token,body)
+    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
+    let result=try JSONDecoder().decode(MoveResult.self,from:data).data
+    guard var next=relocate(record,from:expected,to:actual,base:base) else{continue}
+    next.subfolder=result.subfolder_id?.uuidString.lowercased();next.location=result.location_revision.value;index.put(next)
+    patch(record.id,result.subfolder_id,result.location_revision.value)
+   }
+   catch let failure as CloudFailure where failure.status==409 && failure.code=="location_conflict" {
+    guard isCurrent(topic,token:token) else{throw CloudFailure.invalid}
+    // Server vyhrává: relace jde tam, kde ji má cloud.
+    guard let current=failure.details.flatMap({try? JSONDecoder().decode(LocationConflict.self,from:$0)})?.current else{back(record,nil);continue}
+    var moved=record;moved.subfolder=current.subfolder_id?.uuidString.lowercased();moved.location=current.location_revision.value;index.put(moved)
+    _ = relocate(moved,from:expected,to:container(moved.subfolder,base:base),base:base)
+    patch(record.id,current.subfolder_id,current.location_revision.value)
+    let text=LF("Relaci „%@“ mezitím přesunul někdo jiný. Je tam, kde ji má cloud.",record.title);if !messages.contains(text){say(text)}
+   }
+   catch let failure as CloudFailure where failure.status==409 && failure.code=="session_trashed"{continue}
+   catch let failure as CloudFailure where failure.isRoleForbidden{back(record,LF("Relaci „%@“ v týmové složce smí přesunout jen autor nebo správce. Vrátil jsem ji na místo.",record.title))}
+   catch let failure as CloudFailure where [400,404,409].contains(failure.status){back(record,LF("Relaci „%@“ nešlo v cloudu přesunout. Vrátil jsem ji na místo.",record.title))}
+   catch {
+    guard isCurrent(topic,token:token) else{throw error}
+    // Přechodná chyba: soubory zůstávají, přesun se zkusí v dalším průchodu.
+    localMoves.insert(record.id)
+   }
+  }
+ }
+ /// Nová podsložka cloudové složky: nejdřív server (vlastní ID kvůli opakování), pak adresář na disku.
+ @MainActor func createSubfolder(_ topic:Topic,name raw:String,parent:UUID?,id:UUID=UUID())async throws->CloudSubfolder {
+  let name=cleanSubfolderName(raw)
+  guard validSubfolderName(name) else{throw Self.invalidSubfolderName}
+  guard let c=currentConnection(),let endpoint=CloudEndpoint(c.endpoint),let folder=topic.cloudFolderID,topic.cloudOrigin==c.endpoint else{throw CloudFailure.invalid}
+  activate(c)
+  guard let record=records.first(where:{matches($0,topic) && $0.unavailable != true}) else{throw CloudFailure.invalid}
+  guard record.topic.canManageCloudFolder else{throw Self.subfolderForbidden}
+  var body:[String:Any]=["id":id.uuidString.lowercased(),"name":name];if let parent{body["parent_id"]=parent.uuidString.lowercased()}
+  let data:Data
+  do{data=try await send(endpoint,"/api/v1/folders/"+folder.uuidString.lowercased()+"/subfolders","POST",c.token,try JSONSerialization.data(withJSONObject:body))}
+  catch let failure as CloudFailure {
+   if ["parent_not_found","subfolder_conflict"].contains(failure.code ?? ""){await refresh(c)}
+   throw Self.friendlySubfolder(failure)
+  }
+  let created=try JSONDecoder().decode(SubfolderEnvelope.self,from:data).data
+  guard currentConnection()?.token==c.token,created.id==id,created.parent_id==parent,let i=records.firstIndex(where:{matches($0,topic)}) else{throw CloudFailure.invalid}
+  let value=CloudSubfolder(id:id,parent:parent,name:created.name,revision:created.revision.value)
+  var updated=records,tree=updated[i].subfolders ?? []
+  tree.removeAll{$0.id==id};tree.append(value);updated[i].subfolders=validSubfolderTree(tree)
+  updated[i].subfoldersRevision=created.subfolders_revision?.value ?? updated[i].subfoldersRevision
+  try persist(updated)
+  // Adresář vzniká až po potvrzení serveru a mapuje se podle identity.
+  if !updated[i].folder.isEmpty,let base=try? Topics.checkedDestination(updated[i].folder),fm.fileExists(atPath:base.path){applySubfolders(updated[i].topic,base:base)}
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+  return value
+ }
+ /// Adresář podsložky na tomto Macu (mapování podle identity), nebo nil.
+ func subfolderDirectory(_ topic:Topic,_ id:UUID)->URL? {
+  guard !topic.folder.isEmpty,let base=try? Topics.checkedDestination(topic.folder) else{return nil}
+  if let url=resolvedSubfolders[SessionIndex.key(base)]?[id],fm.fileExists(atPath:url.path){return url}
+  return SessionIndex.shared.subfolderLinks(base:base)[id].flatMap{fm.fileExists(atPath:$0.path) ? URL(fileURLWithPath:$0.path,isDirectory:true):nil}
+ }
+ static var invalidSubfolderName:CloudFailure{CloudFailure(L("Název podsložky může mít 1–100 znaků bez / \\ : * ? \" < > |, nesmí začínat tečkou ani to být „assets“."),status:400,code:"invalid_subfolder_name")}
+ static var subfolderForbidden:CloudFailure{CloudFailure(L("Podsložky týmové složky spravuje jen vlastník nebo správce týmu."),status:403,code:"role_forbidden")}
+ static func friendlySubfolder(_ failure:CloudFailure)->CloudFailure {
+  switch failure.code {
+  case "subfolder_name_taken":return CloudFailure(L("Podsložka s tímto názvem už existuje."),status:failure.status,code:failure.code)
+  case "subfolder_depth_limit":return CloudFailure(L("Podsložky mohou mít nejvýš dvě úrovně."),status:failure.status,code:failure.code)
+  case "subfolder_limit":return CloudFailure(L("Složka může mít nejvýš 500 podsložek."),status:failure.status,code:failure.code)
+  case "parent_not_found","subfolder_conflict":return CloudFailure(L("Podsložky se mezitím změnily. Načetl jsem aktuální stav, zkus to znovu."),status:failure.status,code:failure.code)
+  case "invalid_subfolder_name":return invalidSubfolderName
+  case "role_forbidden":return subfolderForbidden
+  case nil where failure.status==404:return CloudFailure(L("Server zatím podsložky nepodporuje."),status:404)
+  default:return friendly(failure)
+  }
  }
 }

@@ -19,6 +19,8 @@ struct Topic:Codable,Equatable {
  var defaultTitle:String? = nil
  // Kontext z prohlížeče u lokální složky; nil znamená výchozí politiku.
  var contextPolicy:ContextPolicy? = nil
+ // Cloudová složka: strom podsložek ze serveru.
+ var subfolders:[CloudSubfolder]? = nil
  /// Zobrazovaný název; týmová složka má vždy předponu týmu.
  var displayName:String{cloudTeam==true ? LF("%@ · %@",cloudOwnerName ?? L("Tým"),name):name}
  /// Přejmenovat, nastavit a smazat týmovou složku smí jen vlastník nebo správce týmu.
@@ -185,6 +187,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  private(set) var syncButton:AppButton!;private var saveButton:AppButton!;private var addButton:AppButton!;private var templateButton:AppButton!;private var chooseFolderButton:AppButton!
  private(set) var pencil:AppButton!;let star=StarButton();private let nameShell=AdaptiveInputBackground(frame:.zero);private let nameClick=NSClickGestureRecognizer()
  private var fileLabel:NSTextField!;private(set) var syncCaption:NSTextField!
+ // Náhled stromu podsložek; spravuje se ve snímání nebo na webu.
+ private(set) var subfolderButton:AppButton!
  let name=CenteredTextField(),detail=CenteredTextField(),folder=CenteredTextField(),file=CenteredTextField()
  var template=defaultMarkdownTemplate;var fileTemplate:String?;var commentTemplate:String?;var imageTemplate:String?
  var pendingDefault=false
@@ -232,6 +236,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   view.addSubview(sectionLabel(L("Popis"),NSRect(x:272,y:478,width:600,height:18)));inputShell(detail,frame:NSRect(x:272,y:436,width:600,height:36),in:view)
   detail.placeholderString=L("Krátký popis pro snazší výběr")
   view.addSubview(sectionLabel(L("Složka"),NSRect(x:272,y:406,width:600,height:18)))
+  subfolderButton=styledButton("",symbol:"list.bullet.indent",role:.quiet,frame:NSRect(x:652,y:401,width:220,height:26),target:self,action:#selector(showSubfolders(_:)));subfolderButton.alignment = .right;view.addSubview(subfolderButton)
   inputShell(folder,frame:NSRect(x:272,y:364,width:450,height:36),in:view);folder.placeholderString=L("Vyber místní adresář")
   chooseFolderButton=styledButton(L("Vybrat…"),symbol:"folder",frame:NSRect(x:736,y:365,width:136,height:34),target:self,action:#selector(chooseFolder));view.addSubview(chooseFolderButton)
   syncButton=styledButton(L("Synchronizovat s cloudem"),symbol:"icloud.and.arrow.up",frame:NSRect(x:272,y:314,width:250,height:34),target:self,action:#selector(syncSelected));view.addSubview(syncButton)
@@ -272,7 +277,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func reloadFolders(){
   table.reloadData();let row=rows.firstIndex{$0.id==editingID} ?? (rows.isEmpty ? nil:0)
   if let row{table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);load(rows[row])}
-  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading();loadedForm=nil}
+  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading();loadedForm=nil;updateSubfolders(nil)}
   updateMode()
  }
  func numberOfRows(in tableView:NSTableView)->Int{rows.count}
@@ -344,6 +349,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;layoutHeading();updateMode();markLoaded()
+  updateSubfolders(topic)
   if let other=Topics.overlapping(topic,among:list){showStatus(Topics.nestedError(other).message,warning:true)}
  }
  /// Týmovou složku smí nastavovat jen vlastník nebo správce; člen mění jen místní adresář.
@@ -370,6 +376,25 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard editingID != defaultID else{return}
   if isExportingDesign{previewDefaultID=editingID}else{UserDefaults.standard.set(editingID,forKey:"defaultTopic")}
   reloadTable();layoutHeading()
+ }
+ /// Počet podsložek u nadpisu Složka; bez podpory serveru (nebo bez místního adresáře) skryté.
+ func updateSubfolders(_ topic:Topic?) {
+  guard let subfolderButton else{return}
+  let supported=topic.map{$0.cloudFolderID != nil ? $0.subfolders != nil:!$0.folder.isEmpty} ?? false
+  let count=supported ? topic.map(subfolderChoices)?.count ?? 0:0
+  subfolderButton.isHidden = !supported
+  subfolderButton.title=count==0 ? L("Bez podsložek"):LP(count,"%ld podsložka","%ld podsložky","%ld podsložek",count)
+  subfolderButton.toolTip=L("Podsložky vytvoříš ve snímání (Podsložka → Nová podsložka…) nebo na webu.")
+  subfolderButton.needsDisplay=true
+ }
+ @objc func showSubfolders(_ sender:NSButton){
+  guard let topic=list.first(where:{$0.id==editingID}) else{return}
+  let menu=NSMenu();menu.autoenablesItems=false
+  let choices=subfolderChoices(topic)
+  for choice in choices{let item=NSMenuItem(title:choice.name,action:nil,keyEquivalent:"");item.isEnabled=false;item.indentationLevel=choice.depth;item.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil);menu.addItem(item)}
+  if !choices.isEmpty{menu.addItem(.separator())}
+  let hint=NSMenuItem(title:topic.cloudFolderID != nil ? L("Spravuješ je ve snímání nebo na webu."):L("Vytvoříš je ve snímání; jsou to adresáře ve složce."),action:nil,keyEquivalent:"");hint.isEnabled=false;menu.addItem(hint)
+  menu.popUp(positioning:nil,at:NSPoint(x:0,y:sender.isFlipped ? sender.bounds.maxY+4:sender.bounds.minY-4),in:sender)
  }
  @objc func updateMode(){
   let cloud=editingCloud,combined=mode.indexOfSelectedItem==1,saved=list.contains{$0.id==editingID}

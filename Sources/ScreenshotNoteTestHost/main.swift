@@ -24,7 +24,7 @@ if CommandLine.arguments.contains("--folder-sync-self-test") {
 
 if CommandLine.arguments.contains("--folder-safety-self-test") {
  _ = NSApplication.shared;NSApp.setActivationPolicy(.prohibited)
- Task{@MainActor in do{try await missingRootTests();try await nestedFolderTests();print("Folder safety self-test passed");exit(0)}catch{fputs("Folder safety test failed: \(error)\n",stderr);exit(1)}}
+ Task{@MainActor in do{try await missingRootTests();try await nestedFolderTests();try await subfolderTests();print("Folder safety self-test passed");exit(0)}catch{fputs("Folder safety test failed: \(error)\n",stderr);exit(1)}}
  dispatchMain()
 }
 

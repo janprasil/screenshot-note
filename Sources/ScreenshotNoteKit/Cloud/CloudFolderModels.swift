@@ -30,12 +30,14 @@ struct CloudFolderRecord:Codable {
  var defaultTitle:String? = nil
  // Místní stav Macu: adresář složky zmizel, nebo ho uživatel na tomto Macu odpojil.
  var missingRoot:Bool? = nil;var detached:Bool? = nil
+ // Strom podsložek a jeho revize ze serveru; starší server je neposílá.
+ var subfolders:[CloudSubfolder]? = nil;var subfoldersRevision:String? = nil
  var account:UUID{accountID ?? owner}
  var isTeam:Bool{owner != account || ownerKind==LibraryKind.team.rawValue}
- enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable,aiTitle,defaultTitle,missingRoot,detached;case accountID="account"}
+ enum CodingKeys:String,CodingKey{case id,name,owner,origin,folder,migratedLocalIDs,revision,description,combined,combinedFile,markdownTemplate,combinedTemplate,commentTemplate,imageTemplate,itemTemplates,remoteDeleted,confirmLocalDeletes,ownerKind,ownerName,role,unavailable,aiTitle,defaultTitle,missingRoot,detached,subfolders,subfoldersRevision;case accountID="account"}
  var topic:Topic {
   var value=Topic(id:"cloud:"+origin+":"+owner.uuidString+":"+id.uuidString,name:name,detail:description ?? "",folder:folder,combined:combined ?? false,combinedFile:combinedFile.flatMap{$0.isEmpty ? nil:$0} ?? defaultCombinedFile,markdownTemplate:markdownTemplate,cloudFolderID:id,cloudOwnerID:owner,cloudOrigin:origin,combinedTemplate:combinedTemplate);value.confirmLocalDeletes=confirmLocalDeletes;value.commentTemplate=commentTemplate;value.imageTemplate=imageTemplate
-  value.aiTitle=aiTitle;value.defaultTitle=defaultTitle
+  value.aiTitle=aiTitle;value.defaultTitle=defaultTitle;value.subfolders=subfolders
   if isTeam{value.cloudTeam=true;value.cloudOwnerName=ownerName;value.cloudRole=role}
   return value
  }
@@ -72,6 +74,7 @@ struct RemoteNote:Codable,Equatable {
 /// Revize jako řetězec, i když ji server pošle jako číslo.
 struct FlexibleString:Decodable {
  let value:String
+ init(_ value:String){self.value=value}
  init(from decoder:Decoder)throws{let c=try decoder.singleValueContainer();if let text=try? c.decode(String.self){value=text}else{value=String(try c.decode(Int64.self))}}
 }
 

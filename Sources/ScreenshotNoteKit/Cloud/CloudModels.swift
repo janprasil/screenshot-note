@@ -25,6 +25,8 @@ struct CloudManifest: Codable,Equatable {
  var base_images:Int? = nil
  // Revize stažené relace; server při jiné revizi vrátí session_changed.
  var revision:String? = nil
+ // Podsložka nové relace; u doplnění se neposílá.
+ var subfolder_id:UUID? = nil
  static func validRevision(_ value:String?)->Bool{value?.range(of:"^[1-9][0-9]{0,15}$",options:.regularExpression) != nil}
 }
 
@@ -33,7 +35,7 @@ extension CloudManifest {
   func text(_ s: String, _ points: Int, _ bytes: Int) -> Bool { !s.contains("\0") && s.unicodeScalars.count <= points && s.utf8.count <= bytes }
   return (1...30).contains(images.count) && captions.count == images.count && text(title,500,2000) && text(comment,100000,100000)
    && text(configuration,200,800) && text(template,100000,100000) && captions.allSatisfy { text($0,20000,20000) }
-   && captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 && (base_images == nil || (0..<images.count).contains(base_images!)) && (revision == nil || (base_images != nil && Self.validRevision(revision))) && images.enumerated().allSatisfy { index,image in
+   && captions.reduce(0,{$0 + $1.utf8.count}) <= 300000 && (base_images == nil || (0..<images.count).contains(base_images!)) && (revision == nil || (base_images != nil && Self.validRevision(revision))) && (subfolder_id == nil || (folder_id != nil && base_images == nil)) && images.enumerated().allSatisfy { index,image in
     image.index == index + 1 && (1...52428800).contains(image.bytes) && image.sha256.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil
    } && images.reduce(0,{$0 + $1.bytes}) <= 100000000
  }

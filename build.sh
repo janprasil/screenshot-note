@@ -41,7 +41,10 @@ codesign --verify --strict --deep "$app"
 for signed in "$app/Contents/MacOS/ScreenshotNote" "$app/Contents/MacOS/screenshot-note-bridge"; do
  codesign -dv "$signed" 2>&1 | grep -q 'flags=.*runtime' || { print -u2 "Missing hardened runtime: $signed"; exit 1 }
 done
-DYLD_INSERT_LIBRARIES=/nonexistent/inject.dylib "$app/Contents/MacOS/ScreenshotNote" --language-check >/dev/null || { print -u2 "App accepts DYLD_INSERT_LIBRARIES"; exit 1 }
+# Bez SIP (GitHub runnery) systém DYLD_* nefiltruje ani s runtime; tam stačí kontrola příznaku výše.
+if csrutil status 2>/dev/null | grep -q enabled; then
+ DYLD_INSERT_LIBRARIES=/nonexistent/inject.dylib "$app/Contents/MacOS/ScreenshotNote" --language-check >/dev/null || { print -u2 "App accepts DYLD_INSERT_LIBRARIES"; exit 1 }
+fi
 smoke=0;"$app/Contents/MacOS/ScreenshotNote" --self-test 2>/dev/null || smoke=$?
 [[ $smoke == 64 ]] || { print -u2 "App binary must reject test flags (exit $smoke)"; exit 1 }
 # Testy běží v kopii bundlu (stejný Info.plist, lproj, helper i podpis) s testovacím hostem místo appky.

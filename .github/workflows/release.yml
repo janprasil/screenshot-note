@@ -123,7 +123,7 @@ jobs:
           codesign --force --options runtime --entitlements scripts/adhoc.entitlements --sign - "$app"
           codesign --verify --strict --deep "$app"
           "$app/Contents/MacOS/ScreenshotNote" --language-check
-          DYLD_INSERT_LIBRARIES=/nonexistent/inject.dylib "$app/Contents/MacOS/ScreenshotNote" --language-check
+          codesign -dv "$app" 2>&1 | grep -q "flags=.*runtime"
           hdiutil create -volname "Screenshot Note (staging)" -srcfolder staging-app -ov -format UDZO staging/Screenshot-Note-staging.dmg
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: actions/upload-artifact@v7

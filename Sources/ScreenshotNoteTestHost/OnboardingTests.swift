@@ -21,4 +21,10 @@ func onboardingTests() throws {
  let pinned=store();pinLegacyDestination(pinned,legacy:legacy);assert(pinned.string(forKey:"destination") == legacy.path)
  let custom=store();custom.set("/tmp/own",forKey:"destination");pinLegacyDestination(custom,legacy:legacy);assert(custom.string(forKey:"destination") == "/tmp/own")
  let topics=store();topics.set(Data([1]),forKey:"topics");pinLegacyDestination(topics,legacy:legacy);assert(topics.object(forKey:"destination") == nil)
+ // Prázdný seznam složek (vše v cloudu) je jako žádný: stará složka se zafixuje.
+ let emptied=store();emptied.set(try JSONEncoder().encode([Topic]()),forKey:"topics");pinLegacyDestination(emptied,legacy:legacy);assert(emptied.string(forKey:"destination") == legacy.path)
+ // Stávající nebo dokončená instalace nemá doporučené výchozí znovu zapnout (průvodce z Nastavení).
+ let upgraded=store();upgraded.set("/tmp/x",forKey:"destination");_ = Onboarding.pending(upgraded);assert(upgraded.bool(forKey:Onboarding.defaultsKey))
+ let finished=store();finished.set(true,forKey:Onboarding.doneKey);_ = Onboarding.pending(finished);assert(finished.bool(forKey:Onboarding.defaultsKey))
+ let newcomer=store();_ = Onboarding.pending(newcomer);assert(!newcomer.bool(forKey:Onboarding.defaultsKey))
 }

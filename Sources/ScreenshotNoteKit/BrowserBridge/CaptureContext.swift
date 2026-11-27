@@ -157,6 +157,7 @@ enum CloudContextPolicies {
  static var defaults=UserDefaults.standard
  private static func all()->[String:ContextPolicy]{defaults.data(forKey:key).flatMap{try? JSONDecoder().decode([String:ContextPolicy].self,from:$0)} ?? [:]}
  static func policy(_ folder:UUID)->ContextPolicy{all()[folder.uuidString.lowercased()] ?? {var off=ContextPolicy();off.enabled=false;return off}()}
+ static func has(_ folder:UUID)->Bool{all()[folder.uuidString.lowercased()] != nil}
  static func set(_ policy:ContextPolicy,for folder:UUID){var value=all();value[folder.uuidString.lowercased()]=policy;defaults.set(try? JSONEncoder().encode(value),forKey:key)}
 }
 extension Topic {

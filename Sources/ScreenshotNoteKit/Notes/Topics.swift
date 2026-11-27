@@ -149,7 +149,12 @@ enum Topics {
   }
  }
  // Nová relace začíná ve složce, kam se naposledy ukládalo.
- static var initialTopic:Topic{let list=all;return list.first{$0.id==UserDefaults.standard.string(forKey:"lastTopic")} ?? defaultTopic}
+ // Cloudová složka bez místního adresáře nemá kam ukládat, proto se nenabízí jako první.
+ static func hasNoLocalDirectory(_ topic:Topic)->Bool{topic.cloudFolderID != nil && topic.folder.isEmpty}
+ static var initialTopic:Topic{
+  let list=all,usable=list.filter{!hasNoLocalDirectory($0)}
+  return usable.first{$0.id==UserDefaults.standard.string(forKey:"lastTopic")} ?? usable.first{$0.id==UserDefaults.standard.string(forKey:"defaultTopic")} ?? usable.first ?? defaultTopic
+ }
  static func rememberLast(_ topic:Topic?){if let topic,!isExportingDesign{UserDefaults.standard.set(topic.id,forKey:"lastTopic")}}
  static var defaultTopic:Topic{let list=all;return list.first{$0.id==UserDefaults.standard.string(forKey:"defaultTopic")} ?? list[0]}
  /// Uloží lokální složky bez kontroly; volající kontroluje kolize sám.
@@ -188,7 +193,6 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  private(set) var pencil:AppButton!;let star=StarButton();private let nameShell=AdaptiveInputBackground(frame:.zero);private let nameClick=NSClickGestureRecognizer()
  private var fileLabel:NSTextField!;private(set) var syncCaption:NSTextField!
  // Náhled stromu podsložek; spravuje se ve snímání nebo na webu.
- private(set) var subfolderButton:AppButton!
  let name=CenteredTextField(),detail=CenteredTextField(),folder=CenteredTextField(),file=CenteredTextField()
  var template=defaultMarkdownTemplate;var fileTemplate:String?;var commentTemplate:String?;var imageTemplate:String?
  var pendingDefault=false
@@ -201,6 +205,8 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  private(set) var contextButton:AppButton!;private(set) var contextCaption:NSTextField!
  // AI návrh názvu jen u cloudové složky; mění ho vlastník nebo správce, platí hned na serveru.
  let aiTitleToggle=NSButton(checkboxWithTitle:"",target:nil,action:nil)
+ // Ikona s vysvětlením, proč je přepínač AI názvů vypnutý.
+ let aiTitleInfo=NSImageView()
  // Výchozí název relace bez názvu; u cloudové složky platí hned na serveru, u místní s uložením.
  private(set) var defaultTitleButton:AppButton!;var defaultTitleValue:String?=nil
  let mode=NSPopUpButton()
@@ -236,24 +242,22 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   view.addSubview(sectionLabel(L("Popis"),NSRect(x:272,y:478,width:600,height:18)));inputShell(detail,frame:NSRect(x:272,y:436,width:600,height:36),in:view)
   detail.placeholderString=L("Krátký popis pro snazší výběr")
   view.addSubview(sectionLabel(L("Složka"),NSRect(x:272,y:406,width:600,height:18)))
-  subfolderButton=styledButton("",symbol:"list.bullet.indent",role:.quiet,frame:NSRect(x:652,y:401,width:220,height:26),target:self,action:#selector(showSubfolders(_:)));subfolderButton.alignment = .right;view.addSubview(subfolderButton)
   inputShell(folder,frame:NSRect(x:272,y:364,width:450,height:36),in:view);folder.placeholderString=L("Vyber místní adresář")
   chooseFolderButton=styledButton(L("Vybrat…"),symbol:"folder",frame:NSRect(x:736,y:365,width:136,height:34),target:self,action:#selector(chooseFolder));view.addSubview(chooseFolderButton)
   syncButton=styledButton(L("Synchronizovat s cloudem"),symbol:"icloud.and.arrow.up",frame:NSRect(x:272,y:314,width:250,height:34),target:self,action:#selector(syncSelected));view.addSubview(syncButton)
   syncCaption=designLabel("",NSRect(x:536,y:320,width:336,height:22),size:11,color:AppPalette.secondary);view.addSubview(syncCaption)
   view.addSubview(DesignDivider(NSRect(x:272,y:296,width:600,height:1)))
   view.addSubview(sectionLabel(L("Ukládání relací"),NSRect(x:272,y:266,width:600,height:18)))
-  mode.addItems(withTitles:[L("Samostatný Markdown pro každou relaci"),L("Všechny relace v jednom Markdownu")]);mode.target=self;mode.action=#selector(updateMode);inputShell(mode,frame:NSRect(x:272,y:224,width:376,height:36),in:view)
-  templateButton=styledButton(L("Šablona Markdownu…"),symbol:"doc.text",frame:NSRect(x:662,y:225,width:210,height:34),target:self,action:#selector(editTemplate));view.addSubview(templateButton)
+  mode.addItems(withTitles:[L("Samostatný Markdown pro každou relaci"),L("Všechny relace v jednom Markdownu")]);mode.target=self;mode.action=#selector(updateMode);inputShell(mode,frame:NSRect(x:272,y:224,width:600,height:36),in:view)
+  templateButton=styledButton(L("Šablona Markdownu…"),symbol:"doc.text",frame:NSRect(x:272,y:98,width:192,height:34),target:self,action:#selector(editTemplate));view.addSubview(templateButton)
   askBeforeDelete.title=L("Ptát se před smazáním v cloudu");askBeforeDelete.frame=NSRect(x:272,y:104,width:600,height:22);askBeforeDelete.target=self;askBeforeDelete.action=#selector(toggleAskBeforeDelete);askBeforeDelete.isHidden=true;view.addSubview(askBeforeDelete)
   fileLabel=sectionLabel(L("Společný soubor"),NSRect(x:272,y:196,width:600,height:18));view.addSubview(fileLabel);inputShell(file,frame:NSRect(x:272,y:154,width:600,height:36),in:view)
   contextToggle.title=L("Přikládat kontext z prohlížeče");contextToggle.frame=NSRect(x:272,y:120,width:380,height:22);contextToggle.target=self;contextToggle.action=#selector(toggleContext);view.addSubview(contextToggle)
-  contextCaption=designLabel("",NSRect(x:292,y:90,width:358,height:28),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
-  // Dlouhý popis se zalomí, aby nezasahoval pod tlačítka vpravo.
-  contextCaption.usesSingleLineMode=false;contextCaption.maximumNumberOfLines=2;contextCaption.lineBreakMode = .byWordWrapping;contextCaption.cell?.wraps=true;contextCaption.cell?.truncatesLastVisibleLine=true
-  contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:662,y:114,width:210,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
-  aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:122,width:380,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle)
-  defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:662,y:122,width:210,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
+  contextCaption=designLabel("",NSRect(x:292,y:138,width:580,height:16),size:11,color:AppPalette.secondary);view.addSubview(contextCaption)
+  contextCaption.lineBreakMode = .byTruncatingTail
+  contextButton=styledButton(L("Nastavení kontextu…"),symbol:"slider.horizontal.3",frame:NSRect(x:476,y:98,width:192,height:34),target:self,action:#selector(editContext));view.addSubview(contextButton)
+  aiTitleToggle.title=L("Navrhovat názvy relací pomocí AI");aiTitleToggle.frame=NSRect(x:272,y:122,width:380,height:22);aiTitleToggle.target=self;aiTitleToggle.action=#selector(toggleAITitle);aiTitleToggle.isHidden=true;view.addSubview(aiTitleToggle);aiTitleInfo.image=NSImage(systemSymbolName:"info.circle",accessibilityDescription:L("Nápověda"));aiTitleInfo.contentTintColor=AppPalette.secondary;aiTitleInfo.toolTip=L("AI názvy fungují jen u cloudové složky. Nejdřív složku synchronizuj s cloudem.");aiTitleInfo.isHidden=true;view.addSubview(aiTitleInfo)
+  defaultTitleButton=styledButton("",symbol:"textformat",role:.secondary,frame:NSRect(x:680,y:98,width:192,height:34),target:self,action:#selector(editTopicDefaultTitle));view.addSubview(defaultTitleButton)
   // Linka ve stejné výšce jako v postranním panelu, tlačítka s odstupem pod ní.
   view.addSubview(DesignDivider(NSRect(x:272,y:64,width:600,height:1)))
   deleteButton=styledButton(L("Smazat složku…"),symbol:"trash",role:.quiet,frame:NSRect(x:524,y:16,width:166,height:34),target:self,action:#selector(deleteTopic));view.addSubview(deleteButton)
@@ -277,7 +281,7 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func reloadFolders(){
   table.reloadData();let row=rows.firstIndex{$0.id==editingID} ?? (rows.isEmpty ? nil:0)
   if let row{table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);load(rows[row])}
-  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading();loadedForm=nil;updateSubfolders(nil)}
+  else{editingID=nil;name.stringValue="";detail.stringValue="";folder.stringValue="";detail.isEnabled=false;saveButton?.isEnabled=false;folder.isEnabled=false;chooseFolderButton?.isEnabled=false;layoutHeading();loadedForm=nil}
   updateMode()
  }
  func numberOfRows(in tableView:NSTableView)->Int{rows.count}
@@ -349,7 +353,6 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   template=topic.markdownTemplate ?? defaultMarkdownTemplate;fileTemplate=topic.combinedTemplate;commentTemplate=topic.commentTemplate;imageTemplate=topic.imageTemplate;contextPolicy=topic.cloudFolderID.map{CloudContextPolicies.policy($0)} ?? topic.contextPolicy ?? ContextPolicy();defaultTitleValue=topic.defaultTitle
   endNameEdit();name.stringValue=topic.name;detail.stringValue=topic.detail;folder.stringValue=topic.folder;file.stringValue=topic.combinedFile;mode.selectItem(at:topic.combined ? 1:0)
   detail.isEnabled=true;folder.isEnabled=true;chooseFolderButton?.isEnabled=true;saveButton?.isEnabled=true;showCombinedChoice(topic.combined);layoutHeading();updateMode();markLoaded()
-  updateSubfolders(topic)
   if let other=Topics.overlapping(topic,among:list){showStatus(Topics.nestedError(other).message,warning:true)}
  }
  /// Týmovou složku smí nastavovat jen vlastník nebo správce; člen mění jen místní adresář.
@@ -376,25 +379,6 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
   guard editingID != defaultID else{return}
   if isExportingDesign{previewDefaultID=editingID}else{UserDefaults.standard.set(editingID,forKey:"defaultTopic")}
   reloadTable();layoutHeading()
- }
- /// Počet podsložek u nadpisu Složka; bez podpory serveru (nebo bez místního adresáře) skryté.
- func updateSubfolders(_ topic:Topic?) {
-  guard let subfolderButton else{return}
-  let supported=topic.map{$0.cloudFolderID != nil ? $0.subfolders != nil:!$0.folder.isEmpty} ?? false
-  let count=supported ? topic.map(subfolderChoices)?.count ?? 0:0
-  subfolderButton.isHidden = !supported
-  subfolderButton.title=count==0 ? L("Bez podsložek"):LP(count,"%ld podsložka","%ld podsložky","%ld podsložek",count)
-  subfolderButton.toolTip=L("Podsložky vytvoříš ve snímání (Podsložka → Nová podsložka…) nebo na webu.")
-  subfolderButton.needsDisplay=true
- }
- @objc func showSubfolders(_ sender:NSButton){
-  guard let topic=list.first(where:{$0.id==editingID}) else{return}
-  let menu=NSMenu();menu.autoenablesItems=false
-  let choices=subfolderChoices(topic)
-  for choice in choices{let item=NSMenuItem(title:choice.name,action:nil,keyEquivalent:"");item.isEnabled=false;item.indentationLevel=choice.depth;item.image=NSImage(systemSymbolName:"folder",accessibilityDescription:nil);menu.addItem(item)}
-  if !choices.isEmpty{menu.addItem(.separator())}
-  let hint=NSMenuItem(title:topic.cloudFolderID != nil ? L("Spravuješ je ve snímání nebo na webu."):L("Vytvoříš je ve snímání; jsou to adresáře ve složce."),action:nil,keyEquivalent:"");hint.isEnabled=false;menu.addItem(hint)
-  menu.popUp(positioning:nil,at:NSPoint(x:0,y:sender.isFlipped ? sender.bounds.maxY+4:sender.bounds.minY-4),in:sender)
  }
  @objc func updateMode(){
   let cloud=editingCloud,combined=mode.indexOfSelectedItem==1,saved=list.contains{$0.id==editingID}
@@ -491,27 +475,37 @@ final class TopicSettings:NSObject,NSTableViewDataSource,NSTableViewDelegate,NST
  func updateContext(){
   guard let contextButton else{return}
   let cloud=editingCloud
-  // Bez společného souboru je řádek hned pod režimem ukládání.
-  let top:CGFloat=mode.indexOfSelectedItem==1 ? 150:178+Self.lift
-  contextToggle.frame.origin.y=top;contextCaption.frame.origin.y=top-30;contextButton.frame.origin.y=top-6;askBeforeDelete.frame.origin.y=top-84
+  // Řádky jdou shora od nadpisu Ukládání relací; skrytá volba režimu ani soubor nenechají mezeru.
+  let combined=mode.indexOfSelectedItem==1,popupShown = !(mode.superview?.isHidden ?? true)
+  var y:CGFloat=298
+  if popupShown{mode.superview?.frame.origin.y=256;y=256}
+  if combined{fileLabel.frame.origin.y=y-28;file.superview?.frame.origin.y=y-70;y-=70}
+  contextToggle.frame.origin.y=y-30;contextCaption.frame.origin.y=y-48
+  let row=y-88
+  for button in [templateButton,contextButton,defaultTitleButton]{button?.frame.origin.y=row}
+  askBeforeDelete.frame.origin.y=row-26
+  let aiY=row-26
   contextToggle.state=contextPolicy.enabled ? .on:.off;contextToggle.isEnabled=editingManaged || cloud
   contextButton.isEnabled=contextPolicy.enabled && (editingManaged || cloud)
   contextCaption.stringValue=contextPolicy.enabled ? (cloud ? LF("Nahrává se do cloudu: %@",contextPolicySummary(contextPolicy)):contextPolicySummary(contextPolicy)):L("Snímky z prohlížeče se uloží bez kontextu.")
   // Starší server nastavení nezná (nil); přepínač se pak nezobrazí.
   let current=list.first{$0.id==editingID}
-  aiTitleToggle.isHidden = !cloud || current?.aiTitle==nil;aiTitleToggle.frame.origin.y=top-56
+  // Lokální složka přepínač ukáže zašedlý s ikonou nápovědy; cloudová ho schová jen u starého serveru.
+  let localAI = !cloud
+  aiTitleToggle.isHidden = localAI ? false:current?.aiTitle==nil;aiTitleToggle.frame.origin.y=aiY;if !aiTitleToggle.isHidden{askBeforeDelete.frame.origin.y=aiY-24}
+  aiTitleToggle.frame.size.width=localAI ? aiTitleToggle.intrinsicContentSize.width:380
+  aiTitleInfo.isHidden = !localAI;aiTitleInfo.frame=NSRect(x:aiTitleToggle.frame.maxX+4,y:aiY+3,width:16,height:16)
   let pending=pendingAITitle.flatMap{$0.id==editingID ? $0.value:nil}
   // AI názvy osobní složky potřebují tarif; týmovou platí tým.
   let planned=current?.cloudTeam==true || CloudFolders.shared.personalCloudAllowed
-  aiTitleToggle.state=(pending ?? (current?.aiTitle==true)) ? .on:.off;aiTitleToggle.isEnabled=editingManaged && pending==nil && (planned || current?.aiTitle==true)
+  aiTitleToggle.state=(pending ?? (current?.aiTitle==true)) ? .on:.off;aiTitleToggle.isEnabled=editingManaged && pending==nil && (planned || current?.aiTitle==true);if localAI{aiTitleToggle.state = .off;aiTitleToggle.isEnabled=false}
   if cloud,let current,current.aiTitle==nil,!aiTitleRequested.contains(current.id),!isExportingDesign{aiTitleRequested.insert(current.id);Task{@MainActor in _ = try? await CloudFolders.shared.aiTitle(current);self.list=Topics.all;self.updateContext()}}
   if let defaultTitleButton {
-   // Pod tlačítkem kontextu s odstupem 8 px, aby nepřerostlo linku nad tlačítky.
-   defaultTitleButton.frame.origin.y=top-48;defaultTitleButton.isEnabled = !cloud || editingManaged
+   defaultTitleButton.isEnabled = !cloud || editingManaged
    defaultTitleButton.title=LF("Výchozí název: %@",defaultTitleValue ?? DefaultTitle.global ?? builtInSessionTitle)
    defaultTitleButton.toolTip=cloud && !editingManaged ? L("Výchozí název týmové složky mění vlastník nebo správce týmu."):L("Použije se, když relace nemá název. Prázdná hodnota převezme globální výchozí název.")
   }
-  aiTitleToggle.toolTip = !planned ? L("AI názvy potřebují aktivní cloudový tarif nebo zkušební období."):editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
+  aiTitleToggle.toolTip = localAI ? L("AI názvy fungují jen u cloudové složky. Nejdřív složku synchronizuj s cloudem."):!planned ? L("AI názvy potřebují aktivní cloudový tarif nebo zkušební období."):editingManaged ? L("U nových relací bez názvu navrhne název AI. Ruční název má vždy přednost. Limit je 1 000 názvů měsíčně na uživatele."):L("AI názvy nastavuje vlastník nebo správce týmu.")
   contextToggle.toolTip=cloud ? L("Konzole, requesty a mapa prvků se nahrají do cloudu jako přílohy snímku. Nastavení platí jen na tomto Macu."):L("Konzole, requesty a mapa prvků ze stránky v Chromu vedle snímku.")
  }
  @objc func toggleContext(){

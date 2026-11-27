@@ -304,8 +304,14 @@ final class Composer:NSObject,NSWindowDelegate {
   let choices=Topics.all
   let picker=SessionChoiceDialog()
   if let index=picker.run(title:L("Vybrat konfiguraci"),choices:choices.map{SessionChoice(title:$0.displayName,detail:$0.choiceDetail)},current:choices.firstIndex{$0.id==draft.topic?.id} ?? 0){
-   if draft.previous != nil && draft.topic?.id != choices[index].id{switchToNewSession()}
-   draft.topic=choices[index];refreshTopics()
+   var chosen=choices[index]
+   // Cloudová složka bez místního adresáře: nejdřív výběr adresáře, jinak se složka nezmění.
+   if Topics.hasNoLocalDirectory(chosen){
+    guard let fixed=MainActor.assumeIsolated({FolderDialogs.askUnmapped(chosen)}),!fixed.folder.isEmpty else{window.makeKeyAndOrderFront(nil);return}
+    chosen=fixed
+   }
+   if draft.previous != nil && draft.topic?.id != chosen.id{switchToNewSession()}
+   draft.topic=chosen;refreshTopics()
   };window.makeKeyAndOrderFront(nil)
  }
  @objc func chooseSession(){

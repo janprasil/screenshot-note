@@ -420,6 +420,8 @@ final class CloudFolders {
   updated[index].migratedLocalIDs=Array(Set((updated[index].migratedLocalIDs ?? [])+[source.id])).sorted()
   try persist(updated)
   if UserDefaults.standard.string(forKey:"defaultTopic")==source.id{UserDefaults.standard.set(updated[index].topic.id,forKey:"defaultTopic")}
+  // Kontext z prohlížeče přejde z místní složky; vlastní nastavení cloudové složky na tomto Macu se nepřepíše.
+  if let id=updated[index].topic.cloudFolderID,!CloudContextPolicies.has(id){CloudContextPolicies.set(source.contextPolicy ?? ContextPolicy(),for:id)}
  }
  @MainActor func create(_ name:String,team:CloudLibraryRef?=nil)async throws->Topic {
   guard let c=currentConnection(),let account=c.ownerID,team.map({$0.isTeam && LibraryRole.manages($0.role)}) != false,let endpoint=CloudEndpoint(c.endpoint),!name.isEmpty,name.unicodeScalars.count<=100,!name.unicodeScalars.contains(where:{CharacterSet.controlCharacters.contains($0)}) else{throw CloudFailure.invalid}

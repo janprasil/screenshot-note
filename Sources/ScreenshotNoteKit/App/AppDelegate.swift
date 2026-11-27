@@ -439,6 +439,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     guard let fixed=MainActor.assumeIsolated({FolderDialogs.askMissing(topic,capture:true)}) else{view.window.makeKeyAndOrderFront(nil);return}
     draft.topic=fixed;view.draft.topic=fixed
    }
+   // Cloudová složka bez adresáře se neukládá potichu jen do cloudu; nejdřív výběr složky.
+   if result == 2,draft.previous == nil,let topic=draft.topic,Topics.hasNoLocalDirectory(topic) {
+    guard let fixed=MainActor.assumeIsolated({FolderDialogs.askUnmapped(topic)}),!fixed.folder.isEmpty else{view.window.makeKeyAndOrderFront(nil);return}
+    draft.topic=fixed;view.draft.topic=fixed
+   }
    let upload = result == 2 && draft.topic?.savesToCloud == true
    let cloudFolder = draft.topic?.cloudFolderID != nil
    // Cloudová složka se zapisuje jen přes stahování, i při doplnění uložené relace.

@@ -372,6 +372,21 @@ enum FolderDialogs {
   NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
   return Topics.all.first{$0.id==topic.id} ?? folders.allTopics.first{$0.id==topic.id} ?? topic
  }
+ /// Cloudová složka bez místního adresáře: ukládání se zastaví, dokud se adresář nevybere.
+ @MainActor static func askUnmapped(_ topic:Topic,folders:CloudFolders = .shared)->Topic? {
+  NSApp.activate(ignoringOtherApps:true)
+  let alert=NSAlert();alert.alertStyle = .warning
+  alert.messageText=LF("Složka %@ nemá místní adresář.",topic.displayName)
+  alert.informativeText=L("Nejdřív vyber složku na tomto Macu, pak relaci ulož.")
+  alert.addButton(withTitle:L("Vybrat složku…"));alert.addButton(withTitle:L("Zrušit"))
+  guard alert.runModal() == .alertFirstButtonReturn else{return nil}
+  let panel=NSOpenPanel();panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.canCreateDirectories=true;panel.prompt=L("Vybrat")
+  panel.message=LF("Vyber místní adresář pro cloudovou složku „%@“.",topic.displayName)
+  guard panel.runModal() == .OK,let url=panel.url else{return nil}
+  do{try folders.setFolder(topic,path:url.path)}catch{showError(error.localizedDescription);return nil}
+  NotificationCenter.default.post(name:.cloudFoldersChanged,object:nil)
+  return Topics.all.first{$0.id==topic.id} ?? folders.allTopics.first{$0.id==topic.id}
+ }
  /// Odložené a osiřelé položky cloudové fronty: Zkusit znovu, Uložit lokálně, Zahodit.
  @MainActor static func resolveParked(library:CloudLibrary = .shared) {
   for item in library.parkedItems {

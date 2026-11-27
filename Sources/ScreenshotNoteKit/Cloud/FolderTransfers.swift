@@ -162,6 +162,12 @@ enum FolderDialogs {
      let alert=NSAlert();alert.messageText=L("Cloudová složka už má místní adresář.");alert.informativeText=L("Stávající cloudový adresář zůstane zachovaný. Původní místní soubory se nesmažou.");alert.addButton(withTitle:L("Pokračovat"));alert.addButton(withTitle:L("Přeskočit"))
      if alert.runModal() != .alertFirstButtonReturn{continue}
     }
+    // Kontext z prohlížeče přejde do cloudu jen se souhlasem; dřívější volba cloudové složky platí.
+    if let id=target.cloudFolderID,!CloudContextPolicies.has(id) {
+     var policy=source.contextPolicy ?? ContextPolicy()
+     if policy.enabled{policy.enabled=confirmMovedContext(source)}
+     CloudContextPolicies.set(policy,for:id)
+    }
     if !(try await FolderTransfers.shared.move(source,to:target)){showError(L("Přesun čeká na potvrzené nahrání všech poznámek. Místní složka zůstává dostupná a přesun se zkusí znovu."));continue}
     // Nová cloudová složka převezme nastavení lokální složky.
     if let moved=CloudFolders.shared.topics.first(where:{$0.cloudFolderID==target.cloudFolderID}),moved.detail.isEmpty,!moved.combined,moved.markdownTemplate==nil,moved.combinedTemplate==nil {
@@ -177,6 +183,13 @@ enum FolderDialogs {
     }
    }catch{showError(error.localizedDescription)}
   }
+ }
+ @MainActor private static func confirmMovedContext(_ source:Topic)->Bool {
+  let alert=NSAlert();alert.alertStyle = .warning
+  alert.messageText=L("Nahrávat kontext z prohlížeče do cloudu?")
+  alert.informativeText=LF("Složka %@ přikládá kontext z prohlížeče.",source.name)+" "+L("Ke každému snímku z Chromu se nahraje adresa a titulek stránky, konzole, seznam requestů (HAR) a mapa prvků s texty podle nastavení. Cookies a autorizační hlavičky se skrývají vždy. Přílohy uvidí všichni členové složky na webu a v MCP.")
+  alert.addButton(withTitle:L("Zapnout"));alert.addButton(withTitle:L("Nenahrávat"))
+  return alert.runModal() == .alertFirstButtonReturn
  }
  @MainActor private static var dismissed=Set<UUID>()
  /// Výchozí nadřazená složka cloudu; nastavená = nové složky dostanou podsložku bez dotazu.

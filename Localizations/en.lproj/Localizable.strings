@@ -836,3 +836,5 @@
 "Vybrat složku…" = "Choose folder…";
 "AI názvy fungují jen u cloudové složky. Nejdřív složku synchronizuj s cloudem." = "AI titles work only for cloud folders. Sync the folder with the cloud first.";
 "Nápověda" = "Help";
+"Složka %@ přikládá kontext z prohlížeče." = "Folder %@ attaches browser context.";
+"Nenahrávat" = "Don’t upload";

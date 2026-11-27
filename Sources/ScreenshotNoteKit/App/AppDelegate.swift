@@ -439,6 +439,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     guard let fixed=MainActor.assumeIsolated({FolderDialogs.askMissing(topic,capture:true)}) else{view.window.makeKeyAndOrderFront(nil);return}
     draft.topic=fixed;view.draft.topic=fixed
    }
+   // Koncept může nést starou kopii; adresář mezitím vybraný v Konfiguraci se převezme.
+   if result == 2,draft.previous == nil,let topic=draft.topic,Topics.hasNoLocalDirectory(topic),let live=Topics.all.first(where:{$0.id==topic.id}),!live.folder.isEmpty {
+    draft.topic?.folder=live.folder;view.draft.topic?.folder=live.folder
+   }
    // Cloudová složka bez adresáře se neukládá potichu jen do cloudu; nejdřív výběr složky.
    if result == 2,draft.previous == nil,let topic=draft.topic,Topics.hasNoLocalDirectory(topic) {
     guard let fixed=MainActor.assumeIsolated({FolderDialogs.askUnmapped(topic)}),!fixed.folder.isEmpty else{view.window.makeKeyAndOrderFront(nil);return}

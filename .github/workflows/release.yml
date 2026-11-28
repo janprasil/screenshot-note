@@ -67,8 +67,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.release == 'true' && needs.plan.outputs.mode == 'rc'
     runs-on: macos-15
-    # Čtyři odeslání do notarizace; čekání u Applu bývá nejdelší část.
-    timeout-minutes: 150
+    # Notarizace u Applu může trvat i hodiny; 360 minut je strop GitHub runnerů.
+    timeout-minutes: 360
     steps:
       # Build bere commit běhu (github.sha), ze kterého plan počítal verzi.
       - uses: actions/checkout@v7
@@ -134,8 +134,14 @@ jobs:
           NOTARY_TEAM_ID: 9NWSHFDN9T
         run: |
           mkdir dist staging
-          scripts/package-dmg.sh "$APP" "dist/Screenshot-Note-$VERSION.dmg" "Screenshot Note"
-          scripts/package-dmg.sh "staging-app/Screenshot Note.app" staging/Screenshot-Note-staging.dmg "Screenshot Note (staging)"
+          # Obě balení běží souběžně, aby se čekání na Apple nesčítalo.
+          scripts/package-dmg.sh "$APP" "dist/Screenshot-Note-$VERSION.dmg" "Screenshot Note" > release-dmg.log 2>&1 & release=$!
+          scripts/package-dmg.sh "staging-app/Screenshot Note.app" staging/Screenshot-Note-staging.dmg "Screenshot Note (staging)" > staging-dmg.log 2>&1 & staging=$!
+          status=0
+          wait $release || status=1
+          wait $staging || status=1
+          cat release-dmg.log staging-dmg.log
+          [ $status = 0 ]
           (cd dist && shasum -a 256 "Screenshot-Note-$VERSION.dmg" > "Screenshot-Note-$VERSION.dmg.sha256")
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: ./.github/actions/sparkle-tools

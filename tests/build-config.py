@@ -46,4 +46,9 @@ class BuildConfiguration(unittest.TestCase):
                 config.updates(environment, feed, public)
 
 
+    def test_update_keys_cover_feed_settings(self):
+        key = "A" * 43 + "="
+        self.assertEqual(set(config.updates("production", "https://example.invalid/appcast.xml", key)), set(config.UPDATE_KEYS))
+
+
 unittest.main()

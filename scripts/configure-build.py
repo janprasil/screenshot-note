@@ -10,6 +10,7 @@ import sys
 from urllib.parse import urlsplit
 
 PRODUCTION = "https://screenshotnote.com"
+UPDATE_KEYS = ("SUFeedURL", "SUPublicEDKey", "SURequireSignedFeed", "SUVerifyUpdateBeforeExtraction")
 
 
 def configuration(environment, override):
@@ -76,6 +77,9 @@ if __name__ == "__main__":
         data = plistlib.loads(path.read_bytes())
         release = version(os.environ.get("SCREENSHOT_NOTE_VERSION"), os.environ.get("SCREENSHOT_NOTE_BUILD"))
         feed = updates(environment, os.environ.get("SCREENSHOT_NOTE_FEED_URL"), os.environ.get("SCREENSHOT_NOTE_ED_PUBLIC_KEY"))
+        # Kopie produkčního bundlu (staging) nesmí zdědit jeho update feed.
+        for name in UPDATE_KEYS:
+            data.pop(name, None)
         data.update(ScreenshotNoteEnvironment=environment, ScreenshotNoteWebOrigin=origin, **release, **feed)
         path.write_bytes(plistlib.dumps(data))
         print(f"Build environment: {environment}; web origin: {origin}; version: {data['CFBundleShortVersionString']} ({data['CFBundleVersion']}); update feed: {feed.get('SUFeedURL', 'none')}")

@@ -23,9 +23,14 @@ rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app
 xattr -cr "$app"
 # Stabilní podpis drží přístup do Klíčenky napříč buildy; ad-hoc podpis se mění s každým buildem.
 # Hardened runtime brání vložení cizích knihoven přes DYLD_* proměnné.
-identity="${SIGNING_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application/ {print $2; exit}')}"
+# Lokálně má přednost Apple Development, ať se nezmění podpis nainstalované appky.
+identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
+identity="${SIGNING_IDENTITY:-$(print -r -- "$identities" | awk '/Apple Development/ {print $2; exit}')}"
+identity="${identity:-$(print -r -- "$identities" | awk '/Developer ID Application/ {print $2; exit}')}"
 # Hardened runtime vždy; ad-hoc podpis nemá Team ID, proto appka dostane výjimku z library validation kvůli Sparkle.
 runtime=(--options runtime);app_entitlements=()
+# Notarizace vyžaduje u Developer ID důvěryhodné časové razítko.
+print -r -- "$identities" | grep -F -- "${identity:--}" | grep -q 'Developer ID Application' && runtime+=(--timestamp)
 [[ -z "$identity" || "$identity" == "-" ]] && app_entitlements=(--entitlements scripts/adhoc.entitlements)
 # Podpis zevnitř ven bez --deep: helpery Sparkle, framework, bridge a nakonec appka.
 sparkle="$app/Contents/Frameworks/Sparkle.framework"

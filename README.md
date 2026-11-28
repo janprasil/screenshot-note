@@ -90,7 +90,18 @@ To use your own signing identity:
 SIGNING_IDENTITY='your personal signing identity' ./build.sh
 ```
 
-The default build uses an ad-hoc signature. Updating such a build can require renewing its screen-recording permission.
+Without `SIGNING_IDENTITY` the build uses an Apple Development or Developer ID
+certificate from the Keychain, or falls back to an ad-hoc signature. Updating an
+ad-hoc build can require renewing its screen-recording permission.
+
+Releases are signed with Developer ID and notarized by `release.yml`, using the
+`MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `NOTARY_APPLE_ID` and `NOTARY_PASSWORD`
+secrets. To package a Developer ID build by hand:
+
+```sh
+SIGNING_IDENTITY='Developer ID Application: …' NOTARY_PROFILE=profile-name \
+  scripts/package-dmg.sh '/path/to/Screenshot Note.app' Screenshot-Note.dmg 'Screenshot Note'
+```
 
 ### Updates
 
@@ -103,11 +114,10 @@ SCREENSHOT_NOTE_FEED_URL=https://example.com/appcast.xml SCREENSHOT_NOTE_ED_PUBL
 
 The feed must be plain HTTPS. These builds also require a signed appcast and verify
 each update before extracting it. Local, test and preview builds, and the test host,
-never contact a feed. Without a feed (every build today) the "Check for Updates…"
-menu item and the Updates row in Settings are hidden. Release candidates are
-offered only to users who turn on "Include release candidates" in Settings.
-Updates stay off in release builds until the app is signed with a Developer ID and
-notarized, because screen-recording permission is bound to the code signature.
+never contact a feed. Without a feed the "Check for Updates…" menu item and the
+Updates row in Settings are hidden. Release candidates are offered only to users
+who turn on "Include release candidates" in Settings. Release builds have the feed
+baked in; the staging DMG does not.
 
 ## Design and screenshots
 

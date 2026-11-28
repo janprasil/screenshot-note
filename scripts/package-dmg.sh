@@ -13,14 +13,26 @@ fi
 work=$(mktemp -d "${TMPDIR%/}/screenshot-note-dmg.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-# notarytool může skončit úspěšně i při zamítnutí, rozhoduje stav.
+# Odeslání a čekání snesou krátké výpadky sítě; rozhoduje až konečný stav u Applu.
 notarize() {
-  local result id
-  result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 150m --output-format json) || true
-  print -r -- "$result"
-  [[ "$(print -r -- "$result" | plutil -extract status raw - 2>/dev/null)" == Accepted ]] && return
-  id=$(print -r -- "$result" | plutil -extract id raw - 2>/dev/null) && xcrun notarytool log "$id" "${auth[@]}" || true
-  print -u2 "Notarization failed: ${1:t}"
+  local result id state attempt deadline
+  for attempt in 1 2 3; do
+    result=$(xcrun notarytool submit "$1" "${auth[@]}" --output-format json) && id=$(print -r -- "$result" | plutil -extract id raw - 2>/dev/null) && break
+    print -u2 "Submit attempt $attempt failed: $result"
+    sleep 30
+  done
+  [[ -n "${id:-}" ]] || { print -u2 "Notarization submit failed: ${1:t}"; return 1 }
+  print "Submitted ${1:t}: $id"
+  deadline=$(( SECONDS + ${NOTARY_TIMEOUT_MINUTES:-150} * 60 ))
+  while (( SECONDS < deadline )); do
+    state=$(xcrun notarytool info "$id" "${auth[@]}" --output-format json 2>/dev/null | plutil -extract status raw - 2>/dev/null) || state=""
+    case "$state" in
+      Accepted) print "Accepted ${1:t}: $id"; return ;;
+      Invalid|Rejected) xcrun notarytool log "$id" "${auth[@]}" || true; print -u2 "Notarization $state: ${1:t}"; return 1 ;;
+    esac
+    sleep 30
+  done
+  print -u2 "Notarization timed out: ${1:t} ($id)"
   return 1
 }
 

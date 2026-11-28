@@ -68,6 +68,14 @@ class Planning(unittest.TestCase):
         self.commit("fix: another")
         self.assertEqual(release.plan_rc("HEAD")["tag"], "v4.5.0-rc.2")
 
+    def test_staging_version_follows_nearest_tag(self):
+        plan = release.plan_staging("HEAD")
+        self.assertEqual((plan["release"], plan["tag"], plan["version"]), ("true", "staging", "4.4.0"))
+        self.commit("feat: next")
+        subprocess.run(["git", "tag", "v4.5.0-rc.3"], check=True)
+        self.commit("fix: more")
+        self.assertEqual(release.plan_staging("HEAD")["version"], "4.5.0")
+
     def test_only_notarized_tags_can_be_promoted(self):
         self.assertFalse(release.notarized("v4.4.0"))
         os.mkdir("scripts")

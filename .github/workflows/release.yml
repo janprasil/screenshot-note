@@ -3,13 +3,14 @@ name: Release
 on:
   schedule:
     - cron: "0 3 * * *" # denní RC
+    - cron: "30 3 * * *" # denní staging build
     - cron: "0 4 * * 1" # pondělní povýšení RC na stabilní verzi
   workflow_dispatch:
     inputs:
       mode:
-        description: rc = nový release candidate, promote = povýšit RC na stabilní verzi
+        description: rc = nový release candidate, staging = jen staging DMG, promote = povýšit RC na stabilní verzi
         type: choice
-        options: [rc, promote]
+        options: [rc, staging, promote]
         default: rc
       min_age_days:
         description: Minimální stáří RC pro promote (0 = hotfix hned)
@@ -18,8 +19,9 @@ on:
 permissions:
   contents: read
 
+# Běhy stejného režimu čekají na sebe, různé režimy běží nezávisle.
 concurrency:
-  group: release
+  group: release-${{ inputs.mode || (github.event.schedule == '30 3 * * *' && 'staging') || (github.event.schedule == '0 4 * * 1' && 'promote') || 'rc' }}
   cancel-in-progress: false
 
 jobs:
@@ -49,6 +51,7 @@ jobs:
         run: |
           if [ "$EVENT" = workflow_dispatch ]; then mode="$INPUT_MODE"
           elif [ "$SCHEDULE" = "0 4 * * 1" ]; then mode=promote
+          elif [ "$SCHEDULE" = "30 3 * * *" ]; then mode=staging
           else mode=rc; fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - id: plan
@@ -56,7 +59,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.mode.outputs.mode }}
           MIN_AGE: ${{ inputs.min_age_days || '7' }}
-        run: python3 scripts/release.py "$MODE" --head "$GITHUB_SHA" --min-age-days "$MIN_AGE" --notes release-notes.md
+          # Plánovaný staging se přeskočí, pokud vydání už nese tenhle commit; ruční běh staví vždy.
+          IF_CHANGED: ${{ github.event_name == 'schedule' && '--if-changed' || '' }}
+        run: python3 scripts/release.py "$MODE" --head "$GITHUB_SHA" --min-age-days "$MIN_AGE" --notes release-notes.md $IF_CHANGED
       - if: steps.plan.outputs.release == 'true'
         uses: actions/upload-artifact@v7
         with:
@@ -76,25 +81,10 @@ jobs:
           persist-credentials: false
       # Self-testy počítají s češtinou jako jazykem systému.
       - run: defaults write -g AppleLanguages -array cs en
-      # Certifikát žije jen v dočasné klíčence tohoto běhu.
-      - env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-        run: |
-          [ -n "$MACOS_CERT_P12" ] || { echo "::error::MACOS_CERT_P12 is not set"; exit 1; }
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          password=$(openssl rand -hex 24)
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          rm "$RUNNER_TEMP/cert.p12"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain" login.keychain-db
-          identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')
-          [ -n "$identity" ] || { echo "::error::No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
-          echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/signing-keychain
+        with:
+          p12: ${{ secrets.MACOS_CERT_P12 }}
+          password: ${{ secrets.MACOS_CERT_PASSWORD }}
       # Cizí veřejný klíč v appce by odmítl každou aktualizaci.
       - env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
@@ -110,21 +100,6 @@ jobs:
           set -o pipefail
           ./build.sh | tee build.log
           echo "app=$(sed -n 's/^Vytvořeno: //p' build.log)" >> "$GITHUB_OUTPUT"
-      # Staging DMG je stejná binárka s jiným originem a bez update feedu; kopie vzniká před notarizací.
-      - env:
-          APP: ${{ steps.build.outputs.app }}
-          SCREENSHOT_NOTE_ENV: test
-          SCREENSHOT_NOTE_WEB_ORIGIN: https://sn-staging.cfy.performance4.cz
-          SCREENSHOT_NOTE_VERSION: ${{ needs.plan.outputs.version }}
-          SCREENSHOT_NOTE_BUILD: ${{ needs.plan.outputs.build }}
-        run: |
-          mkdir staging-app
-          app="staging-app/Screenshot Note.app"
-          ditto "$APP" "$app"
-          python3 scripts/configure-build.py "$app/Contents/Info.plist"
-          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$app"
-          codesign --verify --strict --deep "$app"
-          "$app/Contents/MacOS/ScreenshotNote" --language-check
       # Název DMG je bez -rc, aby šel při povýšení použít beze změny.
       - env:
           APP: ${{ steps.build.outputs.app }}
@@ -133,17 +108,9 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
           NOTARY_TEAM_ID: 9NWSHFDN9T
         run: |
-          mkdir dist staging
-          # Obě balení běží souběžně, aby se čekání na Apple nesčítalo.
-          scripts/package-dmg.sh "$APP" "dist/Screenshot-Note-$VERSION.dmg" "Screenshot Note" > release-dmg.log 2>&1 & release=$!
-          scripts/package-dmg.sh "staging-app/Screenshot Note.app" staging/Screenshot-Note-staging.dmg "Screenshot Note (staging)" > staging-dmg.log 2>&1 & staging=$!
-          status=0
-          wait $release || status=1
-          wait $staging || status=1
-          cat release-dmg.log staging-dmg.log
-          [ $status = 0 ]
+          mkdir dist
+          scripts/package-dmg.sh "$APP" "dist/Screenshot-Note-$VERSION.dmg" "Screenshot Note"
           (cd dist && shasum -a 256 "Screenshot-Note-$VERSION.dmg" > "Screenshot-Note-$VERSION.dmg.sha256")
-          (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: ./.github/actions/sparkle-tools
       # Podpis aktualizace pro appcast, až po notarizaci a staple.
       - env:
@@ -158,10 +125,6 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: actions/upload-artifact@v7
-        with:
-          name: staging
-          path: staging/
       - if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
@@ -179,20 +142,59 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: gh release create "$TAG" dist/* -R "$REPO" --target "$SHA" --prerelease --title "Screenshot Note ${TAG#v}" --notes-file release-notes/release-notes.md
-      # Průběžné vydání staging drží stálou URL; soubory se při každém RC přepíšou.
+
+  # Staging je samostatný režim: vlastní build s testovacím originem, bez update feedu.
+  staging:
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && needs.plan.outputs.mode == 'staging'
+    runs-on: macos-15
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: defaults write -g AppleLanguages -array cs en
+      - uses: ./.github/actions/signing-keychain
+        with:
+          p12: ${{ secrets.MACOS_CERT_P12 }}
+          password: ${{ secrets.MACOS_CERT_PASSWORD }}
+      - id: build
+        env:
+          SCREENSHOT_NOTE_ENV: test
+          SCREENSHOT_NOTE_WEB_ORIGIN: https://sn-staging.cfy.performance4.cz
+          SCREENSHOT_NOTE_VERSION: ${{ needs.plan.outputs.version }}
+          SCREENSHOT_NOTE_BUILD: ${{ needs.plan.outputs.build }}
+        run: |
+          set -o pipefail
+          ./build.sh | tee build.log
+          echo "app=$(sed -n 's/^Vytvořeno: //p' build.log)" >> "$GITHUB_OUTPUT"
+      - env:
+          APP: ${{ steps.build.outputs.app }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: 9NWSHFDN9T
+        run: |
+          mkdir staging
+          scripts/package-dmg.sh "$APP" staging/Screenshot-Note-staging.dmg "Screenshot Note (staging)"
+          (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
+      # Průběžné vydání staging drží stálou URL; soubory se při každém běhu přepíšou.
       - env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
-          notes="Rolling staging build of ${TAG#v} ($SHA), replaced on every release candidate. Web origin: https://sn-staging.cfy.performance4.cz. Signed with Developer ID and notarized."
+          notes="Rolling staging build of $VERSION ($SHA). Web origin: https://sn-staging.cfy.performance4.cz. Signed with Developer ID and notarized."
           if gh release view staging -R "$REPO" >/dev/null 2>&1; then
             gh release upload staging staging/* -R "$REPO" --clobber
             gh release edit staging -R "$REPO" --prerelease --notes "$notes"
           else
             gh release create staging staging/* -R "$REPO" --target "$SHA" --prerelease --title "Screenshot Note staging" --notes "$notes"
           fi
+      - if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
   # Po RC i povýšení se appcast sestaví znovu ze všech vydání.
   appcast:

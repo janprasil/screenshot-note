@@ -3,6 +3,7 @@
 
   release.py rc                       -> next vX.Y.Z-rc.N if HEAD has releasable changes
   release.py promote --min-age-days 7 -> oldest-enough newest RC to promote to vX.Y.Z
+  release.py staging [--if-changed]   -> staging build of HEAD, versioned after the nearest tag
 
 Results are printed as key=value lines (and appended to $GITHUB_OUTPUT when set).
 Release notes are written to the file given by --notes.
@@ -130,14 +131,35 @@ def plan_promote(min_age_days, now=None):
             "notes_body": notes(commits_between(stable_tag, sha), title)}
 
 
+def plan_staging(head, if_changed=False):
+    sha = git("rev-parse", head).strip()
+    if if_changed:
+        current = subprocess.run(["gh", "release", "view", "staging", "--json", "body", "-q", ".body"], capture_output=True, text=True)
+        if current.returncode == 0 and sha in current.stdout:
+            return {"release": "false", "reason": f"staging already built from {sha}"}
+    try:
+        tag = git("describe", "--tags", "--abbrev=0", "--match", "v*", head).strip()
+    except subprocess.CalledProcessError:
+        tag = ""
+    match = STABLE.match(tag) or RC.match(tag)
+    version = fmt(tuple(map(int, match.groups()[:3]))) if match else "0.0.0"
+    return {"release": "true", "tag": "staging", "version": version, "build": build_number(head), "sha": sha}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["rc", "promote"])
+    parser.add_argument("mode", choices=["rc", "staging", "promote"])
+    parser.add_argument("--if-changed", action="store_true")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--min-age-days", type=float, default=7)
     parser.add_argument("--notes", default="release-notes.md")
     args = parser.parse_args()
-    result = plan_rc(args.head) if args.mode == "rc" else plan_promote(args.min_age_days)
+    if args.mode == "rc":
+        result = plan_rc(args.head)
+    elif args.mode == "staging":
+        result = plan_staging(args.head, args.if_changed)
+    else:
+        result = plan_promote(args.min_age_days)
     body = result.pop("notes_body", None)
     if body is not None:
         with open(args.notes, "w") as handle:

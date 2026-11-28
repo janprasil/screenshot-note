@@ -19,6 +19,7 @@ import sys
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RC = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$")
 HEADER = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?: (?P<subject>.+)$")
+STAGING_ASSETS = {"Screenshot-Note-staging.dmg", "Screenshot-Note-staging.dmg.sha256"}
 RELEASABLE = {"feat", "fix", "perf", "revert"}
 SECTIONS = [("breaking", "Breaking Changes"), ("feat", "Features"), ("fix", "Bug Fixes"), ("perf", "Performance"), ("revert", "Reverts")]
 
@@ -134,9 +135,13 @@ def plan_promote(min_age_days, now=None):
 def plan_staging(head, if_changed=False):
     sha = git("rev-parse", head).strip()
     if if_changed:
-        current = subprocess.run(["gh", "release", "view", "staging", "--json", "body", "-q", ".body"], capture_output=True, text=True)
-        if current.returncode == 0 and sha in current.stdout:
-            return {"release": "false", "reason": f"staging already built from {sha}"}
+        # Přeskočí se jen kompletní vydání; po nepovedeném uploadu se staví znovu.
+        current = subprocess.run(["gh", "release", "view", "staging", "--json", "body,assets"], capture_output=True, text=True)
+        if current.returncode == 0:
+            data = json.loads(current.stdout)
+            assets = {a["name"] for a in data["assets"]}
+            if sha in data["body"] and STAGING_ASSETS <= assets:
+                return {"release": "false", "reason": f"staging already built from {sha}"}
     try:
         tag = git("describe", "--tags", "--abbrev=0", "--match", "v*", head).strip()
     except subprocess.CalledProcessError:

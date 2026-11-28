@@ -19,9 +19,9 @@ on:
 permissions:
   contents: read
 
-# Běhy stejného režimu čekají na sebe, různé režimy běží nezávisle.
+# Staging běží nezávisle; rc a promote se nesmí míjet kvůli číslování verzí.
 concurrency:
-  group: release-${{ inputs.mode || (github.event.schedule == '30 3 * * *' && 'staging') || (github.event.schedule == '0 4 * * 1' && 'promote') || 'rc' }}
+  group: ${{ (inputs.mode == 'staging' || github.event.schedule == '30 3 * * *') && 'release-staging' || 'release' }}
   cancel-in-progress: false
 
 jobs:

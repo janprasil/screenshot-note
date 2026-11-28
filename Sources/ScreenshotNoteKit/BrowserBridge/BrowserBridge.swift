@@ -197,7 +197,7 @@ final class BrowserBridge:@unchecked Sendable {
 enum NativeHostRegistration {
  static let name="cz.janprasil.screenshotnote.bridge"
  static let enabledKey="browserBridgeEnabled"
- static let allowedOrigins=["chrome-extension://hffkngdjiopodemokmgiedickoiehidb/"]
+ static let allowedOrigins=["chrome-extension://ncpmdpnmhemklklkakeonmkhoclfngjk/"]
  static let browserDirectories=["Google/Chrome","Google/Chrome Beta","Google/Chrome Canary","Microsoft Edge","BraveSoftware/Brave-Browser","Arc/User Data","Chromium"]
  static let helperName="screenshot-note-bridge"
  static var bundledHelper:URL{Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/"+helperName)}

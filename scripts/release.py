@@ -3,6 +3,7 @@
 
   release.py rc                       -> next vX.Y.Z-rc.N if HEAD has releasable changes
   release.py promote --min-age-days 7 -> oldest-enough newest RC to promote to vX.Y.Z
+  release.py staging [--if-changed]   -> staging build of HEAD, versioned after the nearest tag
 
 Results are printed as key=value lines (and appended to $GITHUB_OUTPUT when set).
 Release notes are written to the file given by --notes.
@@ -18,6 +19,7 @@ import sys
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RC = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$")
 HEADER = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?: (?P<subject>.+)$")
+STAGING_ASSETS = {"Screenshot-Note-staging.dmg", "Screenshot-Note-staging.dmg.sha256"}
 RELEASABLE = {"feat", "fix", "perf", "revert"}
 SECTIONS = [("breaking", "Breaking Changes"), ("feat", "Features"), ("fix", "Bug Fixes"), ("perf", "Performance"), ("revert", "Reverts")]
 
@@ -130,14 +132,39 @@ def plan_promote(min_age_days, now=None):
             "notes_body": notes(commits_between(stable_tag, sha), title)}
 
 
+def plan_staging(head, if_changed=False):
+    sha = git("rev-parse", head).strip()
+    if if_changed:
+        # Přeskočí se jen kompletní vydání; po nepovedeném uploadu se staví znovu.
+        current = subprocess.run(["gh", "release", "view", "staging", "--json", "body,assets"], capture_output=True, text=True)
+        if current.returncode == 0:
+            data = json.loads(current.stdout)
+            assets = {a["name"] for a in data["assets"]}
+            if sha in data["body"] and STAGING_ASSETS <= assets:
+                return {"release": "false", "reason": f"staging already built from {sha}"}
+    try:
+        tag = git("describe", "--tags", "--abbrev=0", "--match", "v*", head).strip()
+    except subprocess.CalledProcessError:
+        tag = ""
+    match = STABLE.match(tag) or RC.match(tag)
+    version = fmt(tuple(map(int, match.groups()[:3]))) if match else "0.0.0"
+    return {"release": "true", "tag": "staging", "version": version, "build": build_number(head), "sha": sha}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["rc", "promote"])
+    parser.add_argument("mode", choices=["rc", "staging", "promote"])
+    parser.add_argument("--if-changed", action="store_true")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--min-age-days", type=float, default=7)
     parser.add_argument("--notes", default="release-notes.md")
     args = parser.parse_args()
-    result = plan_rc(args.head) if args.mode == "rc" else plan_promote(args.min_age_days)
+    if args.mode == "rc":
+        result = plan_rc(args.head)
+    elif args.mode == "staging":
+        result = plan_staging(args.head, args.if_changed)
+    else:
+        result = plan_promote(args.min_age_days)
     body = result.pop("notes_body", None)
     if body is not None:
         with open(args.notes, "w") as handle:

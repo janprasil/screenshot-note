@@ -1,0 +1,32 @@
+name: Signing keychain
+description: Import the Developer ID certificate into a temporary keychain and export SIGNING_IDENTITY.
+inputs:
+  p12:
+    description: Base64 encoded .p12 with the Developer ID Application identity
+    required: true
+  password:
+    description: Password of the .p12
+    required: true
+runs:
+  using: composite
+  steps:
+    # Certifikát žije jen v dočasné klíčence tohoto běhu; job ji na konci smaže.
+    - shell: bash
+      env:
+        MACOS_CERT_P12: ${{ inputs.p12 }}
+        MACOS_CERT_PASSWORD: ${{ inputs.password }}
+      run: |
+        [ -n "$MACOS_CERT_P12" ] || { echo "::error::MACOS_CERT_P12 is not set"; exit 1; }
+        keychain="$RUNNER_TEMP/signing.keychain-db"
+        password=$(openssl rand -hex 24)
+        security create-keychain -p "$password" "$keychain"
+        security set-keychain-settings -lut 21600 "$keychain"
+        security unlock-keychain -p "$password" "$keychain"
+        printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+        rm "$RUNNER_TEMP/cert.p12"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+        security list-keychains -d user -s "$keychain" login.keychain-db
+        identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')
+        [ -n "$identity" ] || { echo "::error::No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
+        echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"

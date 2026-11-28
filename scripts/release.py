@@ -79,6 +79,11 @@ def fmt(version):
     return ".".join(map(str, version))
 
 
+def notarized(tag):
+    """Only commits that carry the packaging script produce notarized DMGs."""
+    return subprocess.run(["git", "cat-file", "-e", f"{tag}:scripts/package-dmg.sh"], capture_output=True).returncode == 0
+
+
 def build_number(ref):
     return git("rev-list", "--count", "--first-parent", ref).strip()
 
@@ -114,10 +119,10 @@ def plan_promote(min_age_days, now=None):
             continue
         version, number = tuple(map(int, match.groups()[:3])), int(match[4])
         published = dt.datetime.fromisoformat(release["publishedAt"].replace("Z", "+00:00"))
-        if version > stable_version and now - published >= dt.timedelta(days=min_age_days):
+        if version > stable_version and now - published >= dt.timedelta(days=min_age_days) and notarized(release["tagName"]):
             candidates.append((version, number, release["tagName"]))
     if not candidates:
-        return {"release": "false", "reason": f"no release candidate newer than v{fmt(stable_version)} is {min_age_days}+ days old"}
+        return {"release": "false", "reason": f"no notarized release candidate newer than v{fmt(stable_version)} is {min_age_days}+ days old"}
     version, _, rc_tag = max(candidates)
     sha = git("rev-list", "-n", "1", rc_tag).strip()
     title = f"Changes since {stable_tag}" if stable_tag else "Changes"

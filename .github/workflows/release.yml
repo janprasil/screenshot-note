@@ -68,7 +68,7 @@ jobs:
     if: needs.plan.outputs.release == 'true' && needs.plan.outputs.mode == 'rc'
     runs-on: macos-15
     # Čtyři odeslání do notarizace; čekání u Applu bývá nejdelší část.
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       # Build bere commit běhu (github.sha), ze kterého plan počítal verzi.
       - uses: actions/checkout@v7
@@ -95,6 +95,11 @@ jobs:
           identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')
           [ -n "$identity" ] || { echo "::error::No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
           echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+      # Cizí veřejný klíč v appce by odmítl každou aktualizaci.
+      - env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+        run: swift scripts/check-update-keys.swift
       - id: build
         env:
           SCREENSHOT_NOTE_FEED_URL: https://janprasil.github.io/screenshot-note/appcast.xml
@@ -134,14 +139,13 @@ jobs:
           (cd dist && shasum -a 256 "Screenshot-Note-$VERSION.dmg" > "Screenshot-Note-$VERSION.dmg.sha256")
           (cd staging && shasum -a 256 Screenshot-Note-staging.dmg > Screenshot-Note-staging.dmg.sha256)
       - uses: ./.github/actions/sparkle-tools
-      # Podpis aktualizace pro appcast; vydání bez .sparkle se aktualizací nenabídne.
+      # Podpis aktualizace pro appcast, až po notarizaci a staple.
       - env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           VERSION: ${{ needs.plan.outputs.version }}
           BUILD: ${{ needs.plan.outputs.build }}
         run: |
           dmg="dist/Screenshot-Note-$VERSION.dmg"
-          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set; this release will not be offered as an update"; exit 0; fi
           signed=$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | sign_update --ed-key-file - "$dmg")
           printf '%s' "$signed" | python3 scripts/appcast.py sparkle-meta "$dmg" "$VERSION" "$BUILD" > "$dmg.sparkle"
       - uses: actions/upload-artifact@v7

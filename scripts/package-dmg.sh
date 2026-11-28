@@ -16,7 +16,7 @@ trap 'rm -rf "$work"' EXIT
 # notarytool může skončit úspěšně i při zamítnutí, rozhoduje stav.
 notarize() {
   local result id
-  result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 60m --output-format json) || true
+  result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 30m --output-format json) || true
   print -r -- "$result"
   [[ "$(print -r -- "$result" | plutil -extract status raw - 2>/dev/null)" == Accepted ]] && return
   id=$(print -r -- "$result" | plutil -extract id raw - 2>/dev/null) && xcrun notarytool log "$id" "${auth[@]}" || true

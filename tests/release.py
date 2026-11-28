@@ -68,5 +68,14 @@ class Planning(unittest.TestCase):
         self.commit("fix: another")
         self.assertEqual(release.plan_rc("HEAD")["tag"], "v4.5.0-rc.2")
 
+    def test_only_notarized_tags_can_be_promoted(self):
+        self.assertFalse(release.notarized("v4.4.0"))
+        os.mkdir("scripts")
+        Path("scripts/package-dmg.sh").write_text("")
+        subprocess.run(["git", "add", "scripts"], check=True)
+        self.commit("feat: notarize")
+        subprocess.run(["git", "tag", "v4.5.0-rc.1"], check=True)
+        self.assertTrue(release.notarized("v4.5.0-rc.1"))
+
 
 unittest.main()
